@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/api/connections/:id", "destination": "/api/connections" },
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
