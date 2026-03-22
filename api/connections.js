@@ -5,24 +5,31 @@ const REDIS_TOKEN = process.env.KV_REST_API_TOKEN
 const KEY = 'ibp:connections'
 
 async function redisGet(key) {
-  const resp = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
+  const resp = await fetch(`${REDIS_URL}/pipeline`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify([['GET', key]])
   })
   const data = await resp.json()
-  if (!data.result) return []
-  const parsed = JSON.parse(data.result)
-  return Array.isArray(parsed) ? parsed : []
+  const result = data[0]?.result
+  if (!result) return []
+  try {
+    const parsed = JSON.parse(result)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
 }
 
 async function redisSet(key, value) {
-  const resp = await fetch(`${REDIS_URL}/set/${encodeURIComponent(key)}`, {
+  const resp = await fetch(`${REDIS_URL}/pipeline`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(JSON.stringify(value))
+    body: JSON.stringify([['SET', key, JSON.stringify(value)]])
   })
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}))
-    throw new Error(`Redis SET failed (${resp.status}): ${data.error || 'unknown'}`)
+    throw new Error(`Redis SET failed (${resp.status}): ${JSON.stringify(data)}`)
   }
 }
 
