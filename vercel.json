@@ -1,5 +1,6 @@
 {
   "buildCommand": "npm run build",
+  "nodeVersion": "20.x",
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/connections/:id", "destination": "/api/connections" },
