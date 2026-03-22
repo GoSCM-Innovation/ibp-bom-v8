@@ -9,7 +9,9 @@ async function redisGet(key) {
     headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
   })
   const data = await resp.json()
-  return data.result ? JSON.parse(data.result) : []
+  if (!data.result) return []
+  const parsed = JSON.parse(data.result)
+  return Array.isArray(parsed) ? parsed : []
 }
 
 async function redisSet(key, value) {
