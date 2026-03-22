@@ -1,12 +1,24 @@
-import { Redis } from '@upstash/redis'
 import crypto from 'crypto'
 
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL,
-  token: process.env.KV_REST_API_TOKEN,
-})
-
+const REDIS_URL = process.env.KV_REST_API_URL
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN
 const KEY = 'ibp:connections'
+
+async function redisGet(key) {
+  const resp = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
+  })
+  const data = await resp.json()
+  return data.result ? JSON.parse(data.result) : []
+}
+
+async function redisSet(key, value) {
+  await fetch(`${REDIS_URL}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(JSON.stringify(value))
+  })
+}
 
 function encrypt(text) {
   const secret = process.env.ENCRYPTION_SECRET || 'default-secret-change-me'
@@ -24,26 +36,20 @@ function decrypt(text) {
   } catch { return '' }
 }
 
-async function getAll() {
-  const data = await redis.get(KEY)
-  return data || []
-}
-
-async function saveAll(connections) {
-  await redis.set(KEY, connections)
-}
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   if (req.method === 'OPTIONS') return res.status(200).end()
 
+  if (!REDIS_URL || !REDIS_TOKEN) {
+    return res.status(500).json({ error: 'Redis no configurado: faltan KV_REST_API_URL o KV_REST_API_TOKEN' })
+  }
+
   try {
-    const connections = await getAll()
+    const connections = await redisGet(KEY)
 
     if (req.method === 'GET') {
-      // Return connections without password
       return res.json(connections.map(({ password, ...c }) => c))
     }
 
@@ -52,12 +58,11 @@ export default async function handler(req, res) {
       if (!name || !url || !user || !password) return res.status(400).json({ error: 'Faltan campos obligatorios' })
       const newConn = { id: crypto.randomUUID(), name, url, user, password: encrypt(password) }
       connections.push(newConn)
-      await saveAll(connections)
+      await redisSet(KEY, connections)
       const { password: _, ...safe } = newConn
       return res.status(201).json(safe)
     }
 
-    // Extract id from URL path for PUT and DELETE
     const urlParts = req.url.split('/')
     const id = urlParts[urlParts.length - 1]
 
@@ -72,7 +77,7 @@ export default async function handler(req, res) {
         ...(user && { user }),
         ...(password && { password: encrypt(password) }),
       }
-      await saveAll(connections)
+      await redisSet(KEY, connections)
       const { password: _, ...safe } = connections[idx]
       return res.json(safe)
     }
@@ -81,7 +86,7 @@ export default async function handler(req, res) {
       const idx = connections.findIndex(c => c.id === id)
       if (idx === -1) return res.status(404).json({ error: 'No encontrado' })
       connections.splice(idx, 1)
-      await saveAll(connections)
+      await redisSet(KEY, connections)
       return res.json({ ok: true })
     }
 
