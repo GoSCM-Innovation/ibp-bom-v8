@@ -39,6 +39,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   let { connectionId, path, url, user, password, method = 'GET', body } = req.body
+  let serviceRoot = null
 
   // Mode: connectionId + path → resolve credentials from Redis
   if (connectionId) {
@@ -46,6 +47,7 @@ export default async function handler(req, res) {
     const connections = await redisGet(KEY)
     const conn = connections.find(c => c.id === connectionId)
     if (!conn) return res.status(404).json({ error: 'Conexión no encontrada' })
+    serviceRoot = conn.url
     url = conn.url + (path || '')
     user = conn.user
     password = decrypt(conn.password)
@@ -64,11 +66,11 @@ export default async function handler(req, res) {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
     const baseHeaders = { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json, application/xml, */*', 'Content-Type': 'application/json' }
 
-    // For POST/PUT/DELETE: fetch CSRF token first
+    // For POST/PUT/DELETE: fetch CSRF token first from service root
     let csrfToken = null
     if (method !== 'GET') {
-      const baseUrl = url.split('?')[0].split('/').slice(0, 6).join('/')
-      const csrfResp = await fetch(baseUrl, { method: 'GET', headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' } })
+      const csrfUrl = serviceRoot || url.split('?')[0]
+      const csrfResp = await fetch(csrfUrl, { method: 'GET', headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' } })
       csrfToken = csrfResp.headers.get('x-csrf-token')
     }
 
