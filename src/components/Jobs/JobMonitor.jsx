@@ -17,6 +17,22 @@ const PALETTE = [
 // P=Released, R=In Process, S=Scheduled, Y=Ready
 const CANCELABLE_STATUSES = ['P', 'R', 'S', 'Y']
 
+// A=Failed, U=User Error, C=Canceled, W=Finished w/Warning, F=Finished
+const RESTARTABLE_STATUSES = ['A', 'U', 'C', 'W', 'F']
+
+const RESTART_MODES = [
+  {
+    value: 'E',
+    label: 'Desde el paso fallido',
+    desc: 'Reinicia desde el paso que falló. Los pasos anteriores se omitirán.',
+  },
+  {
+    value: 'A',
+    label: 'Después del paso fallido',
+    desc: 'Reinicia omitiendo el paso fallido y todos los anteriores.',
+  },
+]
+
 function toSapTs(date) {
   const p = n => String(n).padStart(2, '0')
   return `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}.0000000`
@@ -45,8 +61,11 @@ export default function JobMonitor({ connection }) {
   const [lastRefresh, setLastRefresh] = useState(null)
   const [colWidths, setColWidths]     = useState({})
   const [selectedRow, setSelectedRow] = useState(null)
-  const [cancelling, setCancelling]   = useState(false)
-  const [cancelMsg, setCancelMsg]     = useState('')
+  const [cancelling, setCancelling]     = useState(false)
+  const [cancelMsg, setCancelMsg]       = useState('')
+  const [restarting, setRestarting]     = useState(false)
+  const [restartMsg, setRestartMsg]     = useState('')
+  const [restartModal, setRestartModal] = useState(false)
   const resizing = useRef(null)
   const timerRef = useRef(null)
 
@@ -112,6 +131,28 @@ export default function JobMonitor({ connection }) {
       setCancelMsg(e.message)
     } finally {
       setCancelling(false)
+    }
+  }
+
+  // Restart job
+  async function handleRestart(mode) {
+    if (!selectedRow) return
+    setRestartModal(false)
+    setRestarting(true); setRestartMsg('')
+    try {
+      const path = `/JobRestart?JobName=${encodeODataString(selectedRow.JobName)}&JobRunCount=${encodeODataString(selectedRow.JobRunCount)}&JobRestartMode=${encodeODataString(mode)}`
+      const data = await proxyPost(path, { method: 'POST' })
+      if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
+      setRestartMsg('ok')
+      await loadJobs()
+      setTimeout(() => {
+        setSelectedRow(null)
+        setRestartMsg('')
+      }, 2500)
+    } catch (e) {
+      setRestartMsg(e.message)
+    } finally {
+      setRestarting(false)
     }
   }
 
@@ -187,7 +228,8 @@ export default function JobMonitor({ connection }) {
     window.addEventListener('mouseup', onUp)
   }
 
-  const isCancelable = selectedRow && CANCELABLE_STATUSES.includes(selectedRow.JobStatus)
+  const isCancelable  = selectedRow && CANCELABLE_STATUSES.includes(selectedRow.JobStatus)
+  const isRestartable = selectedRow && RESTARTABLE_STATUSES.includes(selectedRow.JobStatus)
 
   return (
     <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
@@ -318,12 +360,10 @@ export default function JobMonitor({ connection }) {
             </div>
           </div>
 
-          {cancelMsg === 'ok' && (
-            <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job cancelado</span>
-          )}
-          {cancelMsg && cancelMsg !== 'ok' && (
-            <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 320 }}>✕ {cancelMsg}</span>
-          )}
+          {cancelMsg === 'ok'  && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job cancelado</span>}
+          {cancelMsg && cancelMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {cancelMsg}</span>}
+          {restartMsg === 'ok' && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job reiniciado</span>}
+          {restartMsg && restartMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {restartMsg}</span>}
 
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button
@@ -342,12 +382,74 @@ export default function JobMonitor({ connection }) {
               {cancelling ? 'Cancelando…' : '✕ Cancelar job'}
             </button>
             <button
-              onClick={() => { setSelectedRow(null); setCancelMsg('') }}
+              onClick={() => setRestartModal(true)}
+              disabled={!isRestartable || restarting}
+              title={!isRestartable ? 'Solo se pueden reiniciar jobs finalizados o fallidos' : 'Reiniciar este job en SAP IBP'}
+              style={{
+                padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                border: '1px solid rgba(6,182,212,.4)',
+                background: isRestartable ? 'rgba(6,182,212,.12)' : 'transparent',
+                color: isRestartable ? 'var(--cyan)' : 'var(--text3)',
+                cursor: isRestartable ? 'pointer' : 'not-allowed',
+                opacity: restarting ? .6 : 1,
+              }}
+            >
+              {restarting ? 'Reiniciando…' : '↺ Reiniciar job'}
+            </button>
+            <button
+              onClick={() => { setSelectedRow(null); setCancelMsg(''); setRestartMsg('') }}
               style={{
                 padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600,
                 border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
               }}
             >Deseleccionar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Restart mode modal */}
+      {restartModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500,
+        }}>
+          <div style={{
+            background: 'var(--bg2)', border: '1px solid var(--border2)',
+            borderRadius: 12, padding: 28, width: 'min(440px, 92vw)', boxShadow: '0 16px 48px rgba(0,0,0,.6)',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>↺ Reiniciar job</div>
+            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 20 }}>
+              Selecciona el modo de reinicio para <strong style={{ color: 'var(--text)' }}>{selectedRow.JobText || selectedRow.JobName}</strong>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+              {RESTART_MODES.map(m => (
+                <button
+                  key={m.value}
+                  onClick={() => handleRestart(m.value)}
+                  style={{
+                    textAlign: 'left', padding: '12px 16px', borderRadius: 8,
+                    border: '1px solid var(--border2)', background: 'var(--bg3)',
+                    color: 'var(--text)', cursor: 'pointer', transition: 'all .15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--cyan)'; e.currentTarget.style.background = 'rgba(6,182,212,.08)' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.background = 'var(--bg3)' }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>
+                    Modo {m.value} — {m.label}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>{m.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setRestartModal(false)}
+              style={{
+                width: '100%', padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
+              }}
+            >Cancelar</button>
           </div>
         </div>
       )}
