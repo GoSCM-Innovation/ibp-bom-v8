@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-const JOB_PATH = '/sap/opu/odata/sap/BC_EXT_APPJOB_MANAGEMENT;v=0002/JobTemplateSet'
+const JOB_PATH = '/JobTemplateSet'
 
 export default function Jobs({ connection }) {
   const [rows, setRows] = useState([])
