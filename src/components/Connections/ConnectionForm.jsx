@@ -50,42 +50,43 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 20 }}>
         {initial ? 'Editar conexión' : 'Nueva conexión'}
       </div>
-      <form onSubmit={handleSubmit}>
-        {/* Emoji + Nombre */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 14 }}>
-          <div style={{ flexShrink: 0 }}>
-            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginBottom: 5 }}>Ícono</label>
-            <div style={{ position: 'relative' }} ref={pickerRef}>
-              <button
-                type="button"
-                onClick={() => setShowPicker(p => !p)}
-                style={{
-                  width: 48, height: 36, fontSize: 22, background: 'var(--bg)',
-                  border: `1px solid ${showPicker ? 'var(--accent)' : 'var(--border)'}`,
-                  borderRadius: 6, cursor: 'pointer', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                {form.emoji}
-              </button>
-              {showPicker && (
-                <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 400 }}>
-                  <EmojiPicker
-                    onEmojiClick={e => { set('emoji', e.emoji); setShowPicker(false) }}
-                    theme="dark"
-                    searchPlaceholder="Buscar emoji..."
-                    height={380}
-                    width={320}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-          <div style={{ flex: 1 }}>
-            <Field label="Nombre conexión" value={form.name} onChange={v => set('name', v)} placeholder="ej: IBP Producción" />
+
+      {/* Emoji picker — fuera del form para evitar submit accidental */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 14 }}>
+        <div style={{ flexShrink: 0 }}>
+          <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginBottom: 5 }}>Ícono</label>
+          <div style={{ position: 'relative' }} ref={pickerRef}>
+            <button
+              type="button"
+              onClick={() => setShowPicker(p => !p)}
+              style={{
+                width: 48, height: 36, fontSize: 22, background: 'var(--bg)',
+                border: `1px solid ${showPicker ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: 6, cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              {form.emoji}
+            </button>
+            {showPicker && (
+              <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 400 }}>
+                <EmojiPicker
+                  onEmojiClick={e => { set('emoji', e.emoji); setShowPicker(false) }}
+                  theme="dark"
+                  searchPlaceholder="Buscar emoji..."
+                  height={380}
+                  width={320}
+                />
+              </div>
+            )}
           </div>
         </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Nombre conexión" value={form.name} onChange={v => set('name', v)} placeholder="ej: IBP Producción" />
+        </div>
+      </div>
 
+      <form onSubmit={handleSubmit}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <Field label="API URL" value={form.url} onChange={v => set('url', v)} placeholder="https://my400444-api.scmibp.ondemand.com/..." mono />
           <Field label="Usuario" value={form.user} onChange={v => set('user', v)} placeholder="COMM_USER" mono />
