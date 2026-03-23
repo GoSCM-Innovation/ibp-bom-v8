@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
 
 const DEFAULT_HOURS = 24
+const REFRESH_MS = 5 * 60 * 1000 // 5 minutos
 
 const STATUS_COLORS = {
   F: '#34d399', W: '#fbbf24', A: '#ff6b6b', U: '#f97316',
@@ -42,10 +43,12 @@ function toInputDate(date) {
 }
 
 export default function Resumen({ connection }) {
-  const [rows, setRows]         = useState([])
-  const [statuses, setStatuses] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState('')
+  const [rows, setRows]           = useState([])
+  const [statuses, setStatuses]   = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [lastRefresh, setLastRefresh] = useState(null)
+  const timerRef = useRef(null)
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
   const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
@@ -66,16 +69,25 @@ export default function Resumen({ connection }) {
     }).catch(() => {})
   }, [proxyPost])
 
-  useEffect(() => {
+  const loadData = useCallback(async () => {
     setLoading(true); setError('')
-    proxyPost('/JobHeaderSet')
-      .then(data => {
-        if (data.error) throw new Error(data.error)
-        setRows(data?.d?.results ?? data?.value ?? [])
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
+    try {
+      const data = await proxyPost('/JobHeaderSet')
+      if (data.error) throw new Error(data.error)
+      setRows(data?.d?.results ?? data?.value ?? [])
+      setLastRefresh(new Date())
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
   }, [proxyPost])
+
+  useEffect(() => {
+    loadData()
+    timerRef.current = setInterval(loadData, REFRESH_MS)
+    return () => clearInterval(timerRef.current)
+  }, [loadData])
 
   function statusLabel(code) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code
@@ -184,13 +196,26 @@ export default function Resumen({ connection }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Resumen</div>
-          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{connection.name} · {total} jobs en el período</div>
+          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+            {connection.name} · {total} jobs en el período
+            {lastRefresh && !loading && (
+              <span style={{ marginLeft: 8, opacity: .6 }}>· Actualizado {lastRefresh.toLocaleTimeString()}</span>
+            )}
+          </div>
         </div>
-        {/* Date range — igual que Job Monitor */}
+        {/* Date range + refresh */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
           <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
           <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
+          <button onClick={loadData} disabled={loading} style={{
+            background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
+            color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
+          }}>↺ Refresh</button>
+          <span style={{
+            fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
+            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
+          }}>🔄 Auto-refresh cada 5 min</span>
         </div>
       </div>
 
