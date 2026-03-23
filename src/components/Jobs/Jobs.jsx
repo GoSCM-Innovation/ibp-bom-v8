@@ -47,8 +47,8 @@ function EjecutarBtn({ row, connectionId }) {
   )
 
   if (status === 'error') return (
-    <td style={{ ...TD, maxWidth: 180 }} title={msg} onClick={e => e.stopPropagation()}>
-      <span style={{ fontSize: 11, color: 'var(--red)' }}>✕ Error</span>
+    <td style={{ ...TD, maxWidth: 320 }} onClick={e => e.stopPropagation()}>
+      <span style={{ fontSize: 11, color: 'var(--red)', whiteSpace: 'normal', wordBreak: 'break-word' }}>✕ {msg}</span>
     </td>
   )
 
