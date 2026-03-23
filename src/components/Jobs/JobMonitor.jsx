@@ -40,7 +40,7 @@ export default function JobMonitor({ connection }) {
   const resizing = useRef(null)
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
-  const defaultTo   = new Date()
+  const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
   const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
   const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
 
@@ -95,7 +95,7 @@ export default function JobMonitor({ connection }) {
     const av = a.JobPlannedStartDateTime || '', bv = b.JobPlannedStartDateTime || ''
     return bv.localeCompare(av) // más reciente primero
   }).filter(r => {
-    const ts = r.JobStartDateTime || ''
+    const ts = r.JobPlannedStartDateTime || ''
     if (ts && (ts < fromTs || ts > toTs)) return false
     if (activeStatus !== 'ALL' && r.JobStatus !== activeStatus) return false
     if (search.trim()) {
