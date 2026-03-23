@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 
 const JOB_PATH = '/JobTemplateSet'
+const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
 
 export default function Jobs({ connection }) {
   const [rows, setRows] = useState([])
@@ -10,6 +11,7 @@ export default function Jobs({ connection }) {
   const [sortAsc, setSortAsc] = useState(true)
   const [selected, setSelected] = useState(null)
   const [colWidths, setColWidths] = useState({})
+  const [search, setSearch] = useState('')
   const resizing = useRef(null)
 
   useEffect(() => {
@@ -17,6 +19,7 @@ export default function Jobs({ connection }) {
     setError('')
     setRows([])
     setSelected(null)
+    setSearch('')
 
     fetch('/api/proxy', {
       method: 'POST',
@@ -33,11 +36,16 @@ export default function Jobs({ connection }) {
       .finally(() => setLoading(false))
   }, [connection.id])
 
-  const cols = rows.length > 0
-    ? Object.keys(rows[0]).filter(k => k !== '__metadata')
-    : []
+  // Filter by search across ALL columns
+  const filtered = search.trim()
+    ? rows.filter(row =>
+        Object.values(row).some(v =>
+          String(v ?? '').toLowerCase().includes(search.toLowerCase())
+        )
+      )
+    : rows
 
-  const sorted = [...rows].sort((a, b) => {
+  const sorted = [...filtered].sort((a, b) => {
     if (!sortCol) return 0
     const av = String(a[sortCol] ?? ''), bv = String(b[sortCol] ?? '')
     return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av)
@@ -52,13 +60,13 @@ export default function Jobs({ connection }) {
     e.preventDefault()
     e.stopPropagation()
     const startX = e.clientX
-    const startW = colWidths[col] || 160
+    const startW = colWidths[col] || 260
     resizing.current = { col, startX, startW }
 
     function onMove(e) {
       if (!resizing.current) return
       const { col, startX, startW } = resizing.current
-      setColWidths(w => ({ ...w, [col]: Math.max(60, startW + e.clientX - startX) }))
+      setColWidths(w => ({ ...w, [col]: Math.max(80, startW + e.clientX - startX) }))
     }
     function onUp() {
       resizing.current = null
@@ -90,11 +98,26 @@ export default function Jobs({ connection }) {
   return (
     <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 16, flexShrink: 0 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Jobs</div>
-        <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-          {rows.length} registros · {connection.name}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Jobs</div>
+          <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+            {sorted.length}{search ? ` de ${rows.length}` : ''} registros · {connection.name}
+          </div>
         </div>
+
+        {/* Search */}
+        <input
+          type="text"
+          placeholder="Buscar en todas las columnas…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setSelected(null) }}
+          style={{
+            background: 'var(--bg2)', border: '1px solid var(--border)',
+            borderRadius: 6, color: 'var(--text)', fontSize: 12,
+            padding: '6px 12px', width: 240, outline: 'none',
+          }}
+        />
       </div>
 
       {rows.length === 0 ? (
@@ -104,8 +127,8 @@ export default function Jobs({ connection }) {
           <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%', fontSize: 12 }}>
             <thead>
               <tr style={{ background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1 }}>
-                {cols.map(col => {
-                  const w = colWidths[col] || 160
+                {VISIBLE_COLS.map(col => {
+                  const w = colWidths[col] || 260
                   return (
                     <th
                       key={col}
@@ -122,7 +145,6 @@ export default function Jobs({ connection }) {
                       {sortCol === col && (
                         <span style={{ marginLeft: 4, fontSize: 10 }}>{sortAsc ? '↑' : '↓'}</span>
                       )}
-                      {/* Resize handle */}
                       <span
                         style={{
                           position: 'absolute', right: 0, top: 0, bottom: 0, width: 5,
@@ -137,7 +159,13 @@ export default function Jobs({ connection }) {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((row, i) => (
+              {sorted.length === 0 ? (
+                <tr>
+                  <td colSpan={VISIBLE_COLS.length} style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text2)', fontSize: 12 }}>
+                    Sin resultados para "{search}"
+                  </td>
+                </tr>
+              ) : sorted.map((row, i) => (
                 <tr
                   key={i}
                   onClick={() => setSelected(i === selected ? null : i)}
@@ -150,14 +178,14 @@ export default function Jobs({ connection }) {
                     outlineOffset: -1,
                   }}
                 >
-                  {cols.map(col => (
+                  {VISIBLE_COLS.map(col => (
                     <td
                       key={col}
                       style={{
                         padding: '7px 12px', color: 'var(--text)',
                         borderBottom: '1px solid var(--border)',
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        maxWidth: colWidths[col] || 160,
+                        maxWidth: colWidths[col] || 260,
                       }}
                       title={String(row[col] ?? '')}
                     >
