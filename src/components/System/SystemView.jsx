@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import Jobs from '../Jobs/Jobs'
+import JobMonitor from '../Jobs/JobMonitor'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 
 const APPS = [
-  { id: 'jobs', label: 'Job Templates' },
+  { id: 'jobs',    label: 'Job Templates' },
+  { id: 'monitor', label: 'Job Monitor'   },
 ]
 
 export default function SystemView({ connection }) {
@@ -41,7 +43,8 @@ export default function SystemView({ connection }) {
 
       {/* App content */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {activeApp === 'jobs' && <Jobs connection={connection} />}
+        {activeApp === 'jobs'    && <Jobs connection={connection} />}
+        {activeApp === 'monitor' && <JobMonitor connection={connection} />}
       </div>
     </div>
   )
