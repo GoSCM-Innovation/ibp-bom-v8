@@ -27,7 +27,7 @@ function EjecutarBtn({ row, connectionId }) {
         }),
       })
       const data = await r.json()
-      if (data.error) throw new Error(data.error)
+      if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
       setStatus('ok')
     } catch (e) {
       setStatus('error'); setMsg(e.message)
