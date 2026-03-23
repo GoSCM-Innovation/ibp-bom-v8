@@ -103,8 +103,11 @@ export default function JobMonitor({ connection }) {
       const data = await proxyPost(path, { method: 'POST' })
       if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
       setCancelMsg('ok')
-      setSelectedRow(null)
       await loadJobs()
+      setTimeout(() => {
+        setSelectedRow(null)
+        setCancelMsg('')
+      }, 2500)
     } catch (e) {
       setCancelMsg(e.message)
     } finally {
