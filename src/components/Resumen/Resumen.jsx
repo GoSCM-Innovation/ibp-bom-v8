@@ -117,10 +117,10 @@ export default function Resumen({ connection }) {
   })
   const barData = Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day)).slice(-14)
 
-  // Top templates
+  // Top jobs ejecutados
   const tplMap = {}
   filtered.forEach(r => {
-    const k = r.JobTemplateText || r.JobTemplateName || '—'
+    const k = r.JobText || '—'
     tplMap[k] = (tplMap[k] || 0) + 1
   })
   const topTemplates = Object.entries(tplMap).sort((a,b) => b[1]-a[1]).slice(0,5)
@@ -141,7 +141,7 @@ export default function Resumen({ connection }) {
     const end   = parseSapTs(r.JobEndDateTime)
     if (!start || !end || end <= start) return
     const mins = (end - start) / 60000
-    const k = r.JobText || r.JobTemplateName || '—'
+    const k = r.JobText || '—'
     if (!durationMap[k]) durationMap[k] = { total: 0, count: 0 }
     durationMap[k].total += mins
     durationMap[k].count += 1
@@ -263,7 +263,7 @@ export default function Resumen({ connection }) {
 
         {/* Top templates */}
         <div style={cardStyle}>
-          <div style={cardTitle}>Top templates ejecutados</div>
+          <div style={cardTitle}>Top jobs ejecutados</div>
           {topTemplates.length === 0 ? <Empty /> : topTemplates.map(([name, count], i) => (
             <RankRow key={i} rank={i+1} label={name} count={count} max={topTemplates[0][1]} color="var(--cyan)" />
           ))}
@@ -303,7 +303,7 @@ export default function Resumen({ connection }) {
             : recentFailed.map((r, i) => (
               <div key={i} style={{ padding: '7px 0', borderBottom: i < recentFailed.length-1 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--red)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {r.JobText || r.JobTemplateName || '—'}
+                  {r.JobText || '—'}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
                   <span>{r.JobCreatedByFormattedName || r.JobCreatedBy}</span>
