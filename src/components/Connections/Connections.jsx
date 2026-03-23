@@ -105,14 +105,6 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
             borderRadius: 10, padding: '16px 20px',
             display: 'flex', alignItems: 'center', gap: 16,
           }}>
-            {/* Icon */}
-            <div style={{
-              width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-              background: 'linear-gradient(135deg, rgba(247,168,0,.2), rgba(232,98,42,.2))',
-              border: '1px solid rgba(247,168,0,.3)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18,
-            }}>◉</div>
 
             {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>
