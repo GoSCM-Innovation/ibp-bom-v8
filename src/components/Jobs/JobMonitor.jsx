@@ -123,12 +123,15 @@ export default function JobMonitor({ connection }) {
   }
 
   const COLS = [
-    { key: 'JobStatus',       label: 'Estado',       w: 130, render: (v) => <StatusBadge code={v} /> },
-    { key: 'JobTemplateText', label: 'Template',      w: 240 },
-    { key: 'JobCreatedBy',    label: 'Usuario',       w: 140 },
-    { key: 'JobStartDateTime',label: 'Inicio',        w: 160, render: formatSapTs },
-    { key: 'JobEndDateTime',  label: 'Fin',           w: 160, render: formatSapTs },
-    { key: 'Periodic',        label: 'Periódico',     w: 90,  render: v => v ? '✓' : '—' },
+    { key: 'JobStatus',                label: 'Estado',       w: 130, render: (v) => <StatusBadge code={v} /> },
+    { key: 'JobName',                  label: 'Job',          w: 200 },
+    { key: 'JobText',                  label: 'Descripción',  w: 220 },
+    { key: 'JobTemplateText',          label: 'Template',     w: 220 },
+    { key: 'JobCreatedByFormattedName',label: 'Usuario',      w: 180 },
+    { key: 'JobStepCount',             label: 'Pasos',        w: 70  },
+    { key: 'JobStartDateTime',         label: 'Inicio',       w: 160, render: formatSapTs },
+    { key: 'JobEndDateTime',           label: 'Fin',          w: 160, render: formatSapTs },
+    { key: 'Periodic',                 label: 'Periódico',    w: 90,  render: v => v ? '✓' : '—' },
   ]
 
   return (
