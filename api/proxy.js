@@ -64,7 +64,7 @@ export default async function handler(req, res) {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
     const opts = {
       method,
-      headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json, application/xml, */*', 'Content-Type': 'application/json' },
     }
     if (body && method !== 'GET') opts.body = JSON.stringify(body)
 
