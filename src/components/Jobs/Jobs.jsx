@@ -7,63 +7,6 @@ function encodeODataString(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
-function DiagPanel({ diag }) {
-  const [open, setOpen] = useState({})
-  const toggle = i => setOpen(o => ({ ...o, [i]: !o[i] }))
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ fontSize: 10, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
-        Diagnóstico técnico
-      </div>
-      {diag.map((step, i) => (
-        <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
-          <button
-            onClick={() => toggle(i)}
-            style={{
-              width: '100%', textAlign: 'left', padding: '8px 10px',
-              background: 'var(--bg)', border: 'none', cursor: 'pointer',
-              color: 'var(--text)', fontSize: 11, fontWeight: 600,
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}
-          >
-            <span>{step.step}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {step.response && (
-                <span style={{
-                  fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 700,
-                  background: step.response.status >= 400 ? 'rgba(255,107,107,.15)' : 'rgba(34,197,94,.15)',
-                  color: step.response.status >= 400 ? 'var(--red)' : '#22c55e',
-                }}>
-                  {step.response.status}
-                </span>
-              )}
-              <span style={{ color: 'var(--text2)', fontSize: 10 }}>{open[i] ? '▲' : '▼'}</span>
-            </span>
-          </button>
-          {open[i] && (
-            <div style={{ padding: '0 10px 10px', background: 'var(--bg)' }}>
-              {/* Request */}
-              <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 4, marginTop: 8 }}>REQUEST</div>
-              <pre style={PRE_STYLE}>{JSON.stringify(step.request, null, 2)}</pre>
-              {/* Response */}
-              {step.response && <>
-                <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 4, marginTop: 8 }}>RESPONSE</div>
-                <pre style={PRE_STYLE}>{JSON.stringify(step.response, null, 2)}</pre>
-              </>}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-const PRE_STYLE = {
-  background: 'var(--bg2)', borderRadius: 4, padding: 8, fontSize: 10,
-  color: 'var(--text)', border: '1px solid var(--border)', margin: 0,
-  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-}
 
 const BTN_BASE = {
   padding: '9px 14px', borderRadius: 6, border: '1px solid var(--border)',
@@ -86,10 +29,7 @@ function JobPanel({ row, connectionId, onClose }) {
         body: JSON.stringify({ connectionId, path, method }),
       })
       const data = await r.json()
-      if (data.error) {
-        setResult(data) // conserva diag aunque haya error
-        throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
-      }
+      if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
       setResult(data)
     } catch (e) {
       setError(e.message)
@@ -155,16 +95,17 @@ function JobPanel({ row, connectionId, onClose }) {
       {/* Result */}
       <div style={{ padding: '0 16px 16px', flex: 1, overflowY: 'auto' }}>
         {loading && <div style={{ color: 'var(--text2)', fontSize: 12 }}>Procesando…</div>}
-
         {error && (
           <div style={{
             background: 'rgba(255,107,107,.08)', border: '1px solid rgba(255,107,107,.25)',
-            borderRadius: 6, padding: '10px 12px', color: 'var(--red)', fontSize: 11, marginBottom: 10,
+            borderRadius: 6, padding: '10px 12px', color: 'var(--red)', fontSize: 11,
           }}>✕ {error}</div>
         )}
-
-        {result?.diag && (
-          <DiagPanel diag={result.diag} />
+        {result && !error && (
+          <div style={{
+            background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.25)',
+            borderRadius: 6, padding: '10px 12px', color: '#22c55e', fontSize: 11,
+          }}>✓ {resultLabel} completado</div>
         )}
       </div>
     </div>

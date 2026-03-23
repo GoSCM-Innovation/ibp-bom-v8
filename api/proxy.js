@@ -65,51 +65,41 @@ export default async function handler(req, res) {
   try {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
     const baseHeaders = { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json, application/xml, */*', 'Content-Type': 'application/json' }
-    const diag = []
 
-    // For POST/PUT/DELETE: fetch CSRF token first from service root
+    // For POST/PUT/DELETE: fetch CSRF token + session cookies first
     let csrfToken = null
+    let sessionCookies = ''
     if (method !== 'GET') {
       const csrfUrl = serviceRoot || url.split('?')[0]
-      const csrfReqHeaders = { ...baseHeaders, 'X-CSRF-Token': 'Fetch' }
-      const csrfResp = await fetch(csrfUrl, { method: 'GET', headers: csrfReqHeaders })
-      const csrfRespHeaders = Object.fromEntries(csrfResp.headers.entries())
+      const csrfResp = await fetch(csrfUrl, { method: 'GET', headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' } })
       csrfToken = csrfResp.headers.get('x-csrf-token')
-      diag.push({
-        step: '1 — CSRF Token Fetch',
-        request: { method: 'GET', url: csrfUrl, headers: { ...csrfReqHeaders, Authorization: '[REDACTED]' } },
-        response: { status: csrfResp.status, headers: csrfRespHeaders, csrfToken: csrfToken || 'NO ENCONTRADO' },
-      })
+      // Capture session cookies — SAP ties the CSRF token to the session
+      const setCookies = csrfResp.headers.getSetCookie?.() ?? []
+      if (setCookies.length > 0) {
+        sessionCookies = setCookies.map(c => c.split(';')[0]).join('; ')
+      }
     }
 
-    const reqHeaders = { ...baseHeaders, ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) }
-    const opts = { method, headers: reqHeaders }
+    const opts = {
+      method,
+      headers: {
+        ...baseHeaders,
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+        ...(sessionCookies ? { 'Cookie': sessionCookies } : {}),
+      },
+    }
     if (body && method !== 'GET') opts.body = JSON.stringify(body)
 
-    diag.push({
-      step: `2 — Petición principal (${method})`,
-      request: { method, url, headers: { ...reqHeaders, Authorization: '[REDACTED]' }, body: body || null },
-    })
-
     const resp = await fetch(url, opts)
-    const respHeaders = Object.fromEntries(resp.headers.entries())
-    const respText = await resp.text()
-
-    diag[diag.length - 1].response = { status: resp.status, headers: respHeaders, body: respText.substring(0, 1000) }
-
     if (!resp.ok) {
-      return res.status(resp.status).json({ error: `SAP IBP returned ${resp.status}`, detail: respText.substring(0, 500), diag })
+      const text = await resp.text()
+      return res.status(resp.status).json({ error: `SAP IBP returned ${resp.status}`, detail: text.substring(0, 500) })
     }
-
     const contentType = resp.headers.get('content-type') || ''
     if (contentType.includes('xml')) {
-      return res.setHeader('Content-Type', 'application/json').json({ _xml: respText, diag })
+      return res.setHeader('Content-Type', 'text/xml').send(await resp.text())
     }
-    try {
-      return res.json({ ...JSON.parse(respText), diag })
-    } catch {
-      return res.json({ _raw: respText, diag })
-    }
+    return res.json(await resp.json())
   } catch (e) {
     return res.status(500).json({ error: e.message })
   }
