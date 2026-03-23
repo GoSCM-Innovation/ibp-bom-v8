@@ -39,7 +39,6 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
       <SidebarItem
         id="connections"
         label="Conexiones"
-        icon="⚙"
         active={activeId === 'connections'}
         expanded={expanded}
         onClick={() => onSelect('connections')}
@@ -60,7 +59,6 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
               key={c.id}
               id={c.id}
               label={c.name}
-              icon="◉"
               active={activeId === c.id}
               expanded={expanded}
               onClick={() => onSelect(c.id)}
@@ -85,16 +83,16 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
   )
 }
 
-function SidebarItem({ label, icon, active, expanded, onClick, accent }) {
+function SidebarItem({ label, active, expanded, onClick, accent }) {
   return (
     <button onClick={onClick} style={{
-      width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-      padding: expanded ? '9px 14px' : '9px 0',
-      justifyContent: expanded ? 'flex-start' : 'center',
+      width: '100%', display: 'flex', alignItems: 'center',
+      padding: '9px 14px',
+      justifyContent: 'flex-start',
       background: active ? 'rgba(247,168,0,.1)' : 'none',
       border: 'none',
       borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
-      color: active ? 'var(--accent)' : accent ? 'var(--text2)' : 'var(--text2)',
+      color: active ? 'var(--accent)' : 'var(--text2)',
       fontSize: 12, fontWeight: active ? 600 : 400,
       transition: 'all .15s', textAlign: 'left',
     }}
@@ -102,8 +100,10 @@ function SidebarItem({ label, icon, active, expanded, onClick, accent }) {
       onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'none' }}
       title={!expanded ? label : undefined}
     >
-      <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
-      {expanded && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
+      {expanded
+        ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        : <span style={{ fontSize: 11 }}>{label?.slice(0, 2)}</span>
+      }
     </button>
   )
 }
