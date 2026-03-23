@@ -141,7 +141,7 @@ export default function Resumen({ connection }) {
     const end   = parseSapTs(r.JobEndDateTime)
     if (!start || !end || end <= start) return
     const mins = (end - start) / 60000
-    const k = r.JobTemplateText || r.JobTemplateName || '—'
+    const k = r.JobText || r.JobTemplateName || '—'
     if (!durationMap[k]) durationMap[k] = { total: 0, count: 0 }
     durationMap[k].total += mins
     durationMap[k].count += 1
