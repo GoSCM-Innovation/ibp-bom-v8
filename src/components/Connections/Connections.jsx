@@ -108,11 +108,11 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
             {/* Icon */}
             <div style={{
               width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-              background: 'linear-gradient(135deg, rgba(247,168,0,.12), rgba(232,98,42,.12))',
-              border: '1px solid rgba(247,168,0,.2)',
+              background: 'linear-gradient(135deg, rgba(247,168,0,.2), rgba(232,98,42,.2))',
+              border: '1px solid rgba(247,168,0,.3)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 22,
-            }}>{conn.emoji || '🏢'}</div>
+              fontSize: 18,
+            }}>◉</div>
 
             {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>

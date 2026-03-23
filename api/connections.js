@@ -67,9 +67,9 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { name, url, user, password, emoji } = req.body
+      const { name, url, user, password } = req.body
       if (!name || !url || !user || !password) return res.status(400).json({ error: 'Faltan campos obligatorios' })
-      const newConn = { id: crypto.randomUUID(), name, url, user, password: encrypt(password), emoji: emoji || '🏢' }
+      const newConn = { id: crypto.randomUUID(), name, url, user, password: encrypt(password) }
       connections.push(newConn)
       await redisSet(KEY, connections)
       const { password: _, ...safe } = newConn
@@ -82,14 +82,13 @@ export default async function handler(req, res) {
     if (req.method === 'PUT') {
       const idx = connections.findIndex(c => c.id === id)
       if (idx === -1) return res.status(404).json({ error: 'No encontrado' })
-      const { name, url, user, password, emoji } = req.body
+      const { name, url, user, password } = req.body
       connections[idx] = {
         ...connections[idx],
         ...(name && { name }),
         ...(url && { url }),
         ...(user && { user }),
         ...(password && { password: encrypt(password) }),
-        ...(emoji && { emoji }),
       }
       await redisSet(KEY, connections)
       const { password: _, ...safe } = connections[idx]
