@@ -14,8 +14,8 @@ const PALETTE = [
   { bg: 'rgba(156,163,175,.15)', color: '#9ca3af', border: 'rgba(156,163,175,.3)' },
 ]
 
-// P=Liberada, R=En tratamiento, S=Programados
-const CANCELABLE_STATUSES = ['P', 'R', 'S']
+// P=Released, R=In Process, S=Scheduled, Y=Ready
+const CANCELABLE_STATUSES = ['P', 'R', 'S', 'Y']
 
 function toSapTs(date) {
   const p = n => String(n).padStart(2, '0')
