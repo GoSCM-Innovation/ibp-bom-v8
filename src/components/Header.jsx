@@ -59,7 +59,7 @@ export default function Header() {
       {/* Logo + title */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <img
-          src="/logo.png"
+          src="/logo-goscm.png"
           alt="GoSCM"
           style={{ height: 32, width: 'auto', objectFit: 'contain', flexShrink: 0 }}
         />
