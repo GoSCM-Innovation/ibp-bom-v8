@@ -14,6 +14,9 @@ const PALETTE = [
   { bg: 'rgba(156,163,175,.15)', color: '#9ca3af', border: 'rgba(156,163,175,.3)' },
 ]
 
+// Status codes that allow cancellation — SAP marks active/running jobs with 'A'
+const CANCELABLE_STATUSES = ['A', 'R', 'Y']
+
 function toSapTs(date) {
   const p = n => String(n).padStart(2, '0')
   return `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}.0000000`
@@ -28,29 +31,35 @@ function toInputDate(date) {
   return date.toISOString().slice(0, 16)
 }
 
+function encodeODataString(val) {
+  return `%27${encodeURIComponent(val)}%27`
+}
+
 export default function JobMonitor({ connection }) {
-  const [statuses, setStatuses] = useState([])   // [{ JobStatus, JobStatusText, color }]
-  const [rows, setRows]         = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState('')
+  const [statuses, setStatuses]       = useState([])
+  const [rows, setRows]               = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState('')
   const [activeStatus, setActiveStatus] = useState('ALL')
-  const [search, setSearch]     = useState('')
+  const [search, setSearch]           = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
   const [colWidths, setColWidths]     = useState({})
+  const [selectedRow, setSelectedRow] = useState(null)
+  const [cancelling, setCancelling]   = useState(false)
+  const [cancelMsg, setCancelMsg]     = useState('')
   const resizing = useRef(null)
+  const timerRef = useRef(null)
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
   const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
   const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
   const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
 
-  const timerRef = useRef(null)
-
-  const proxyPost = useCallback((path) =>
+  const proxyPost = useCallback((path, opts = {}) =>
     fetch('/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionId: connection.id, path }),
+      body: JSON.stringify({ connectionId: connection.id, path, ...opts }),
     }).then(r => r.json())
   , [connection.id])
 
@@ -58,11 +67,7 @@ export default function JobMonitor({ connection }) {
   useEffect(() => {
     proxyPost('/JobStatusInfoSet').then(data => {
       const results = data?.d?.results ?? data?.value ?? []
-      const mapped = results.map((s, i) => ({
-        ...s,
-        color: PALETTE[i % PALETTE.length],
-      }))
-      setStatuses(mapped)
+      setStatuses(results.map((s, i) => ({ ...s, color: PALETTE[i % PALETTE.length] })))
     }).catch(() => {})
   }, [proxyPost])
 
@@ -87,6 +92,26 @@ export default function JobMonitor({ connection }) {
     return () => clearInterval(timerRef.current)
   }, [loadJobs])
 
+  // Cancel job
+  async function handleCancel() {
+    if (!selectedRow) return
+    const label = selectedRow.JobText || selectedRow.JobName
+    if (!window.confirm(`¿Cancelar el job "${label}"?\n\nEsta acción detendrá el job en SAP IBP.`)) return
+    setCancelling(true); setCancelMsg('')
+    try {
+      const path = `/JobCancel?JobName=${encodeODataString(selectedRow.JobName)}&JobRunCount=${encodeODataString(selectedRow.JobRunCount)}`
+      const data = await proxyPost(path, { method: 'POST' })
+      if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
+      setCancelMsg('ok')
+      setSelectedRow(null)
+      await loadJobs()
+    } catch (e) {
+      setCancelMsg(e.message)
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   // Filters
   const fromTs = toSapTs(new Date(fromDate))
   const toTs   = toSapTs(new Date(toDate))
@@ -96,7 +121,6 @@ export default function JobMonitor({ connection }) {
     return bv.localeCompare(av)
   })
 
-  // Filtrado por fecha y búsqueda (sin status) — base para conteos
   const filteredBase = sorted.filter(r => {
     const ts = r.JobPlannedStartDateTime || ''
     if (ts && (ts < fromTs || ts > toTs)) return false
@@ -107,18 +131,12 @@ export default function JobMonitor({ connection }) {
     return true
   })
 
-  // Conteos sobre el subconjunto visible (fecha + búsqueda)
   const countByStatus = {}
   filteredBase.forEach(r => { countByStatus[r.JobStatus] = (countByStatus[r.JobStatus] || 0) + 1 })
 
-  // Filtrado final incluyendo status
   const filtered = filteredBase.filter(r =>
     activeStatus === 'ALL' || r.JobStatus === activeStatus
   )
-
-  function statusColor(code) {
-    return statuses.find(s => s.JobStatus === code)?.color || PALETTE[7]
-  }
 
   function StatusBadge({ code }) {
     const s = statuses.find(x => x.JobStatus === code)
@@ -166,6 +184,8 @@ export default function JobMonitor({ connection }) {
     window.addEventListener('mouseup', onUp)
   }
 
+  const isCancelable = selectedRow && CANCELABLE_STATUSES.includes(selectedRow.JobStatus)
+
   return (
     <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
 
@@ -181,21 +201,17 @@ export default function JobMonitor({ connection }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)}
-            style={inputStyle} />
+          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
           <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
-          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)}
-            style={inputStyle} />
-          <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)}
-            style={{ ...inputStyle, width: 180 }} />
+          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
+          <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, width: 180 }} />
           <button onClick={loadJobs} disabled={loading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
           }}>↺ Refresh</button>
           <span style={{
             fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
-            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)',
-            borderRadius: 6,
+            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
           }}>🔄 Auto-refresh cada {REFRESH_MS / 1000}s</span>
         </div>
       </div>
@@ -231,8 +247,7 @@ export default function JobMonitor({ connection }) {
                   <th key={col.key} style={{
                     width: col.w, minWidth: col.w, padding: '9px 12px', textAlign: 'left',
                     color: 'var(--text2)', fontWeight: 600, whiteSpace: 'nowrap',
-                    borderBottom: '1px solid var(--border)', position: 'relative',
-                    userSelect: 'none',
+                    borderBottom: '1px solid var(--border)', position: 'relative', userSelect: 'none',
                   }}>
                     {col.label}
                     <span
@@ -253,22 +268,84 @@ export default function JobMonitor({ connection }) {
                 <tr><td colSpan={COLS.length} style={{ padding: '32px 12px', textAlign: 'center', color: 'var(--text2)' }}>
                   Sin resultados para el período y filtros seleccionados
                 </td></tr>
-              ) : filtered.map((row, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? 'var(--bg)' : 'var(--bg2)' }}>
-                  {COLS.map(col => (
-                    <td key={col.key} style={{
-                      padding: '7px 12px', color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                      width: col.w, maxWidth: col.w,
-                    }} title={String(row[col.key] ?? '')}>
-                      {col.render ? col.render(row[col.key]) : String(row[col.key] ?? '—')}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              ) : filtered.map((row, i) => {
+                const isSelected = selectedRow?.JobName === row.JobName && selectedRow?.JobRunCount === row.JobRunCount
+                return (
+                  <tr
+                    key={i}
+                    onClick={() => setSelectedRow(isSelected ? null : row)}
+                    style={{
+                      background: isSelected ? 'rgba(247,168,0,.08)' : i % 2 === 0 ? 'var(--bg)' : 'var(--bg2)',
+                      outline: isSelected ? '1px solid rgba(247,168,0,.35)' : 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {COLS.map(col => (
+                      <td key={col.key} style={{
+                        padding: '7px 12px', color: isSelected ? '#fff' : 'var(--text)',
+                        borderBottom: '1px solid var(--border)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        width: col.w, maxWidth: col.w,
+                      }} title={String(row[col.key] ?? '')}>
+                        {col.render ? col.render(row[col.key]) : String(row[col.key] ?? '—')}
+                      </td>
+                    ))}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Action bar — aparece al seleccionar una fila */}
+      {selectedRow && (
+        <div style={{
+          marginTop: 12, padding: '12px 16px', flexShrink: 0,
+          background: 'var(--bg2)', border: '1px solid var(--border2)',
+          borderRadius: 8, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>Job seleccionado</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {selectedRow.JobText || selectedRow.JobName}
+              <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
+                {selectedRow.JobName} · {selectedRow.JobRunCount}
+              </span>
+            </div>
+          </div>
+
+          {cancelMsg === 'ok' && (
+            <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job cancelado</span>
+          )}
+          {cancelMsg && cancelMsg !== 'ok' && (
+            <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 320 }}>✕ {cancelMsg}</span>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button
+              onClick={handleCancel}
+              disabled={!isCancelable || cancelling}
+              title={!isCancelable ? 'Solo se pueden cancelar jobs en ejecución' : 'Cancelar este job en SAP IBP'}
+              style={{
+                padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                border: '1px solid rgba(255,107,107,.4)',
+                background: isCancelable ? 'rgba(255,107,107,.12)' : 'transparent',
+                color: isCancelable ? 'var(--red)' : 'var(--text3)',
+                cursor: isCancelable ? 'pointer' : 'not-allowed',
+                opacity: cancelling ? .6 : 1,
+              }}
+            >
+              {cancelling ? 'Cancelando…' : '✕ Cancelar job'}
+            </button>
+            <button
+              onClick={() => { setSelectedRow(null); setCancelMsg('') }}
+              style={{
+                padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
+              }}
+            >Deseleccionar</button>
+          </div>
         </div>
       )}
     </div>
