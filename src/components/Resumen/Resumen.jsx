@@ -4,12 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
 
-// Cada preset define cuántas horas mirar hacia atrás; el límite superior siempre es +24 h
-const PRESETS = [
-  { label: 'Hoy',    hoursBack: 24  },
-  { label: '7 días', hoursBack: 168 },
-  { label: '30 días',hoursBack: 720 },
-]
+const DEFAULT_HOURS = 24
 
 const STATUS_COLORS = {
   F: '#34d399', W: '#fbbf24', A: '#ff6b6b', U: '#f97316',
@@ -42,12 +37,20 @@ function dayLabel(ts) {
   return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`
 }
 
+function toInputDate(date) {
+  return date.toISOString().slice(0, 16)
+}
+
 export default function Resumen({ connection }) {
   const [rows, setRows]         = useState([])
   const [statuses, setStatuses] = useState([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
-  const [preset, setPreset]     = useState(0) // index in PRESETS
+
+  const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
+  const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
+  const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
+  const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
 
   const proxyPost = useCallback(path =>
     fetch('/api/proxy', {
@@ -78,10 +81,9 @@ export default function Resumen({ connection }) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code
   }
 
-  // Filter rows by preset — mismo criterio que Job Monitor
-  const { hoursBack } = PRESETS[preset]
-  const fromTs = toSapTs(new Date(Date.now() - hoursBack * 3600 * 1000))
-  const toTs   = toSapTs(new Date(Date.now() + 24 * 3600 * 1000))   // +24 h (igual que Job Monitor)
+  // Filter — mismo criterio que Job Monitor
+  const fromTs = toSapTs(new Date(fromDate))
+  const toTs   = toSapTs(new Date(toDate))
   const filtered = rows.filter(r => {
     const ts = r.JobPlannedStartDateTime || ''
     if (ts && (ts < fromTs || ts > toTs)) return false
@@ -153,20 +155,16 @@ export default function Resumen({ connection }) {
     <div style={{ padding: 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Resumen</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{connection.name} · {total} jobs en el período</div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {PRESETS.map((p, i) => (
-            <button key={i} onClick={() => setPreset(i)} style={{
-              padding: '5px 14px', borderRadius: 20, fontSize: 11, fontWeight: preset === i ? 700 : 400,
-              border: `1px solid ${preset === i ? 'var(--accent)' : 'var(--border)'}`,
-              background: preset === i ? 'rgba(247,168,0,.12)' : 'transparent',
-              color: preset === i ? 'var(--accent)' : 'var(--text2)', cursor: 'pointer',
-            }}>{p.label}</button>
-          ))}
+        {/* Date range — igual que Job Monitor */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
+          <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
+          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
         </div>
       </div>
 
@@ -288,7 +286,7 @@ function KpiCard({ label, value, color }) {
   )
 }
 
-function RankRow({ rank, label, count, max, color }) {
+function RankRow({ rank, label, count, max, color, suffix = '' }) {
   const pct = max > 0 ? (count / max) * 100 : 0
   return (
     <div style={{ marginBottom: 8 }}>
@@ -297,7 +295,7 @@ function RankRow({ rank, label, count, max, color }) {
           <span style={{ color: 'var(--text3)', fontWeight: 700, flexShrink: 0 }}>#{rank}</span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
         </div>
-        <span style={{ fontSize: 11, fontWeight: 700, color, flexShrink: 0, marginLeft: 8 }}>{count}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color, flexShrink: 0, marginLeft: 8 }}>{count}{suffix}</span>
       </div>
       <div style={{ height: 3, background: 'var(--border)', borderRadius: 2 }}>
         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 2, transition: 'width .4s' }} />
@@ -318,4 +316,10 @@ const cardStyle = {
 const cardTitle = {
   fontSize: 11, fontWeight: 700, color: 'var(--text2)',
   textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 12,
+}
+
+const inputStyle = {
+  background: 'var(--bg2)', border: '1px solid var(--border)',
+  borderRadius: 6, color: 'var(--text)', fontSize: 11,
+  padding: '6px 10px', outline: 'none',
 }
