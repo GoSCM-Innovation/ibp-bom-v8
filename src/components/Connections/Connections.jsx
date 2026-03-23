@@ -25,7 +25,11 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
 
   async function handleDelete(id, name) {
     if (!confirm(`¿Eliminar la conexión "${name}"?`)) return
-    await fetch(`/api/connections/${id}`, { method: 'DELETE' })
+    await fetch('/api/connections', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
     onDeleted(id)
   }
 

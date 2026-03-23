@@ -77,7 +77,7 @@ export default async function handler(req, res) {
     }
 
     const urlParts = req.url.split('/')
-    const id = urlParts[urlParts.length - 1]
+    const id = req.body?.id || urlParts[urlParts.length - 1]
 
     if (req.method === 'PUT') {
       const idx = connections.findIndex(c => c.id === id)

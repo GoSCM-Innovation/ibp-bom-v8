@@ -19,8 +19,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     try {
       const body = { name: form.name, url: form.url.replace(/\/$/, ''), user: form.user, jobUser: form.jobUser }
       if (form.password) body.password = form.password
+      if (initial) body.id = initial.id
       const res = await fetch(
-        initial ? `/api/connections/${initial.id}` : '/api/connections',
+        '/api/connections',
         { method: initial ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       )
       if (!res.ok) throw new Error((await res.json()).error || 'Error')
