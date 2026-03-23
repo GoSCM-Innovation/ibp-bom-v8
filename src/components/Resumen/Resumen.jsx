@@ -220,7 +220,7 @@ export default function Resumen({ connection }) {
       </div>
 
       {/* KPI cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginBottom: 24 }}>
+      <div className="grid-kpi">
         <KpiCard label="Total jobs"    value={total}        color="var(--text)" />
         <KpiCard label="En ejecución"  value={running}      color="var(--cyan)" />
         <KpiCard label="Programados"   value={scheduled}    color="var(--purple)" />
@@ -230,7 +230,7 @@ export default function Resumen({ connection }) {
       </div>
 
       {/* Charts row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16, marginBottom: 24 }}>
+      <div className="grid-charts">
 
         {/* Donut */}
         <div style={cardStyle}>
@@ -284,7 +284,7 @@ export default function Resumen({ connection }) {
       </div>
 
       {/* Bottom rows — 2×2 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="grid-stats">
 
         {/* Top templates */}
         <div style={cardStyle}>

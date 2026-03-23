@@ -1,19 +1,22 @@
 const W = 220
 const W_MIN = 52
 
-export default function Sidebar({ connections, activeId, onSelect, expanded, onToggle, loading }) {
+export default function Sidebar({ connections, activeId, onSelect, expanded, onToggle, loading, isMobile = false, mobileOpen = false }) {
   const w = expanded ? W : W_MIN
 
   return (
-    <aside style={{
-      width: w, minWidth: w, maxWidth: w,
-      background: 'var(--bg2)',
-      borderRight: '1px solid var(--border)',
-      display: 'flex', flexDirection: 'column',
-      transition: 'width .2s, min-width .2s, max-width .2s',
-      overflow: 'hidden',
-      flexShrink: 0,
-    }}>
+    <aside
+      className={isMobile ? `sidebar-drawer${mobileOpen ? ' open' : ''}` : ''}
+      style={{
+        width: w, minWidth: w, maxWidth: w,
+        background: 'var(--bg2)',
+        borderRight: '1px solid var(--border)',
+        display: 'flex', flexDirection: 'column',
+        transition: 'width .2s, min-width .2s, max-width .2s',
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
+    >
       {/* Header */}
       <div style={{
         padding: '12px 10px',

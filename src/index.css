@@ -37,3 +37,46 @@ input, select, textarea { font-family: var(--font); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 ::-webkit-scrollbar-corner { background: var(--bg2); }
+
+/* ─── Responsive layout ──────────────────────────────────── */
+
+/* Resumen grids */
+.grid-kpi    { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
+.grid-charts { display: grid; grid-template-columns: 1fr 2fr;        gap: 16px; margin-bottom: 24px; }
+.grid-stats  { display: grid; grid-template-columns: 1fr 1fr;        gap: 16px; }
+
+/* Sidebar overlay backdrop (mobile) */
+.sidebar-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 90;
+}
+
+@media (max-width: 900px) {
+  .grid-kpi    { grid-template-columns: repeat(3, 1fr); }
+  .grid-charts { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  body   { overflow: auto; }
+  #root  { height: auto; min-height: 100vh; }
+
+  .grid-kpi   { grid-template-columns: repeat(2, 1fr); }
+  .grid-stats { grid-template-columns: 1fr; }
+
+  /* Sidebar becomes a drawer on mobile */
+  .sidebar-drawer {
+    position: fixed !important;
+    left: 0; top: 0; bottom: 0;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform .25s ease !important;
+  }
+  .sidebar-drawer.open {
+    transform: translateX(0);
+  }
+  .sidebar-backdrop.open { display: block; }
+
+  .hamburger-btn { display: flex !important; }
+}

@@ -27,7 +27,7 @@ const REQUIREMENTS = [
   },
 ]
 
-export default function Header() {
+export default function Header({ onMenuToggle }) {
   const [showReqs, setShowReqs] = useState(false)
   const panelRef = useRef(null)
 
@@ -56,6 +56,19 @@ export default function Header() {
       boxShadow: '0 2px 20px rgba(0,0,0,.5)',
       flexShrink: 0,
     }}>
+      {/* Hamburger — mobile only */}
+      {onMenuToggle && (
+        <button
+          onClick={onMenuToggle}
+          className="hamburger-btn"
+          style={{
+            display: 'none',
+            background: 'none', border: '1px solid var(--border)',
+            borderRadius: 6, color: 'var(--text2)', padding: '5px 9px',
+            fontSize: 16, cursor: 'pointer', flexShrink: 0,
+          }}
+        >☰</button>
+      )}
       {/* Logo + title */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <img
@@ -92,7 +105,7 @@ export default function Header() {
         {showReqs && (
           <div style={{
             position: 'absolute', top: 'calc(100% + 10px)', right: 0,
-            width: 420, background: '#0d1829',
+            width: 'min(420px, 92vw)', background: '#0d1829',
             border: '1px solid rgba(247,168,0,.25)', borderRadius: 10,
             boxShadow: '0 8px 32px rgba(0,0,0,.6)', padding: 20, zIndex: 300,
           }}>
