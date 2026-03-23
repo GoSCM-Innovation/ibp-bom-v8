@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import Jobs from '../Jobs/Jobs'
 import JobMonitor from '../Jobs/JobMonitor'
+import Resumen from '../Resumen/Resumen'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 
 const APPS = [
+  { id: 'resumen', label: 'Resumen'       },
   { id: 'jobs',    label: 'Job Templates' },
   { id: 'monitor', label: 'Job Monitor'   },
 ]
 
 export default function SystemView({ connection }) {
-  const [activeApp, setActiveApp] = useState('jobs')
+  const [activeApp, setActiveApp] = useState('resumen')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -43,6 +45,7 @@ export default function SystemView({ connection }) {
 
       {/* App content */}
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {activeApp === 'resumen' && <Resumen connection={connection} />}
         {activeApp === 'jobs'    && <Jobs connection={connection} />}
         {activeApp === 'monitor' && <JobMonitor connection={connection} />}
       </div>
