@@ -2,7 +2,7 @@ import { useState } from 'react'
 import Jobs from '../Jobs/Jobs'
 
 const APPS = [
-  { id: 'jobs', label: 'Jobs' },
+  { id: 'jobs', label: 'Job Templates' },
 ]
 
 export default function SystemView({ connection }) {
