@@ -283,8 +283,8 @@ export default function Resumen({ connection }) {
         </div>
       </div>
 
-      {/* Bottom row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
+      {/* Bottom rows — 2×2 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
         {/* Top templates */}
         <div style={cardStyle}>
