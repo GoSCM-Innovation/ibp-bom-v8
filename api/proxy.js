@@ -62,9 +62,22 @@ export default async function handler(req, res) {
 
   try {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
+    const baseHeaders = { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json, application/xml, */*', 'Content-Type': 'application/json' }
+
+    // For POST/PUT/DELETE: fetch CSRF token first
+    let csrfToken = null
+    if (method !== 'GET') {
+      const baseUrl = url.split('?')[0].split('/').slice(0, 6).join('/')
+      const csrfResp = await fetch(baseUrl, { method: 'GET', headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' } })
+      csrfToken = csrfResp.headers.get('x-csrf-token')
+    }
+
     const opts = {
       method,
-      headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json, application/xml, */*', 'Content-Type': 'application/json' },
+      headers: {
+        ...baseHeaders,
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+      },
     }
     if (body && method !== 'GET') opts.body = JSON.stringify(body)
 

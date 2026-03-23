@@ -37,10 +37,6 @@ function JobPanel({ row, connectionId, onClose }) {
     }
   }
 
-  function handleParams() {
-    callProxy('Parámetros', `/TemplateValuesGet?JobTemplateName=${encodeODataString(row.JobTemplateName)}`)
-  }
-
   function handleValidar() {
     callProxy('Validación', `/JobScheduleCheck?JobTemplateName=${encodeODataString(row.JobTemplateName)}`, 'POST')
   }
@@ -79,13 +75,6 @@ function JobPanel({ row, connectionId, onClose }) {
 
       {/* Actions */}
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <button
-          onClick={handleParams}
-          disabled={loading}
-          style={{ ...BTN_BASE, background: 'rgba(255,255,255,.04)' }}
-        >
-          📋 Ver parámetros
-        </button>
         <button
           onClick={handleValidar}
           disabled={loading}
