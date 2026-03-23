@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Jobs from '../Jobs/Jobs'
+import ConnectionAvatar from '../Connections/ConnectionAvatar'
 
 const APPS = [
   { id: 'jobs', label: 'Job Templates' },
@@ -15,6 +16,7 @@ export default function SystemView({ connection }) {
         background: 'var(--bg2)', borderBottom: '1px solid var(--border)',
         padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
       }}>
+        <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
         <div>
           <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{connection.name}</div>
           <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>{connection.url}</div>

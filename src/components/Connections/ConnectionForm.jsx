@@ -7,6 +7,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     user: initial?.user || '',
     password: '',
     jobUser: initial?.jobUser || '',
+    logoUrl: initial?.logoUrl || '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -17,7 +18,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     if (!form.name || !form.url || !form.user) { setError('Nombre, URL y usuario son obligatorios'); return }
     setSaving(true); setError('')
     try {
-      const body = { name: form.name, url: form.url.replace(/\/$/, ''), user: form.user, jobUser: form.jobUser }
+      const body = { name: form.name, url: form.url.replace(/\/$/, ''), user: form.user, jobUser: form.jobUser, logoUrl: form.logoUrl }
       if (form.password) body.password = form.password
       if (initial) body.id = initial.id
       const res = await fetch(
@@ -44,6 +45,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         <Field label="Usuario comunicación" value={form.user} onChange={v => set('user', v)} placeholder="COM_0326_USER" mono />
         <Field label={initial ? 'Contraseña (dejar vacío para mantener)' : 'Contraseña'} value={form.password} onChange={v => set('password', v)} type="password" placeholder={initial ? '••••••••' : 'Contraseña'} />
         <Field label="Usuario de negocio (JobUser)" value={form.jobUser} onChange={v => set('jobUser', v)} placeholder="EXT_GAHUMADA" mono />
+        <Field label="URL del logo (opcional)" value={form.logoUrl} onChange={v => set('logoUrl', v)} placeholder="https://empresa.com/logo.png" />
       </div>
       {error && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--red)' }}>✕ {error}</div>}
       <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>

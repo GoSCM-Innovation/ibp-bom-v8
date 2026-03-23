@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ConnectionForm from './ConnectionForm'
+import ConnectionAvatar from './ConnectionAvatar'
 
 export default function Connections({ connections, onSaved, onDeleted, onSelect }) {
   const [showForm, setShowForm] = useState(false)
@@ -109,6 +110,9 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
             borderRadius: 10, padding: '16px 20px',
             display: 'flex', alignItems: 'center', gap: 16,
           }}>
+
+            {/* Avatar */}
+            <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={40} />
 
             {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>
