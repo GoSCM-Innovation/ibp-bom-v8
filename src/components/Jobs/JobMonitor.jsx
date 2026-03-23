@@ -91,7 +91,10 @@ export default function JobMonitor({ connection }) {
   const fromTs = toSapTs(new Date(fromDate))
   const toTs   = toSapTs(new Date(toDate))
 
-  const filtered = rows.filter(r => {
+  const filtered = [...rows].sort((a, b) => {
+    const av = a.JobPlannedStartDateTime || '', bv = b.JobPlannedStartDateTime || ''
+    return bv.localeCompare(av) // más reciente primero
+  }).filter(r => {
     const ts = r.JobStartDateTime || ''
     if (ts && (ts < fromTs || ts > toTs)) return false
     if (activeStatus !== 'ALL' && r.JobStatus !== activeStatus) return false
@@ -125,14 +128,15 @@ export default function JobMonitor({ connection }) {
   }
 
   const BASE_COLS = useMemo(() => [
-    { key: 'JobStatus',                label: 'Estado',      w: 130, render: (v) => <StatusBadge code={v} /> },
-    { key: 'JobName',                  label: 'Job',         w: 200 },
-    { key: 'JobText',                  label: 'Descripción', w: 220 },
-    { key: 'JobCreatedByFormattedName',label: 'Usuario',     w: 180 },
-    { key: 'JobStepCount',             label: 'Pasos',       w: 70  },
-    { key: 'JobStartDateTime',         label: 'Inicio',      w: 160, render: formatSapTs },
-    { key: 'JobEndDateTime',           label: 'Fin',         w: 160, render: formatSapTs },
-    { key: 'Periodic',                 label: 'Periódico',   w: 90,  render: v => v ? '✓' : '—' },
+    { key: 'JobStatus',                label: 'Estado',            w: 130, render: (v) => <StatusBadge code={v} /> },
+    { key: 'JobTemplateText',          label: 'Template',          w: 220 },
+    { key: 'JobText',                  label: 'Descripción',       w: 220 },
+    { key: 'JobCreatedByFormattedName',label: 'Usuario',           w: 180 },
+    { key: 'JobStepCount',             label: 'Pasos',             w: 70  },
+    { key: 'JobPlannedStartDateTime',  label: 'Inicio planificado',w: 170, render: formatSapTs },
+    { key: 'JobStartDateTime',         label: 'Inicio real',       w: 160, render: formatSapTs },
+    { key: 'JobEndDateTime',           label: 'Fin',               w: 160, render: formatSapTs },
+    { key: 'Periodic',                 label: 'Periódico',         w: 90,  render: v => v ? '✓' : '—' },
   ], [statuses])
 
   const COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
@@ -181,6 +185,11 @@ export default function JobMonitor({ connection }) {
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
           }}>↺ Refresh</button>
+          <span style={{
+            fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
+            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)',
+            borderRadius: 6,
+          }}>🔄 Auto-refresh cada {REFRESH_MS / 1000}s</span>
         </div>
       </div>
 
