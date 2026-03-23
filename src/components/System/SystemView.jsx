@@ -15,12 +15,6 @@ export default function SystemView({ connection }) {
         background: 'var(--bg2)', borderBottom: '1px solid var(--border)',
         padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
       }}>
-        <div style={{
-          width: 34, height: 34, borderRadius: 7, flexShrink: 0,
-          background: 'linear-gradient(135deg, rgba(247,168,0,.25), rgba(232,98,42,.25))',
-          border: '1px solid rgba(247,168,0,.35)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
-        }}>◉</div>
         <div>
           <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{connection.name}</div>
           <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>{connection.url}</div>
