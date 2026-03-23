@@ -2,28 +2,28 @@ import { useState, useRef, useEffect } from 'react'
 
 const REQUIREMENTS = [
   {
-    title: 'Usuario de comunicación SAP IBP',
-    detail: 'Se requiere un usuario tipo COMM_USER con rol SAP_IBP_COMMUNICATION_USER asignado en el sistema IBP.',
+    title: '1. Usuario de Comunicación',
+    detail: 'Crear un Communication User en SAP IBP → Settings → Communication Users. Este usuario y su contraseña se usan como credenciales de la conexión.',
   },
   {
-    title: 'Servicio OData activo',
-    detail: 'El servicio BC_EXT_APPJOB_MANAGEMENT debe estar activo en la transacción /IWFND/MAINT_SERVICE del Gateway.',
+    title: '2. Sistema de Comunicación',
+    detail: 'Definir un Communication System en SAP IBP → Settings → Communication Systems, representando el sistema externo (GoSCM) que consumirá la API.',
   },
   {
-    title: 'URL base del API',
-    detail: 'Formato: https://<tenant>-api.scmibp.ondemand.com/sap/opu/odata/sap/<SERVICE>;v=XXXX',
+    title: '3. Acuerdo de Comunicación',
+    detail: 'Crear un Communication Arrangement en SAP IBP → Settings → Communication Arrangements usando el escenario SAP_COM_0326. Asociar el Communication System y el Communication User — esto activa el endpoint OData.',
   },
   {
-    title: 'Autenticación Basic Auth',
-    detail: 'La API utiliza autenticación HTTP Basic (usuario:contraseña en Base64). No se soporta OAuth en esta versión.',
+    title: '4. URL del endpoint',
+    detail: 'La URL del API se obtiene directamente del Communication Arrangement creado. Formato: https://<tenant>-api.scmibp.ondemand.com/sap/opu/odata/sap/BC_EXT_APPJOB_MANAGEMENT;v=0002',
   },
   {
-    title: 'Dominio permitido',
-    detail: 'Solo se permiten conexiones a dominios *.scmibp.ondemand.com por seguridad.',
+    title: '5. Rol de autorización',
+    detail: 'El Communication User debe tener asignado el business role correspondiente para leer y ejecutar Application Jobs en IBP.',
   },
   {
-    title: 'Accept header',
-    detail: 'Las peticiones deben incluir Accept: application/json para recibir respuestas en formato JSON en lugar de XML.',
+    title: '6. Autenticación Basic Auth',
+    detail: 'La API usa HTTP Basic Authentication con el usuario y contraseña del Communication User. No se requiere configuración adicional de OAuth.',
   },
 ]
 
