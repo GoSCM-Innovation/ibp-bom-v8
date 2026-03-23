@@ -4,10 +4,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
 
+// Cada preset define cuántas horas mirar hacia atrás; el límite superior siempre es +24 h
 const PRESETS = [
-  { label: 'Hoy',    hours: 24  },
-  { label: '7 días', hours: 168 },
-  { label: '30 días',hours: 720 },
+  { label: 'Hoy',    hoursBack: 24  },
+  { label: '7 días', hoursBack: 168 },
+  { label: '30 días',hoursBack: 720 },
 ]
 
 const STATUS_COLORS = {
@@ -77,12 +78,14 @@ export default function Resumen({ connection }) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code
   }
 
-  // Filter rows by preset
-  const hours = PRESETS[preset].hours
-  const fromTs = toSapTs(new Date(Date.now() - hours * 3600 * 1000))
+  // Filter rows by preset — mismo criterio que Job Monitor
+  const { hoursBack } = PRESETS[preset]
+  const fromTs = toSapTs(new Date(Date.now() - hoursBack * 3600 * 1000))
+  const toTs   = toSapTs(new Date(Date.now() + 24 * 3600 * 1000))   // +24 h (igual que Job Monitor)
   const filtered = rows.filter(r => {
     const ts = r.JobPlannedStartDateTime || ''
-    return !ts || ts >= fromTs
+    if (ts && (ts < fromTs || ts > toTs)) return false
+    return true
   })
 
   // KPIs
