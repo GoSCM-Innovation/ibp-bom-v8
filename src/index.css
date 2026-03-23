@@ -30,3 +30,10 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 
 button { cursor: pointer; font-family: var(--font); }
 input, select, textarea { font-family: var(--font); }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: var(--bg2); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+::-webkit-scrollbar-corner { background: var(--bg2); }

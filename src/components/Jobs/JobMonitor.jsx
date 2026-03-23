@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 
 const REFRESH_MS = 30000
 const DEFAULT_HOURS = 24
@@ -36,6 +36,8 @@ export default function JobMonitor({ connection }) {
   const [activeStatus, setActiveStatus] = useState('ALL')
   const [search, setSearch]     = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [colWidths, setColWidths]     = useState({})
+  const resizing = useRef(null)
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
   const defaultTo   = new Date()
@@ -122,17 +124,36 @@ export default function JobMonitor({ connection }) {
     )
   }
 
-  const COLS = [
-    { key: 'JobStatus',                label: 'Estado',       w: 130, render: (v) => <StatusBadge code={v} /> },
-    { key: 'JobName',                  label: 'Job',          w: 200 },
-    { key: 'JobText',                  label: 'Descripción',  w: 220 },
-    { key: 'JobTemplateText',          label: 'Template',     w: 220 },
-    { key: 'JobCreatedByFormattedName',label: 'Usuario',      w: 180 },
-    { key: 'JobStepCount',             label: 'Pasos',        w: 70  },
-    { key: 'JobStartDateTime',         label: 'Inicio',       w: 160, render: formatSapTs },
-    { key: 'JobEndDateTime',           label: 'Fin',          w: 160, render: formatSapTs },
-    { key: 'Periodic',                 label: 'Periódico',    w: 90,  render: v => v ? '✓' : '—' },
-  ]
+  const BASE_COLS = useMemo(() => [
+    { key: 'JobStatus',                label: 'Estado',      w: 130, render: (v) => <StatusBadge code={v} /> },
+    { key: 'JobName',                  label: 'Job',         w: 200 },
+    { key: 'JobText',                  label: 'Descripción', w: 220 },
+    { key: 'JobCreatedByFormattedName',label: 'Usuario',     w: 180 },
+    { key: 'JobStepCount',             label: 'Pasos',       w: 70  },
+    { key: 'JobStartDateTime',         label: 'Inicio',      w: 160, render: formatSapTs },
+    { key: 'JobEndDateTime',           label: 'Fin',         w: 160, render: formatSapTs },
+    { key: 'Periodic',                 label: 'Periódico',   w: 90,  render: v => v ? '✓' : '—' },
+  ], [statuses])
+
+  const COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
+
+  function onResizeStart(col, e) {
+    e.preventDefault(); e.stopPropagation()
+    const startX = e.clientX, startW = colWidths[col] ?? BASE_COLS.find(c => c.key === col)?.w ?? 140
+    resizing.current = { col, startX, startW }
+    function onMove(e) {
+      if (!resizing.current) return
+      const { col, startX, startW } = resizing.current
+      setColWidths(w => ({ ...w, [col]: Math.max(60, startW + e.clientX - startX) }))
+    }
+    function onUp() {
+      resizing.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   return (
     <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
@@ -194,8 +215,16 @@ export default function JobMonitor({ connection }) {
                   <th key={col.key} style={{
                     width: col.w, minWidth: col.w, padding: '9px 12px', textAlign: 'left',
                     color: 'var(--text2)', fontWeight: 600, whiteSpace: 'nowrap',
-                    borderBottom: '1px solid var(--border)',
-                  }}>{col.label}</th>
+                    borderBottom: '1px solid var(--border)', position: 'relative',
+                    userSelect: 'none',
+                  }}>
+                    {col.label}
+                    <span
+                      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'col-resize', background: 'transparent' }}
+                      onClick={e => e.stopPropagation()}
+                      onMouseDown={e => onResizeStart(col.key, e)}
+                    />
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -215,7 +244,7 @@ export default function JobMonitor({ connection }) {
                       padding: '7px 12px', color: 'var(--text)',
                       borderBottom: '1px solid var(--border)',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                      maxWidth: col.w,
+                      width: col.w, maxWidth: col.w,
                     }} title={String(row[col.key] ?? '')}>
                       {col.render ? col.render(row[col.key]) : String(row[col.key] ?? '—')}
                     </td>
