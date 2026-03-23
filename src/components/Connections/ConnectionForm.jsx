@@ -15,7 +15,6 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
   const [pickerPos, setPickerPos] = useState(null)
   const btnRef = useRef(null)
 
-  // Close picker on outside click
   useEffect(() => {
     if (!pickerPos) return
     function handleClick(e) {
@@ -34,8 +33,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
 
   function set(k, v) { setForm(p => ({ ...p, [k]: v })) }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
+  async function handleSave() {
     if (!form.name || !form.url || !form.user) { setError('Nombre, URL y usuario son obligatorios'); return }
     setSaving(true); setError('')
     try {
@@ -60,50 +58,42 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         {initial ? 'Editar conexión' : 'Nueva conexión'}
       </div>
 
-      <form onSubmit={handleSubmit}>
-        {/* Emoji + Nombre */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 14 }}>
-          <div style={{ flexShrink: 0 }}>
-            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginBottom: 5 }}>Ícono</label>
-            <button
-              ref={btnRef}
-              type="button"
-              onClick={togglePicker}
-              style={{
-                width: 48, height: 36, fontSize: 22, background: 'var(--bg)',
-                border: `1px solid ${pickerPos ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: 6, cursor: 'pointer', display: 'flex',
-                alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              {form.emoji}
-            </button>
-          </div>
-          <div style={{ flex: 1 }}>
-            <Field label="Nombre conexión" value={form.name} onChange={v => set('name', v)} placeholder="ej: IBP Producción" />
-          </div>
+      {/* Emoji + Nombre */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 14 }}>
+        <div style={{ flexShrink: 0 }}>
+          <label style={labelStyle}>Ícono</label>
+          <button ref={btnRef} type="button" onClick={togglePicker} style={{
+            width: 48, height: 36, fontSize: 22, background: 'var(--bg)',
+            border: `1px solid ${pickerPos ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {form.emoji}
+          </button>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <Field label="API URL" value={form.url} onChange={v => set('url', v)} placeholder="https://my400444-api.scmibp.ondemand.com/..." mono />
-          <Field label="Usuario" value={form.user} onChange={v => set('user', v)} placeholder="COMM_USER" mono />
-          <Field label={initial ? 'Contraseña (dejar vacío para mantener)' : 'Contraseña'} value={form.password} onChange={v => set('password', v)} type="password" placeholder={initial ? '••••••••' : 'Contraseña'} />
+        <div style={{ flex: 1 }}>
+          <Field label="Nombre conexión" value={form.name} onChange={v => set('name', v)} placeholder="ej: IBP Producción" />
         </div>
+      </div>
 
-        {error && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--red)' }}>✕ {error}</div>}
-        <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onCancel} style={{
-            background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
-            color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 18px',
-          }}>Cancelar</button>
-          <button type="submit" disabled={saving} style={{
-            background: 'var(--accent)', border: 'none', borderRadius: 6,
-            color: '#000', fontSize: 12, fontWeight: 700, padding: '7px 18px',
-          }}>{saving ? 'Guardando...' : initial ? 'Guardar cambios' : 'Crear conexión'}</button>
-        </div>
-      </form>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <Field label="API URL" value={form.url} onChange={v => set('url', v)} placeholder="https://my400444-api.scmibp.ondemand.com/..." mono />
+        <Field label="Usuario" value={form.user} onChange={v => set('user', v)} placeholder="COMM_USER" mono />
+        <Field label={initial ? 'Contraseña (dejar vacío para mantener)' : 'Contraseña'} value={form.password} onChange={v => set('password', v)} type="password" placeholder={initial ? '••••••••' : 'Contraseña'} />
+      </div>
 
-      {/* Portal: picker renderizado en document.body, fuera de todo form */}
+      {error && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--red)' }}>✕ {error}</div>}
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
+        <button type="button" onClick={onCancel} style={{
+          background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
+          color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 18px',
+        }}>Cancelar</button>
+        <button type="button" disabled={saving} onClick={handleSave} style={{
+          background: 'var(--accent)', border: 'none', borderRadius: 6,
+          color: '#000', fontSize: 12, fontWeight: 700, padding: '7px 18px',
+        }}>{saving ? 'Guardando...' : initial ? 'Guardar cambios' : 'Crear conexión'}</button>
+      </div>
+
       {pickerPos && createPortal(
         <div
           style={{ position: 'absolute', top: pickerPos.top, left: pickerPos.left, zIndex: 9999 }}
@@ -123,12 +113,18 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
   )
 }
 
+const labelStyle = {
+  fontSize: 10, fontWeight: 600, color: 'var(--text2)',
+  textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginBottom: 5,
+}
+
 function Field({ label, value, onChange, placeholder, type = 'text', mono }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.07em' }}>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
         style={{
           background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
           color: 'var(--text)', fontFamily: mono ? 'var(--mono)' : 'var(--font)',
