@@ -36,7 +36,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
       const res = await fetch('/api/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: conn.url + '/$metadata', user: conn.user, password: conn.password }),
+        body: JSON.stringify({ connectionId: conn.id, path: '/$metadata' }),
       })
       setTestResult(p => ({ ...p, [conn.id]: res.ok ? 'ok' : 'error' }))
     } catch {

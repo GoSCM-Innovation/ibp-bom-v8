@@ -1,4 +1,35 @@
+import crypto from 'crypto'
+
 const ALLOWED_HOST = '.scmibp.ondemand.com'
+const REDIS_URL = process.env.KV_REST_API_URL
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN
+const KEY = 'ibp:connections'
+
+async function redisGet(key) {
+  const resp = await fetch(`${REDIS_URL}/pipeline`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify([['GET', key]])
+  })
+  const data = await resp.json()
+  const result = data[0]?.result
+  if (!result) return []
+  try {
+    const parsed = JSON.parse(result)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function decrypt(text) {
+  try {
+    const secret = process.env.ENCRYPTION_SECRET || 'default-secret-change-me'
+    const [ivHex, encrypted] = text.split(':')
+    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(secret.padEnd(32).slice(0, 32)), Buffer.from(ivHex, 'hex'))
+    return decipher.update(encrypted, 'hex', 'utf8') + decipher.final('utf8')
+  } catch { return '' }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -7,11 +38,21 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { url, user, password, method = 'GET', body } = req.body
+  let { connectionId, path, url, user, password, method = 'GET', body } = req.body
+
+  // Mode: connectionId + path → resolve credentials from Redis
+  if (connectionId) {
+    if (!REDIS_URL || !REDIS_TOKEN) return res.status(500).json({ error: 'Redis no configurado' })
+    const connections = await redisGet(KEY)
+    const conn = connections.find(c => c.id === connectionId)
+    if (!conn) return res.status(404).json({ error: 'Conexión no encontrada' })
+    url = conn.url + (path || '')
+    user = conn.user
+    password = decrypt(conn.password)
+  }
 
   if (!url || !user || !password) return res.status(400).json({ error: 'Missing url, user or password' })
 
-  // Validate destination host
   try {
     const host = new URL(url).hostname
     if (!host.endsWith(ALLOWED_HOST)) return res.status(403).json({ error: 'Host no permitido' })
