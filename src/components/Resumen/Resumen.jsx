@@ -133,6 +133,32 @@ export default function Resumen({ connection }) {
   })
   const topUsers = Object.entries(userMap).sort((a,b) => b[1]-a[1]).slice(0,5)
 
+  // Top 5 templates by average duration (only F/W jobs with both start+end)
+  const durationMap = {}
+  filtered.forEach(r => {
+    if (!['F','W'].includes(r.JobStatus)) return
+    const start = parseSapTs(r.JobStartDateTime)
+    const end   = parseSapTs(r.JobEndDateTime)
+    if (!start || !end || end <= start) return
+    const mins = (end - start) / 60000
+    const k = r.JobTemplateText || r.JobTemplateName || '—'
+    if (!durationMap[k]) durationMap[k] = { total: 0, count: 0 }
+    durationMap[k].total += mins
+    durationMap[k].count += 1
+  })
+  const topDuration = Object.entries(durationMap)
+    .map(([name, { total, count }]) => ({ name, avg: total / count }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 5)
+
+  function fmtDuration(mins) {
+    if (mins < 1)   return `${Math.round(mins * 60)}s`
+    if (mins < 60)  return `${Math.round(mins)} min`
+    const h = Math.floor(mins / 60)
+    const m = Math.round(mins % 60)
+    return m > 0 ? `${h}h ${m}m` : `${h}h`
+  }
+
   // Recent failed
   const recentFailed = filtered
     .filter(r => ['A','U'].includes(r.JobStatus))
@@ -233,7 +259,7 @@ export default function Resumen({ connection }) {
       </div>
 
       {/* Bottom row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
 
         {/* Top templates */}
         <div style={cardStyle}>
@@ -249,6 +275,24 @@ export default function Resumen({ connection }) {
           {topUsers.length === 0 ? <Empty /> : topUsers.map(([name, count], i) => (
             <RankRow key={i} rank={i+1} label={name} count={count} max={topUsers[0][1]} color="var(--purple)" />
           ))}
+        </div>
+
+        {/* Top duration */}
+        <div style={cardStyle}>
+          <div style={cardTitle}>Top jobs más lentos (prom.)</div>
+          {topDuration.length === 0
+            ? <Empty />
+            : topDuration.map((d, i) => (
+              <RankRow
+                key={i} rank={i+1} label={d.name}
+                count={fmtDuration(d.avg)} max={topDuration[0].avg}
+                rawValue={d.avg} color="var(--accent)"
+              />
+            ))
+          }
+          <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 10 }}>
+            Solo jobs Finalizados con inicio y fin registrados
+          </div>
         </div>
 
         {/* Recent failed */}
@@ -286,8 +330,9 @@ function KpiCard({ label, value, color }) {
   )
 }
 
-function RankRow({ rank, label, count, max, color, suffix = '' }) {
-  const pct = max > 0 ? (count / max) * 100 : 0
+function RankRow({ rank, label, count, max, color, suffix = '', rawValue }) {
+  const numeric = rawValue !== undefined ? rawValue : count
+  const pct = max > 0 ? (numeric / max) * 100 : 0
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
