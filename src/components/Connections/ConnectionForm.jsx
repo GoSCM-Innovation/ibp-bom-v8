@@ -6,6 +6,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     url: initial?.url || '',
     user: initial?.user || '',
     password: '',
+    jobUser: initial?.jobUser || '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -16,7 +17,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     if (!form.name || !form.url || !form.user) { setError('Nombre, URL y usuario son obligatorios'); return }
     setSaving(true); setError('')
     try {
-      const body = { name: form.name, url: form.url.replace(/\/$/, ''), user: form.user }
+      const body = { name: form.name, url: form.url.replace(/\/$/, ''), user: form.user, jobUser: form.jobUser }
       if (form.password) body.password = form.password
       const res = await fetch(
         initial ? `/api/connections/${initial.id}` : '/api/connections',
@@ -39,8 +40,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <Field label="Nombre conexión" value={form.name} onChange={v => set('name', v)} placeholder="ej: IBP Producción" />
         <Field label="API URL" value={form.url} onChange={v => set('url', v)} placeholder="https://my400444-api.scmibp.ondemand.com/..." mono />
-        <Field label="Usuario" value={form.user} onChange={v => set('user', v)} placeholder="COMM_USER" mono />
+        <Field label="Usuario comunicación" value={form.user} onChange={v => set('user', v)} placeholder="COM_0326_USER" mono />
         <Field label={initial ? 'Contraseña (dejar vacío para mantener)' : 'Contraseña'} value={form.password} onChange={v => set('password', v)} type="password" placeholder={initial ? '••••••••' : 'Contraseña'} />
+        <Field label="Usuario de negocio (JobUser)" value={form.jobUser} onChange={v => set('jobUser', v)} placeholder="EXT_GAHUMADA" mono />
       </div>
       {error && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--red)' }}>✕ {error}</div>}
       <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>

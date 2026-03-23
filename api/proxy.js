@@ -50,8 +50,11 @@ export default async function handler(req, res) {
     serviceRoot = conn.url
     user = conn.user
     password = decrypt(conn.password)
-    // Inject JobUser param using the connection user (stays server-side)
-    if (injectJobUser) path = (path || '') + `&JobUser=%27${encodeURIComponent(conn.user)}%27`
+    // Inject JobUser param using the business user (stays server-side)
+    if (injectJobUser) {
+      const jobUser = conn.jobUser || conn.user
+      path = (path || '') + `&JobUser=%27${encodeURIComponent(jobUser)}%27`
+    }
     url = conn.url + (path || '')
   }
 
