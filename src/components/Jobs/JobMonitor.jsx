@@ -14,8 +14,8 @@ const PALETTE = [
   { bg: 'rgba(156,163,175,.15)', color: '#9ca3af', border: 'rgba(156,163,175,.3)' },
 ]
 
-// Status codes that allow cancellation — SAP marks active/running jobs with 'A'
-const CANCELABLE_STATUSES = ['A', 'R', 'Y']
+// P=Liberada, R=En tratamiento, S=Programados
+const CANCELABLE_STATUSES = ['P', 'R', 'S']
 
 function toSapTs(date) {
   const p = n => String(n).padStart(2, '0')
