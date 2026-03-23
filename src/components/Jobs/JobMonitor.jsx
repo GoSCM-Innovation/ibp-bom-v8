@@ -91,13 +91,15 @@ export default function JobMonitor({ connection }) {
   const fromTs = toSapTs(new Date(fromDate))
   const toTs   = toSapTs(new Date(toDate))
 
-  const filtered = [...rows].sort((a, b) => {
+  const sorted = [...rows].sort((a, b) => {
     const av = a.JobPlannedStartDateTime || '', bv = b.JobPlannedStartDateTime || ''
-    return bv.localeCompare(av) // más reciente primero
-  }).filter(r => {
+    return bv.localeCompare(av)
+  })
+
+  // Filtrado por fecha y búsqueda (sin status) — base para conteos
+  const filteredBase = sorted.filter(r => {
     const ts = r.JobPlannedStartDateTime || ''
     if (ts && (ts < fromTs || ts > toTs)) return false
-    if (activeStatus !== 'ALL' && r.JobStatus !== activeStatus) return false
     if (search.trim()) {
       const q = search.toLowerCase()
       return Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))
@@ -105,9 +107,14 @@ export default function JobMonitor({ connection }) {
     return true
   })
 
-  // Count per status for badges
+  // Conteos sobre el subconjunto visible (fecha + búsqueda)
   const countByStatus = {}
-  rows.forEach(r => { countByStatus[r.JobStatus] = (countByStatus[r.JobStatus] || 0) + 1 })
+  filteredBase.forEach(r => { countByStatus[r.JobStatus] = (countByStatus[r.JobStatus] || 0) + 1 })
+
+  // Filtrado final incluyendo status
+  const filtered = filteredBase.filter(r =>
+    activeStatus === 'ALL' || r.JobStatus === activeStatus
+  )
 
   function statusColor(code) {
     return statuses.find(s => s.JobStatus === code)?.color || PALETTE[7]
@@ -196,7 +203,7 @@ export default function JobMonitor({ connection }) {
       {/* Status filter tabs */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexShrink: 0, flexWrap: 'wrap' }}>
         <FilterBtn active={activeStatus === 'ALL'} onClick={() => setActiveStatus('ALL')}
-          label="Todos" count={rows.length} color={PALETTE[3]} />
+          label="Todos" count={filteredBase.length} color={PALETTE[3]} />
         {statuses.map(s => (
           <FilterBtn key={s.JobStatus} active={activeStatus === s.JobStatus}
             onClick={() => setActiveStatus(s.JobStatus)}
