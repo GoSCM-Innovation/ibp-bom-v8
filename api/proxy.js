@@ -38,7 +38,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  let { connectionId, path, url, user, password, method = 'GET', body } = req.body
+  let { connectionId, path, url, user, password, method = 'GET', body, injectJobUser } = req.body
   let serviceRoot = null
 
   // Mode: connectionId + path → resolve credentials from Redis
@@ -48,9 +48,11 @@ export default async function handler(req, res) {
     const conn = connections.find(c => c.id === connectionId)
     if (!conn) return res.status(404).json({ error: 'Conexión no encontrada' })
     serviceRoot = conn.url
-    url = conn.url + (path || '')
     user = conn.user
     password = decrypt(conn.password)
+    // Inject JobUser param using the connection user (stays server-side)
+    if (injectJobUser) path = (path || '') + `&JobUser=%27${encodeURIComponent(conn.user)}%27`
+    url = conn.url + (path || '')
   }
 
   if (!url || !user || !password) return res.status(400).json({ error: 'Missing url, user or password' })

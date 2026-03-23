@@ -24,6 +24,7 @@ function EjecutarBtn({ row, connectionId }) {
           connectionId,
           path: `/JobSchedule?JobTemplateName=${encodeODataString(row.JobTemplateName)}&JobText=${encodeODataString(label)}`,
           method: 'POST',
+          injectJobUser: true,
         }),
       })
       const data = await r.json()
