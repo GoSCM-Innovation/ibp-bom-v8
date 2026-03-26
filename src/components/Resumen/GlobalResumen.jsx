@@ -42,6 +42,8 @@ export default function GlobalResumen({ connections }) {
   const [lastRefresh, setLastRefresh] = useState(null)
   const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
+  const addLogRef = useRef(addLog)
+  addLogRef.current = addLog
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
   const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
@@ -61,7 +63,7 @@ export default function GlobalResumen({ connections }) {
         })
         const data = await res.json()
         const duration = Math.round(performance.now() - start)
-        addLog({ method: 'POST', path: `/JobHeaderSet (${conn.name})`, status: res.status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} rows` })
+        addLogRef.current({ method: 'POST', path: `/JobHeaderSet (${conn.name})`, status: res.status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} rows` })
         if (data.error) {
           results[conn.id] = { rows: [], error: data.error, loading: false }
         } else {
@@ -69,13 +71,13 @@ export default function GlobalResumen({ connections }) {
         }
       } catch (e) {
         const duration = Math.round(performance.now() - start)
-        addLog({ method: 'POST', path: `/JobHeaderSet (${conn.name})`, status: 0, duration, detail: e.message })
+        addLogRef.current({ method: 'POST', path: `/JobHeaderSet (${conn.name})`, status: 0, duration, detail: e.message })
         results[conn.id] = { rows: [], error: e.message, loading: false }
       }
     }))
     setConnData(results)
     setLastRefresh(new Date())
-  }, [connections, addLog])
+  }, [connections])
 
   useEffect(() => {
     if (connections.length === 0) return

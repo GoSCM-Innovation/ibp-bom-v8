@@ -70,6 +70,8 @@ export default function JobMonitor({ connection }) {
   const resizing = useRef(null)
   const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
+  const addLogRef = useRef(addLog)
+  addLogRef.current = addLog
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
   const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
@@ -85,9 +87,9 @@ export default function JobMonitor({ connection }) {
     })
     const data = await res.json()
     const duration = Math.round(performance.now() - start)
-    addLog({ method: opts.method || 'POST', path, status: res.status, duration, detail: data.error || 'OK' })
+    addLogRef.current({ method: opts.method || 'POST', path, status: res.status, duration, detail: data.error || 'OK' })
     return data
-  }, [connection.id, addLog])
+  }, [connection.id])
 
   // Load status codes once
   useEffect(() => {
