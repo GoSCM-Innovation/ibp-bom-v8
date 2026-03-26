@@ -79,10 +79,7 @@ export default function Header({ onMenuToggle }) {
         <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,.12)' }} />
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '.01em', lineHeight: 1.2 }}>
-            SAP IBP Orchestator
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2 }}>
-            Control over all IBP Customers, all in one
+            Customer Success Control Tower
           </div>
         </div>
       </div>
@@ -117,11 +114,12 @@ export default function Header({ onMenuToggle }) {
                 <div key={i} style={{
                   background: 'rgba(255,255,255,.04)', borderRadius: 7,
                   border: '1px solid rgba(255,255,255,.07)', padding: '10px 14px',
+                  overflow: 'hidden',
                 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 4 }}>
-                    {i + 1}. {r.title}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 4, wordBreak: 'break-word' }}>
+                    {r.title}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>{r.detail}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5, wordBreak: 'break-word', overflowWrap: 'break-word' }}>{r.detail}</div>
                 </div>
               ))}
             </div>

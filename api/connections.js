@@ -67,9 +67,9 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { name, url, user, password, jobUser, logoUrl } = req.body
+      const { name, url, user, password, jobUser, logoUrl, ambiente } = req.body
       if (!name || !url || !user || !password) return res.status(400).json({ error: 'Faltan campos obligatorios' })
-      const newConn = { id: crypto.randomUUID(), name, url, user, password: encrypt(password), jobUser: jobUser || '', logoUrl: logoUrl || '' }
+      const newConn = { id: crypto.randomUUID(), name, url, user, password: encrypt(password), jobUser: jobUser || '', logoUrl: logoUrl || '', ambiente: ambiente || '' }
       connections.push(newConn)
       await redisSet(KEY, connections)
       const { password: _, ...safe } = newConn
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
     if (req.method === 'PUT') {
       const idx = connections.findIndex(c => c.id === id)
       if (idx === -1) return res.status(404).json({ error: 'No encontrado' })
-      const { name, url, user, password, jobUser, logoUrl } = req.body
+      const { name, url, user, password, jobUser, logoUrl, ambiente } = req.body
       connections[idx] = {
         ...connections[idx],
         ...(name && { name }),
@@ -91,6 +91,7 @@ export default async function handler(req, res) {
         ...(password && { password: encrypt(password) }),
         ...(jobUser !== undefined && { jobUser }),
         ...(logoUrl !== undefined && { logoUrl }),
+        ...(ambiente !== undefined && { ambiente }),
       }
       await redisSet(KEY, connections)
       const { password: _, ...safe } = connections[idx]

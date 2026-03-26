@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import TechLogs, { useTechLogs } from '../TechLogs'
 
 const JOB_PATH = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
@@ -78,16 +79,23 @@ export default function Jobs({ connection }) {
   const [colWidths, setColWidths] = useState({})
   const [search, setSearch] = useState('')
   const resizing = useRef(null)
+  const [logs, addLog] = useTechLogs()
 
   useEffect(() => {
     setLoading(true); setError(''); setRows([]); setSearch('')
+    const start = performance.now()
     fetch('/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ connectionId: connection.id, path: JOB_PATH }),
     })
-      .then(r => r.json())
-      .then(data => {
+      .then(r => {
+        const status = r.status
+        return r.json().then(data => ({ data, status }))
+      })
+      .then(({ data, status }) => {
+        const duration = Math.round(performance.now() - start)
+        addLog({ method: 'POST', path: JOB_PATH, status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} templates` })
         if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
         setRows(data?.d?.results ?? data?.value ?? [])
       })
@@ -238,6 +246,8 @@ export default function Jobs({ connection }) {
           </table>
         </div>
       )}
+
+      <TechLogs logs={logs} />
     </div>
   )
 }

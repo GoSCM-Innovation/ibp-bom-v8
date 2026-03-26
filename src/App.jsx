@@ -3,6 +3,7 @@ import Header from './components/Header'
 import Sidebar from './components/Sidebar/Sidebar'
 import Connections from './components/Connections/Connections'
 import SystemView from './components/System/SystemView'
+import GlobalResumen from './components/Resumen/GlobalResumen'
 import './App.css'
 
 function useIsMobile() {
@@ -53,6 +54,19 @@ export default function App() {
 
   const activeConn = connections.find(c => c.id === activeId)
 
+  function renderMain() {
+    if (activeId === 'connections') {
+      return <Connections connections={connections} onSaved={fetchConnections} onDeleted={handleDeleted} onSelect={handleSelect} />
+    }
+    if (activeId === 'resumen-general') {
+      return <GlobalResumen connections={connections} />
+    }
+    if (activeConn) {
+      return <SystemView connection={activeConn} />
+    }
+    return null
+  }
+
   return (
     <>
       <Header onMenuToggle={isMobile ? () => setSidebarOpen(p => !p) : null} />
@@ -76,10 +90,7 @@ export default function App() {
         />
 
         <main style={{ flex: 1, overflow: 'auto', background: 'var(--bg)' }}>
-          {activeId === 'connections'
-            ? <Connections connections={connections} onSaved={fetchConnections} onDeleted={handleDeleted} onSelect={handleSelect} />
-            : activeConn ? <SystemView connection={activeConn} /> : null
-          }
+          {renderMain()}
         </main>
       </div>
     </>

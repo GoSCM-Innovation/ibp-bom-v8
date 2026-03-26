@@ -3,6 +3,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
+import TechLogs, { useTechLogs } from '../TechLogs'
 
 const DEFAULT_HOURS = 24
 const REFRESH_MS = 5 * 60 * 1000 // 5 minutos
@@ -49,19 +50,25 @@ export default function Resumen({ connection }) {
   const [error, setError]         = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
   const timerRef = useRef(null)
+  const [logs, addLog] = useTechLogs()
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
   const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
   const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
   const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
 
-  const proxyPost = useCallback(path =>
-    fetch('/api/proxy', {
+  const proxyPost = useCallback(async (path) => {
+    const start = performance.now()
+    const res = await fetch('/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ connectionId: connection.id, path }),
-    }).then(r => r.json())
-  , [connection.id])
+    })
+    const data = await res.json()
+    const duration = Math.round(performance.now() - start)
+    addLog({ method: 'POST', path, status: res.status, duration, detail: data.error || 'OK' })
+    return data
+  }, [connection.id, addLog])
 
   useEffect(() => {
     proxyPost('/JobStatusInfoSet').then(data => {
@@ -93,7 +100,7 @@ export default function Resumen({ connection }) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code
   }
 
-  // Filter — mismo criterio que Job Monitor
+  // Filter
   const fromTs = toSapTs(new Date(fromDate))
   const toTs   = toSapTs(new Date(toDate))
   const filtered = rows.filter(r => {
@@ -111,14 +118,14 @@ export default function Resumen({ connection }) {
   const warned   = filtered.filter(r => r.JobStatus === 'W').length
   const successRate = total > 0 ? Math.round(((finished + warned) / total) * 100) : 0
 
-  // Donut — by status
+  // Donut
   const statusCount = {}
   filtered.forEach(r => { statusCount[r.JobStatus] = (statusCount[r.JobStatus] || 0) + 1 })
   const donutData = Object.entries(statusCount)
     .map(([code, count]) => ({ name: statusLabel(code), value: count, code }))
     .sort((a, b) => b.value - a.value)
 
-  // Bars — jobs per day
+  // Bars
   const dayMap = {}
   filtered.forEach(r => {
     const d = dayLabel(r.JobPlannedStartDateTime)
@@ -129,7 +136,7 @@ export default function Resumen({ connection }) {
   })
   const barData = Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day)).slice(-14)
 
-  // Top jobs ejecutados
+  // Top jobs
   const tplMap = {}
   filtered.forEach(r => {
     const k = r.JobText || '—'
@@ -145,7 +152,7 @@ export default function Resumen({ connection }) {
   })
   const topUsers = Object.entries(userMap).sort((a,b) => b[1]-a[1]).slice(0,5)
 
-  // Top 5 templates by average duration (only F/W jobs with both start+end)
+  // Top duration
   const durationMap = {}
   filtered.forEach(r => {
     if (!['F','W'].includes(r.JobStatus)) return
@@ -186,6 +193,7 @@ export default function Resumen({ connection }) {
   if (error) return (
     <div style={{ padding: 32 }}>
       <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>
+      <TechLogs logs={logs} />
     </div>
   )
 
@@ -203,7 +211,6 @@ export default function Resumen({ connection }) {
             )}
           </div>
         </div>
-        {/* Date range + refresh */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
           <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
@@ -215,7 +222,7 @@ export default function Resumen({ connection }) {
           <span style={{
             fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
             padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-          }}>🔄 Auto-refresh cada 5 min</span>
+          }}>Auto-refresh cada 5 min</span>
         </div>
       </div>
 
@@ -231,8 +238,6 @@ export default function Resumen({ connection }) {
 
       {/* Charts row */}
       <div className="grid-charts">
-
-        {/* Donut */}
         <div style={cardStyle}>
           <div style={cardTitle}>Distribución por estado</div>
           {donutData.length === 0 ? <Empty /> : (
@@ -261,7 +266,6 @@ export default function Resumen({ connection }) {
           </div>
         </div>
 
-        {/* Bars */}
         <div style={cardStyle}>
           <div style={cardTitle}>Jobs por día</div>
           {barData.length === 0 ? <Empty /> : (
@@ -270,9 +274,7 @@ export default function Resumen({ connection }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="day" tick={{ fontSize: 10, fill: 'var(--text2)' }} />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text2)' }} allowDecimals={false} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }}
-                />
+                <Tooltip contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} />
                 <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text2)' }} />
                 <Bar dataKey="Finalizados" stackId="a" fill="#34d399" radius={[0,0,0,0]} />
                 <Bar dataKey="Fallidos"    stackId="a" fill="#ff6b6b" radius={[0,0,0,0]} />
@@ -283,10 +285,8 @@ export default function Resumen({ connection }) {
         </div>
       </div>
 
-      {/* Bottom rows — 2×2 */}
+      {/* Bottom rows */}
       <div className="grid-stats">
-
-        {/* Top templates */}
         <div style={cardStyle}>
           <div style={cardTitle}>Top jobs ejecutados</div>
           {topTemplates.length === 0 ? <Empty /> : topTemplates.map(([name, count], i) => (
@@ -294,7 +294,6 @@ export default function Resumen({ connection }) {
           ))}
         </div>
 
-        {/* Top users */}
         <div style={cardStyle}>
           <div style={cardTitle}>Usuarios más activos</div>
           {topUsers.length === 0 ? <Empty /> : topUsers.map(([name, count], i) => (
@@ -302,7 +301,6 @@ export default function Resumen({ connection }) {
           ))}
         </div>
 
-        {/* Top duration */}
         <div style={cardStyle}>
           <div style={cardTitle}>Top jobs más lentos (prom.)</div>
           {topDuration.length === 0
@@ -320,7 +318,6 @@ export default function Resumen({ connection }) {
           </div>
         </div>
 
-        {/* Recent failed */}
         <div style={cardStyle}>
           <div style={cardTitle}>Últimos jobs fallidos</div>
           {recentFailed.length === 0
@@ -339,6 +336,8 @@ export default function Resumen({ connection }) {
           }
         </div>
       </div>
+
+      <TechLogs logs={logs} />
     </div>
   )
 }

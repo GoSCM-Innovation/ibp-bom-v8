@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import TechLogs, { useTechLogs } from '../TechLogs'
 
 const REFRESH_MS = 30000
 const DEFAULT_HOURS = 24
@@ -68,19 +69,25 @@ export default function JobMonitor({ connection }) {
   const [restartModal, setRestartModal] = useState(false)
   const resizing = useRef(null)
   const timerRef = useRef(null)
+  const [logs, addLog] = useTechLogs()
 
   const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
   const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
   const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
   const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
 
-  const proxyPost = useCallback((path, opts = {}) =>
-    fetch('/api/proxy', {
+  const proxyPost = useCallback(async (path, opts = {}) => {
+    const start = performance.now()
+    const res = await fetch('/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ connectionId: connection.id, path, ...opts }),
-    }).then(r => r.json())
-  , [connection.id])
+    })
+    const data = await res.json()
+    const duration = Math.round(performance.now() - start)
+    addLog({ method: opts.method || 'POST', path, status: res.status, duration, detail: data.error || 'OK' })
+    return data
+  }, [connection.id, addLog])
 
   // Load status codes once
   useEffect(() => {
@@ -406,6 +413,8 @@ export default function JobMonitor({ connection }) {
           </div>
         </div>
       )}
+
+      <TechLogs logs={logs} />
 
       {/* Restart mode modal */}
       {restartModal && (

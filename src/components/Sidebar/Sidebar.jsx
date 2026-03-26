@@ -27,7 +27,7 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
       }}>
         {expanded && (
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-            Conexiones
+            Navegación
           </span>
         )}
         <button onClick={onToggle} style={{
@@ -42,9 +42,21 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
       <SidebarItem
         id="connections"
         label="Conexiones"
+        icon="🔗"
         active={activeId === 'connections'}
         expanded={expanded}
         onClick={() => onSelect('connections')}
+        accent
+      />
+
+      {/* Resumen general link */}
+      <SidebarItem
+        id="resumen-general"
+        label="Resumen"
+        icon="📊"
+        active={activeId === 'resumen-general'}
+        expanded={expanded}
+        onClick={() => onSelect('resumen-general')}
         accent
       />
 
@@ -57,11 +69,13 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading
           ? expanded && <div style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text3)' }}>Cargando...</div>
-          : connections.map(c => (
+          : connections.map((c, idx) => (
             <SidebarItem
               key={c.id}
               id={c.id}
               label={c.name}
+              icon={String(idx + 1)}
+              numberIcon
               active={activeId === c.id}
               expanded={expanded}
               onClick={() => onSelect(c.id)}
@@ -86,12 +100,13 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
   )
 }
 
-function SidebarItem({ label, active, expanded, onClick, accent }) {
+function SidebarItem({ label, icon, numberIcon, active, expanded, onClick, accent }) {
   return (
     <button onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center',
       padding: '9px 14px',
       justifyContent: 'flex-start',
+      gap: 10,
       background: active ? 'rgba(247,168,0,.1)' : 'none',
       border: 'none',
       borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
@@ -103,10 +118,22 @@ function SidebarItem({ label, active, expanded, onClick, accent }) {
       onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'none' }}
       title={!expanded ? label : undefined}
     >
-      {expanded
-        ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-        : <span style={{ fontSize: 11 }}>{label?.slice(0, 2)}</span>
-      }
+      {/* Icon */}
+      {numberIcon ? (
+        <span style={{
+          width: 22, height: 22, borderRadius: '50%',
+          background: active ? 'rgba(247,168,0,.2)' : 'rgba(255,255,255,.08)',
+          border: `1px solid ${active ? 'rgba(247,168,0,.4)' : 'rgba(255,255,255,.12)'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 10, fontWeight: 700, flexShrink: 0,
+          color: active ? 'var(--accent)' : 'var(--text2)',
+        }}>{icon}</span>
+      ) : (
+        <span style={{ fontSize: 14, flexShrink: 0, width: 22, textAlign: 'center' }}>{icon}</span>
+      )}
+      {expanded && (
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      )}
     </button>
   )
 }
