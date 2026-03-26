@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import ConnectionForm from './ConnectionForm'
 import ConnectionAvatar from './ConnectionAvatar'
+import TechLogs, { useTechLogs } from '../TechLogs'
 
 export default function Connections({ connections, onSaved, onDeleted, onSelect }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
   const [testing, setTesting] = useState(null)
   const [testResult, setTestResult] = useState({})
+  const [logs, addLog] = useTechLogs()
 
   function handleEdit(conn) {
     setEditing(conn)
@@ -37,14 +39,19 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
   async function handleTest(conn) {
     setTesting(conn.id)
     setTestResult(p => ({ ...p, [conn.id]: null }))
+    const start = performance.now()
     try {
       const res = await fetch('/api/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ connectionId: conn.id, path: '/$metadata' }),
       })
+      const duration = Math.round(performance.now() - start)
+      addLog({ method: 'POST', path: `/$metadata (${conn.name})`, status: res.status, duration, detail: res.ok ? 'Conexión exitosa' : 'Error de conexión' })
       setTestResult(p => ({ ...p, [conn.id]: res.ok ? 'ok' : 'error' }))
-    } catch {
+    } catch (e) {
+      const duration = Math.round(performance.now() - start)
+      addLog({ method: 'POST', path: `/$metadata (${conn.name})`, status: 0, duration, detail: e.message })
       setTestResult(p => ({ ...p, [conn.id]: 'error' }))
     } finally {
       setTesting(null)
@@ -104,7 +111,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
 
       {/* Connection cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {connections.map(conn => (
+        {connections.map((conn, idx) => (
           <div key={conn.id} style={{
             background: 'var(--bg2)', border: '1px solid var(--border)',
             borderRadius: 10, padding: '16px 20px',
@@ -122,6 +129,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
               </div>
               <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
                 Usuario: {conn.user}
+                {conn.ambiente && <span style={{ marginLeft: 8, color: conn.ambiente === 'Producción' ? 'var(--red)' : 'var(--cyan)', fontWeight: 600 }}>● {conn.ambiente}</span>}
               </div>
             </div>
 
@@ -155,6 +163,8 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
           </div>
         ))}
       </div>
+
+      <TechLogs logs={logs} />
     </div>
   )
 }
