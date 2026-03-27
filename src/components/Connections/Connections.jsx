@@ -124,13 +124,6 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
             {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{conn.name}</div>
-              <div style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {conn.url}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
-                Usuario: {conn.user}
-                {conn.ambiente && <span style={{ marginLeft: 8, color: conn.ambiente === 'Producción' ? 'var(--red)' : 'var(--cyan)', fontWeight: 600 }}>● {conn.ambiente}</span>}
-              </div>
             </div>
 
             {/* Test result */}
