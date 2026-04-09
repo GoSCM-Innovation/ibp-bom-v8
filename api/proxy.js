@@ -38,24 +38,31 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  let { connectionId, path, url, user, password, method = 'GET', body, injectJobUser } = req.body
+  let { connectionId, path, url, user, password, method = 'GET', body, injectJobUser, com } = req.body
   let serviceRoot = null
 
-  // Mode: connectionId + path → resolve credentials from Redis
   if (connectionId) {
     if (!REDIS_URL || !REDIS_TOKEN) return res.status(500).json({ error: 'Redis no configurado' })
     const connections = await redisGet(KEY)
     const conn = connections.find(c => c.id === connectionId)
     if (!conn) return res.status(404).json({ error: 'Conexión no encontrada' })
-    serviceRoot = conn.url
-    user = conn.user
-    password = decrypt(conn.password)
-    // Inject JobUser param using the business user (stays server-side)
+
+    const agreementKey = com === '0068' ? 'com0068' : 'com0326'
+    const agreement = conn[agreementKey]
+
+    if (!agreement?.url || !agreement?.user || !agreement?.password) {
+      return res.status(400).json({ error: `SAP_COM_${com === '0068' ? '0068' : '0326'} no configurado para esta conexión` })
+    }
+
+    serviceRoot = agreement.url
+    user = agreement.user
+    password = decrypt(agreement.password)
+
     if (injectJobUser) {
-      const jobUser = conn.jobUser || conn.user
+      const jobUser = conn.jobUser || agreement.user
       path = (path || '') + `&JobUser=%27${encodeURIComponent(jobUser)}%27`
     }
-    url = conn.url + (path || '')
+    url = agreement.url + (path || '')
   }
 
   if (!url || !user || !password) return res.status(400).json({ error: 'Missing url, user or password' })
@@ -71,14 +78,12 @@ export default async function handler(req, res) {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
     const baseHeaders = { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json, application/xml, */*', 'Content-Type': 'application/json' }
 
-    // For POST/PUT/DELETE: fetch CSRF token + session cookies first
     let csrfToken = null
     let sessionCookies = ''
     if (method !== 'GET') {
       const csrfUrl = serviceRoot || url.split('?')[0]
       const csrfResp = await fetch(csrfUrl, { method: 'GET', headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' } })
       csrfToken = csrfResp.headers.get('x-csrf-token')
-      // Capture session cookies — SAP ties the CSRF token to the session
       const setCookies = csrfResp.headers.getSetCookie?.() ?? []
       if (setCookies.length > 0) {
         sessionCookies = setCookies.map(c => c.split(';')[0]).join('; ')

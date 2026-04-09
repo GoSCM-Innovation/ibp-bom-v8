@@ -40,11 +40,12 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
     setTesting(conn.id)
     setTestResult(p => ({ ...p, [conn.id]: null }))
     const start = performance.now()
+    const com = conn.com0326?.url ? '0326' : conn.com0068?.url ? '0068' : '0326'
     try {
       const res = await fetch('/api/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: conn.id, path: '/$metadata' }),
+        body: JSON.stringify({ connectionId: conn.id, path: '/$metadata', com }),
       })
       const duration = Math.round(performance.now() - start)
       addLog({ method: 'POST', path: `/$metadata (${conn.name})`, status: res.status, duration, detail: res.ok ? 'Conexión exitosa' : 'Error de conexión' })
