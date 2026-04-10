@@ -4,6 +4,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
 import TechLogs, { useTechLogs } from '../TechLogs'
+import {
+  toSapTs, formatSapTsShort, toInputDate, inputDateToDate,
+  getTzMode, setTzMode as saveTzMode, getTzLabel,
+} from '../../utils/dateUtils'
 
 const REFRESH_MS = 5 * 60 * 1000
 const DEFAULT_HOURS = 24
@@ -23,32 +27,26 @@ const STATUS_LABELS = {
 
 const CONN_COLORS = ['#3b82f6', '#34d399', '#f97316', '#8b5cf6', '#06b6d4', '#ff6b6b', '#fbbf24', '#a78bfa']
 
-function toSapTs(date) {
-  const p = n => String(n).padStart(2, '0')
-  return `${date.getFullYear()}${p(date.getMonth()+1)}${p(date.getDate())}${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}.0000000`
-}
-
-function toInputDate(date) {
-  return date.toISOString().slice(0, 16)
-}
-
-function formatSapTs(ts) {
-  if (!ts || ts.length < 14) return '—'
-  return `${ts.slice(6,8)}/${ts.slice(4,6)}/${ts.slice(0,4)} ${ts.slice(8,10)}:${ts.slice(10,12)}`
-}
-
 export default function GlobalResumen({ connections }) {
   const [connData, setConnData] = useState({}) // { connId: { rows, error, loading } }
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [tzMode, setTzModeState]      = useState(() => getTzMode())
   const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
   const addLogRef = useRef(addLog)
   addLogRef.current = addLog
 
-  const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
-  const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
-  const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
-  const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
+  const [fromDate, setFromDate] = useState(() => toInputDate(new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000), getTzMode()))
+  const [toDate,   setToDate]   = useState(() => toInputDate(new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000), getTzMode()))
+
+  function handleTzToggle(newMode) {
+    const fromD = inputDateToDate(fromDate, tzMode)
+    const toD   = inputDateToDate(toDate, tzMode)
+    saveTzMode(newMode)
+    setTzModeState(newMode)
+    setFromDate(toInputDate(fromD, newMode))
+    setToDate(toInputDate(toD, newMode))
+  }
 
   const loadAll = useCallback(async () => {
     const results = {}
@@ -86,9 +84,9 @@ export default function GlobalResumen({ connections }) {
     return () => clearInterval(timerRef.current)
   }, [loadAll, connections.length])
 
-  // Filter by date
-  const fromTs = toSapTs(new Date(fromDate))
-  const toTs   = toSapTs(new Date(toDate))
+  // Filter by date — siempre en UTC para coincidir con SAP
+  const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
+  const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
 
   function filterRows(rows) {
     return rows.filter(r => {
@@ -187,6 +185,7 @@ export default function GlobalResumen({ connections }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TzToggle mode={tzMode} onToggle={handleTzToggle} />
           <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
           <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
           <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
@@ -341,7 +340,7 @@ export default function GlobalResumen({ connections }) {
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
                   <span>{r.JobCreatedByFormattedName || r.JobCreatedBy}</span>
-                  <span>{formatSapTs(r.JobPlannedStartDateTime)}</span>
+                  <span>{formatSapTsShort(r.JobPlannedStartDateTime, tzMode)}</span>
                 </div>
               </div>
             ))
@@ -426,4 +425,29 @@ const tdStyle = {
 const statusBadge = {
   display: 'inline-block', padding: '2px 8px', borderRadius: 20,
   fontSize: 10, fontWeight: 700,
+}
+
+function TzToggle({ mode, onToggle }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
+      <button
+        onClick={() => onToggle('utc')}
+        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'utc' ? 'var(--border2)' : 'transparent',
+          color: mode === 'utc' ? '#fff' : 'var(--text3)',
+        }}
+      >UTC</button>
+      <button
+        onClick={() => onToggle('local')}
+        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'local' ? 'var(--border2)' : 'transparent',
+          color: mode === 'local' ? '#fff' : 'var(--text3)',
+        }}
+      >{getTzLabel()}</button>
+    </div>
+  )
 }

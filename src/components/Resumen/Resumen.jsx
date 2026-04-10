@@ -4,6 +4,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
 import TechLogs, { useTechLogs } from '../TechLogs'
+import {
+  toSapTs, formatSapTsShort, parseSapTs, dayLabel,
+  toInputDate, inputDateToDate,
+  getTzMode, setTzMode as saveTzMode, getTzLabel,
+} from '../../utils/dateUtils'
 
 const DEFAULT_HOURS = 24
 const REFRESH_MS = 5 * 60 * 1000 // 5 minutos
@@ -15,49 +20,29 @@ const STATUS_COLORS = {
   X: '#374151', k: '#6b7280',
 }
 
-function toSapTs(date) {
-  const p = n => String(n).padStart(2, '0')
-  return `${date.getFullYear()}${p(date.getMonth()+1)}${p(date.getDate())}${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}.0000000`
-}
-
-function formatSapTs(ts) {
-  if (!ts || ts.length < 14) return '—'
-  return `${ts.slice(6,8)}/${ts.slice(4,6)}/${ts.slice(0,4)} ${ts.slice(8,10)}:${ts.slice(10,12)}`
-}
-
-function parseSapTs(ts) {
-  if (!ts || ts.length < 8) return null
-  return new Date(
-    parseInt(ts.slice(0,4)), parseInt(ts.slice(4,6))-1, parseInt(ts.slice(6,8)),
-    parseInt(ts.slice(8,10)||0), parseInt(ts.slice(10,12)||0)
-  )
-}
-
-function dayLabel(ts) {
-  const d = parseSapTs(ts)
-  if (!d) return '?'
-  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`
-}
-
-function toInputDate(date) {
-  return date.toISOString().slice(0, 16)
-}
-
 export default function Resumen({ connection }) {
   const [rows, setRows]           = useState([])
   const [statuses, setStatuses]   = useState([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [tzMode, setTzModeState]      = useState(() => getTzMode())
   const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
   const addLogRef = useRef(addLog)
   addLogRef.current = addLog
 
-  const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
-  const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
-  const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
-  const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
+  const [fromDate, setFromDate] = useState(() => toInputDate(new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000), getTzMode()))
+  const [toDate,   setToDate]   = useState(() => toInputDate(new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000), getTzMode()))
+
+  function handleTzToggle(newMode) {
+    const fromD = inputDateToDate(fromDate, tzMode)
+    const toD   = inputDateToDate(toDate, tzMode)
+    saveTzMode(newMode)
+    setTzModeState(newMode)
+    setFromDate(toInputDate(fromD, newMode))
+    setToDate(toInputDate(toD, newMode))
+  }
 
   const proxyPost = useCallback(async (path) => {
     const start = performance.now()
@@ -102,9 +87,9 @@ export default function Resumen({ connection }) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code
   }
 
-  // Filter
-  const fromTs = toSapTs(new Date(fromDate))
-  const toTs   = toSapTs(new Date(toDate))
+  // Filter — siempre en UTC para coincidir con SAP
+  const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
+  const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
   const filtered = rows.filter(r => {
     const ts = r.JobPlannedStartDateTime || ''
     if (ts && (ts < fromTs || ts > toTs)) return false
@@ -130,7 +115,7 @@ export default function Resumen({ connection }) {
   // Bars
   const dayMap = {}
   filtered.forEach(r => {
-    const d = dayLabel(r.JobPlannedStartDateTime)
+    const d = dayLabel(r.JobPlannedStartDateTime, tzMode)
     if (!dayMap[d]) dayMap[d] = { day: d, Finalizados: 0, Fallidos: 0, Otros: 0 }
     if (r.JobStatus === 'F' || r.JobStatus === 'W') dayMap[d].Finalizados++
     else if (r.JobStatus === 'A' || r.JobStatus === 'U') dayMap[d].Fallidos++
@@ -214,6 +199,7 @@ export default function Resumen({ connection }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TzToggle mode={tzMode} onToggle={handleTzToggle} />
           <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
           <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
           <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
@@ -331,7 +317,7 @@ export default function Resumen({ connection }) {
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
                   <span>{r.JobCreatedByFormattedName || r.JobCreatedBy}</span>
-                  <span>{formatSapTs(r.JobPlannedStartDateTime)}</span>
+                  <span>{formatSapTsShort(r.JobPlannedStartDateTime, tzMode)}</span>
                 </div>
               </div>
             ))
@@ -387,6 +373,31 @@ const cardStyle = {
 const cardTitle = {
   fontSize: 11, fontWeight: 700, color: 'var(--text2)',
   textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 12,
+}
+
+function TzToggle({ mode, onToggle }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
+      <button
+        onClick={() => onToggle('utc')}
+        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'utc' ? 'var(--border2)' : 'transparent',
+          color: mode === 'utc' ? '#fff' : 'var(--text3)',
+        }}
+      >UTC</button>
+      <button
+        onClick={() => onToggle('local')}
+        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'local' ? 'var(--border2)' : 'transparent',
+          color: mode === 'local' ? '#fff' : 'var(--text3)',
+        }}
+      >{getTzLabel()}</button>
+    </div>
+  )
 }
 
 const inputStyle = {

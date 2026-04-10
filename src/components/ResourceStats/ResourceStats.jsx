@@ -3,6 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
+import { getTzMode, setTzMode as saveTzMode, getTzLabel } from '../../utils/dateUtils'
 
 const RANGES = [
   { label: 'Última hora',    hours: 1   },
@@ -42,7 +43,13 @@ export default function ResourceStats({ connection }) {
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [tzMode, setTzModeState]      = useState(() => getTzMode())
   const timerRef = useRef(null)
+
+  function handleTzToggle(newMode) {
+    saveTzMode(newMode)
+    setTzModeState(newMode)
+  }
 
   const load = useCallback(async () => {
     try {
@@ -94,9 +101,16 @@ export default function ResourceStats({ connection }) {
 
   function formatTick(ts) {
     const d = new Date(ts)
-    if (range.hours <= 4)  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    if (range.hours <= 24) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    const tz = tzMode === 'utc' ? 'UTC' : undefined
+    if (range.hours <= 24) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz })
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: tz })
+  }
+
+  function formatTooltipLabel(ts) {
+    const d = new Date(ts)
+    const tz = tzMode === 'utc' ? 'UTC' : undefined
+    const label = d.toLocaleString([], { timeZone: tz })
+    return `${label} ${tzMode === 'utc' ? 'UTC' : getTzLabel()}`
   }
 
   function handleRefresh() { setLoading(true); load() }
@@ -114,6 +128,7 @@ export default function ResourceStats({ connection }) {
         </div>
 
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TzToggle mode={tzMode} onToggle={handleTzToggle} />
           {RANGES.map(r => (
             <button key={r.hours} onClick={() => setRange(r)} style={{
               padding: '5px 11px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
@@ -174,7 +189,7 @@ export default function ResourceStats({ connection }) {
                 />
                 <Tooltip
                   contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
-                  labelFormatter={v => new Date(v).toLocaleString()}
+                  labelFormatter={formatTooltipLabel}
                   formatter={(v, name) => [`${v}%`, name === 'cpu' ? 'CPU' : 'Memoria']}
                 />
                 <Legend
@@ -188,6 +203,31 @@ export default function ResourceStats({ connection }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function TzToggle({ mode, onToggle }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
+      <button
+        onClick={() => onToggle('utc')}
+        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'utc' ? 'var(--border2)' : 'transparent',
+          color: mode === 'utc' ? '#fff' : 'var(--text3)',
+        }}
+      >UTC</button>
+      <button
+        onClick={() => onToggle('local')}
+        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'local' ? 'var(--border2)' : 'transparent',
+          color: mode === 'local' ? '#fff' : 'var(--text3)',
+        }}
+      >{getTzLabel()}</button>
     </div>
   )
 }

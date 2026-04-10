@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
+import {
+  toSapTs, formatSapTs, toInputDate, inputDateToDate,
+  getTzMode, setTzMode as saveTzMode, getTzLabel,
+} from '../../utils/dateUtils'
 
 const REFRESH_MS = 30000
 const DEFAULT_HOURS = 24
@@ -34,20 +38,6 @@ const RESTART_MODES = [
   },
 ]
 
-function toSapTs(date) {
-  const p = n => String(n).padStart(2, '0')
-  return `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}.0000000`
-}
-
-function formatSapTs(ts) {
-  if (!ts || ts.length < 14) return ts || '—'
-  return `${ts.slice(6, 8)}/${ts.slice(4, 6)}/${ts.slice(0, 4)} ${ts.slice(8, 10)}:${ts.slice(10, 12)}:${ts.slice(12, 14)}`
-}
-
-function toInputDate(date) {
-  return date.toISOString().slice(0, 16)
-}
-
 function encodeODataString(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
@@ -67,16 +57,24 @@ export default function JobMonitor({ connection }) {
   const [restarting, setRestarting]     = useState(false)
   const [restartMsg, setRestartMsg]     = useState('')
   const [restartModal, setRestartModal] = useState(false)
+  const [tzMode, setTzModeState]        = useState(() => getTzMode())
   const resizing = useRef(null)
   const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
   const addLogRef = useRef(addLog)
   addLogRef.current = addLog
 
-  const defaultFrom = new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000)
-  const defaultTo   = new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000)
-  const [fromDate, setFromDate] = useState(toInputDate(defaultFrom))
-  const [toDate,   setToDate]   = useState(toInputDate(defaultTo))
+  const [fromDate, setFromDate] = useState(() => toInputDate(new Date(Date.now() - DEFAULT_HOURS * 3600 * 1000), getTzMode()))
+  const [toDate,   setToDate]   = useState(() => toInputDate(new Date(Date.now() + DEFAULT_HOURS * 3600 * 1000), getTzMode()))
+
+  function handleTzToggle(newMode) {
+    const fromD = inputDateToDate(fromDate, tzMode)
+    const toD   = inputDateToDate(toDate, tzMode)
+    saveTzMode(newMode)
+    setTzModeState(newMode)
+    setFromDate(toInputDate(fromD, newMode))
+    setToDate(toInputDate(toD, newMode))
+  }
 
   const proxyPost = useCallback(async (path, opts = {}) => {
     const start = performance.now()
@@ -165,9 +163,9 @@ export default function JobMonitor({ connection }) {
     }
   }
 
-  // Filters
-  const fromTs = toSapTs(new Date(fromDate))
-  const toTs   = toSapTs(new Date(toDate))
+  // Filters — siempre en UTC para coincidir con SAP
+  const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
+  const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
 
   const sorted = [...rows].sort((a, b) => {
     const av = a.JobPlannedStartDateTime || '', bv = b.JobPlannedStartDateTime || ''
@@ -205,17 +203,18 @@ export default function JobMonitor({ connection }) {
     )
   }
 
+  const tzSuffix = tzMode === 'utc' ? ' (UTC)' : ` (${getTzLabel()})`
   const BASE_COLS = useMemo(() => [
-    { key: 'JobStatus',                label: 'Estado',            w: 130, render: (v) => <StatusBadge code={v} /> },
-    { key: 'JobTemplateText',          label: 'Template',          w: 220 },
-    { key: 'JobText',                  label: 'Descripción',       w: 220 },
-    { key: 'JobCreatedByFormattedName',label: 'Usuario',           w: 180 },
-    { key: 'JobStepCount',             label: 'Pasos',             w: 70  },
-    { key: 'JobPlannedStartDateTime',  label: 'Inicio planificado',w: 170, render: formatSapTs },
-    { key: 'JobStartDateTime',         label: 'Inicio real',       w: 160, render: formatSapTs },
-    { key: 'JobEndDateTime',           label: 'Fin',               w: 160, render: formatSapTs },
-    { key: 'Periodic',                 label: 'Periódico',         w: 90,  render: v => v ? '✓' : '—' },
-  ], [statuses])
+    { key: 'JobStatus',                label: 'Estado',                        w: 130, render: (v) => <StatusBadge code={v} /> },
+    { key: 'JobTemplateText',          label: 'Template',                      w: 220 },
+    { key: 'JobText',                  label: 'Descripción',                   w: 220 },
+    { key: 'JobCreatedByFormattedName',label: 'Usuario',                       w: 180 },
+    { key: 'JobStepCount',             label: 'Pasos',                         w: 70  },
+    { key: 'JobPlannedStartDateTime',  label: `Inicio planificado${tzSuffix}`, w: 190, render: v => formatSapTs(v, tzMode) },
+    { key: 'JobStartDateTime',         label: `Inicio real${tzSuffix}`,        w: 175, render: v => formatSapTs(v, tzMode) },
+    { key: 'JobEndDateTime',           label: `Fin${tzSuffix}`,                w: 175, render: v => formatSapTs(v, tzMode) },
+    { key: 'Periodic',                 label: 'Periódico',                     w: 90,  render: v => v ? '✓' : '—' },
+  ], [statuses, tzMode, tzSuffix])
 
   const COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
 
@@ -255,6 +254,7 @@ export default function JobMonitor({ connection }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TzToggle mode={tzMode} onToggle={handleTzToggle} />
           <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
           <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
           <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
@@ -483,6 +483,31 @@ function FilterBtn({ active, onClick, label, count, color }) {
         borderRadius: 10, padding: '0 5px', fontSize: 10, fontWeight: 700,
       }}>{count}</span>
     </button>
+  )
+}
+
+function TzToggle({ mode, onToggle }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
+      <button
+        onClick={() => onToggle('utc')}
+        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'utc' ? 'var(--border2)' : 'transparent',
+          color: mode === 'utc' ? '#fff' : 'var(--text3)',
+        }}
+      >UTC</button>
+      <button
+        onClick={() => onToggle('local')}
+        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
+          background: mode === 'local' ? 'var(--border2)' : 'transparent',
+          color: mode === 'local' ? '#fff' : 'var(--text3)',
+        }}
+      >{getTzLabel()}</button>
+    </div>
   )
 }
 
