@@ -54,6 +54,12 @@ async function proxy(connectionId, path, addLog) {
  *  - tzMode
  *  - onClose, addLog
  */
+// Convierte timestamp SAP "YYYYMMDDHHMMSS" → "YYYY-MM-DDTHH:MM:SSZ"
+function sapTsToISO(ts) {
+  if (!ts || ts.length < 14) return null
+  return `${ts.slice(0,4)}-${ts.slice(4,6)}-${ts.slice(6,8)}T${ts.slice(8,10)}:${ts.slice(10,12)}:${ts.slice(12,14)}Z`
+}
+
 export default function PerformanceDrawer({ connection, activity, jobRef, tzMode, onClose, addLog }) {
   const [tab, setTab] = useState('info')
   const [mainRec, setMainRec] = useState(activity || null)
@@ -74,20 +80,34 @@ export default function PerformanceDrawer({ connection, activity, jobRef, tzMode
         let activityId = activity?.ActivityId
         let record = activity
 
-        // Si nos pasaron jobRef en lugar de activity, resolver primero.
-        // OriginalJobName y JobCount NO son filtrables vía $filter en TASKMON,
-        // por lo que descargamos las últimas N actividades y filtramos en cliente.
+        // Si nos pasaron jobRef en lugar de activity, resolver usando ventana estrecha.
+        // OriginalJobName y JobCount NO son filtrables via $filter en TASKMON.
+        // Estrategia: filtrar por StartTime alrededor del tiempo de ejecución del job
+        // (JobStartDateTime/JobEndDateTime de JobHeaderSet) → pocos registros, match exacto.
         if (!activityId && jobRef?.JobName) {
-          const fromUTC = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
-          const filter = `StartTime ge datetimeoffset'${fromUTC}'`
-          const path = `/xIBPxC_TASKMON_EXT_MAIN?$format=json&$top=2000&$orderby=StartTime desc&$filter=${encodeURIComponent(filter)}`
+          // Construir ventana: job_start - 2 min  /  job_end + 5 min
+          const startISO = sapTsToISO(jobRef.JobStartDateTime)
+          const endISO   = sapTsToISO(jobRef.JobEndDateTime)
+          let fromISO, toISO
+          if (startISO) {
+            const startMs = new Date(startISO).getTime()
+            const endMs   = endISO ? new Date(endISO).getTime() : startMs + 30 * 60 * 1000
+            fromISO = new Date(startMs - 2 * 60 * 1000).toISOString()
+            toISO   = new Date(endMs   + 5 * 60 * 1000).toISOString()
+          } else {
+            // Fallback si no hay timestamps: ventana de 24h hacia atrás
+            fromISO = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+            toISO   = new Date().toISOString()
+          }
+          const filter = `StartTime ge datetimeoffset'${fromISO}' and StartTime le datetimeoffset'${toISO}'`
+          const path = `/xIBPxC_TASKMON_EXT_MAIN?$format=json&$top=200&$orderby=StartTime desc&$filter=${encodeURIComponent(filter)}`
           const data = await proxy(connection.id, path, addLogRef.current)
           const all = data?.d?.results ?? []
           const r = all.find(x =>
             x.OriginalJobName === jobRef.JobName &&
             (jobRef.JobCount ? x.JobCount === jobRef.JobCount : true)
           ) || all.find(x => x.OriginalJobName === jobRef.JobName)
-          if (!r) throw new Error(`Sin telemetría para ${jobRef.JobName}/${jobRef.JobCount}`)
+          if (!r) throw new Error(`Sin telemetría para este job en el período de ejecución`)
           activityId = r.ActivityId
           record = {
             ActivityId: r.ActivityId, ComponentName: r.ComponentName, ActivityName: r.ActivityName,
