@@ -57,10 +57,19 @@ function stripPasswords(conn) {
 // Encripta un acuerdo de comunicación. existing = acuerdo actual en Redis (para conservar password si no viene nueva)
 function encryptAgreement(agreement, existing) {
   if (!agreement) return undefined
-  const { url, user, password } = agreement
+  const { url, user, password, taskmon } = agreement
   if (!url && !user) return undefined
   const encryptedPw = password ? encrypt(password) : existing?.password
-  return { url: url || '', user: user || '', password: encryptedPw || '' }
+  const out = { url: url || '', user: user || '', password: encryptedPw || '' }
+  // taskmon es un sub-objeto { enabled, url } dentro de com0068 — se preserva si viene, o se mantiene el existente
+  if (taskmon !== undefined) {
+    if (taskmon && (taskmon.enabled || taskmon.url)) {
+      out.taskmon = { enabled: !!taskmon.enabled, url: taskmon.url || '' }
+    }
+  } else if (existing?.taskmon) {
+    out.taskmon = existing.taskmon
+  }
+  return out
 }
 
 export default async function handler(req, res) {
