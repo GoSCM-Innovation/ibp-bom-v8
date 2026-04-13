@@ -20,8 +20,18 @@ const STATUS_COLORS = {
   X: '#374151', k: '#6b7280',
 }
 
+function fmtBytesShort(b) {
+  const n = Number(b)
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (n < 1048576) return `${(n / 1024).toFixed(0)} KB`
+  if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MB`
+  return `${(n / 1073741824).toFixed(2)} GB`
+}
+
 export default function Resumen({ connection }) {
+  const hasTaskmon = !!(connection.com0068?.taskmon?.enabled && connection.com0068?.taskmon?.url)
   const [rows, setRows]           = useState([])
+  const [taskmonRows, setTaskmonRows] = useState([])
   const [statuses, setStatuses]   = useState([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
@@ -83,6 +93,31 @@ export default function Resumen({ connection }) {
     return () => clearInterval(timerRef.current)
   }, [loadData])
 
+  // Cargar telemetría TASKMON (opcional)
+  useEffect(() => {
+    if (!hasTaskmon) { setTaskmonRows([]); return }
+    let cancelled = false
+    const fromUTC = inputDateToDate(fromDate, tzMode).toISOString()
+    const toUTC   = inputDateToDate(toDate,   tzMode).toISOString()
+    const filter  = `StartTime ge datetimeoffset'${fromUTC}' and StartTime le datetimeoffset'${toUTC}'`
+    const path = `/xIBPxC_TASKMON_EXT_MAIN?$format=json&$top=2000&$orderby=StartTime desc&$filter=${encodeURIComponent(filter)}`
+    ;(async () => {
+      try {
+        const start = performance.now()
+        const res = await fetch('/api/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connectionId: connection.id, path, com: '0068_taskmon' }),
+        })
+        const data = await res.json()
+        addLogRef.current({ method: 'POST', path, status: res.status, duration: Math.round(performance.now() - start), detail: data.error || 'OK' })
+        if (!res.ok || cancelled) return
+        setTaskmonRows(data?.d?.results ?? [])
+      } catch { /* opcional */ }
+    })()
+    return () => { cancelled = true }
+  }, [hasTaskmon, connection.id, fromDate, toDate, tzMode])
+
   function statusLabel(code) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code
   }
@@ -139,23 +174,46 @@ export default function Resumen({ connection }) {
   })
   const topUsers = Object.entries(userMap).sort((a,b) => b[1]-a[1]).slice(0,5)
 
-  // Top duration
+  // Top duration — si hay taskmon, usa DurationSeconds real; si no, delta end-start
   const durationMap = {}
-  filtered.forEach(r => {
-    if (!['F','W'].includes(r.JobStatus)) return
-    const start = parseSapTs(r.JobStartDateTime)
-    const end   = parseSapTs(r.JobEndDateTime)
-    if (!start || !end || end <= start) return
-    const mins = (end - start) / 60000
-    const k = r.JobText || '—'
-    if (!durationMap[k]) durationMap[k] = { total: 0, count: 0 }
-    durationMap[k].total += mins
-    durationMap[k].count += 1
-  })
+  if (hasTaskmon && taskmonRows.length > 0) {
+    // Map JobName → JobText (del header) para resolver nombres legibles
+    const textByJobName = {}
+    filtered.forEach(r => { if (r.JobName) textByJobName[r.JobName] = r.JobText || r.JobName })
+    taskmonRows.forEach(tr => {
+      if (!tr.JobName) return
+      const sec = Number(tr.DurationSeconds) || 0
+      if (sec <= 0) return
+      const k = textByJobName[tr.JobName] || tr.JobName
+      if (!durationMap[k]) durationMap[k] = { total: 0, count: 0 }
+      durationMap[k].total += sec / 60 // a minutos
+      durationMap[k].count += 1
+    })
+  } else {
+    filtered.forEach(r => {
+      if (!['F','W'].includes(r.JobStatus)) return
+      const start = parseSapTs(r.JobStartDateTime)
+      const end   = parseSapTs(r.JobEndDateTime)
+      if (!start || !end || end <= start) return
+      const mins = (end - start) / 60000
+      const k = r.JobText || '—'
+      if (!durationMap[k]) durationMap[k] = { total: 0, count: 0 }
+      durationMap[k].total += mins
+      durationMap[k].count += 1
+    })
+  }
   const topDuration = Object.entries(durationMap)
     .map(([name, { total, count }]) => ({ name, avg: total / count }))
     .sort((a, b) => b.avg - a.avg)
     .slice(0, 5)
+
+  // KPIs HANA (sólo si taskmon)
+  const hanaMemPeak = hasTaskmon
+    ? taskmonRows.reduce((max, r) => Math.max(max, Number(r.HanaMaxMemory) || 0), 0)
+    : 0
+  const hanaCpuTotalSec = hasTaskmon
+    ? taskmonRows.reduce((s, r) => s + (Number(r.HanaCpuTime) || 0), 0) / 1_000_000
+    : 0
 
   function fmtDuration(mins) {
     if (mins < 1)   return `${Math.round(mins * 60)}s`
@@ -222,6 +280,8 @@ export default function Resumen({ connection }) {
         <KpiCard label="Finalizados"   value={finished}     color="var(--green)" />
         <KpiCard label="Fallidos"      value={failed}       color="var(--red)" />
         <KpiCard label="Tasa de éxito" value={`${successRate}%`} color={successRate >= 90 ? 'var(--green)' : successRate >= 70 ? 'var(--accent)' : 'var(--red)'} />
+        {hasTaskmon && <KpiCard label="Mem HANA pico" value={fmtBytesShort(hanaMemPeak)} color="var(--purple)" />}
+        {hasTaskmon && <KpiCard label="CPU HANA total" value={`${hanaCpuTotalSec.toFixed(2)} s`} color="var(--accent)" />}
       </div>
 
       {/* Charts row */}
@@ -302,7 +362,9 @@ export default function Resumen({ connection }) {
             ))
           }
           <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 10 }}>
-            Solo jobs Finalizados con inicio y fin registrados
+            {hasTaskmon && taskmonRows.length > 0
+              ? 'Duración real desde Task Monitor (HANA telemetry)'
+              : 'Solo jobs Finalizados con inicio y fin registrados'}
           </div>
         </div>
 

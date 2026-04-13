@@ -1,9 +1,24 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
+import PerformanceDrawer from '../Performance/PerformanceDrawer'
 import {
   toSapTs, formatSapTs, toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
 } from '../../utils/dateUtils'
+
+function fmtBytesShort(b) {
+  const n = Number(b)
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / 1048576).toFixed(1)} MB`
+  return `${(n / 1073741824).toFixed(2)} GB`
+}
+function fmtMicroShort(us) {
+  const n = Number(us)
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (n < 1_000_000) return `${(n / 1000).toFixed(0)} ms`
+  return `${(n / 1_000_000).toFixed(2)} s`
+}
 
 const REFRESH_MS = 30000
 const DEFAULT_HOURS = 24
@@ -43,6 +58,9 @@ function encodeODataString(val) {
 }
 
 export default function JobMonitor({ connection }) {
+  const hasTaskmon = !!(connection.com0068?.taskmon?.enabled && connection.com0068?.taskmon?.url)
+  const [taskmonMap, setTaskmonMap] = useState({}) // `${JobName}|${JobCount}` → { mem, cpu }
+  const [telemetryFor, setTelemetryFor] = useState(null) // jobRef para drawer
   const [statuses, setStatuses]       = useState([])
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
@@ -117,6 +135,42 @@ export default function JobMonitor({ connection }) {
     timerRef.current = setInterval(loadJobs, REFRESH_MS)
     return () => clearInterval(timerRef.current)
   }, [loadJobs])
+
+  // Cargar telemetría TASKMON y mergear por JobName|JobCount
+  useEffect(() => {
+    if (!hasTaskmon || rows.length === 0) return
+    let cancelled = false
+    const fromUTC = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+    const filter = `StartTime ge datetimeoffset'${fromUTC}'`
+    const path = `/xIBPxC_TASKMON_EXT_MAIN?$format=json&$top=2000&$orderby=StartTime desc&$filter=${encodeURIComponent(filter)}`
+    ;(async () => {
+      try {
+        const start = performance.now()
+        const res = await fetch('/api/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connectionId: connection.id, path, com: '0068_taskmon' }),
+        })
+        const data = await res.json()
+        addLogRef.current({ method: 'POST', path, status: res.status, duration: Math.round(performance.now() - start), detail: data.error || 'OK' })
+        if (!res.ok || cancelled) return
+        const map = {}
+        for (const r of (data?.d?.results ?? [])) {
+          if (!r.JobName) continue
+          const key = `${r.JobName}|${r.JobCount}`
+          // Quedarse con la primera (más reciente por orderby desc)
+          if (!map[key]) {
+            map[key] = {
+              mem: Number(r.HanaMaxMemory) || 0,
+              cpu: Number(r.HanaCpuTime) || 0,
+            }
+          }
+        }
+        setTaskmonMap(map)
+      } catch { /* silencio: telemetría opcional */ }
+    })()
+    return () => { cancelled = true }
+  }, [hasTaskmon, rows, connection.id])
 
   // Cancel job
   async function handleCancel() {
@@ -214,7 +268,11 @@ export default function JobMonitor({ connection }) {
     { key: 'JobStartDateTime',         label: `Inicio real${tzSuffix}`,        w: 175, render: v => formatSapTs(v, tzMode) },
     { key: 'JobEndDateTime',           label: `Fin${tzSuffix}`,                w: 175, render: v => formatSapTs(v, tzMode) },
     { key: 'Periodic',                 label: 'Periódico',                     w: 90,  render: v => v ? '✓' : '—' },
-  ], [statuses, tzMode, tzSuffix])
+    ...(hasTaskmon ? [
+      { key: '_memHana', label: 'Mem HANA', w: 100, render: (_, row) => fmtBytesShort(taskmonMap[`${row.JobName}|${row.JobRunCount}`]?.mem) },
+      { key: '_cpuHana', label: 'CPU HANA', w: 100, render: (_, row) => fmtMicroShort(taskmonMap[`${row.JobName}|${row.JobRunCount}`]?.cpu) },
+    ] : []),
+  ], [statuses, tzMode, tzSuffix, hasTaskmon, taskmonMap])
 
   const COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
 
@@ -341,7 +399,7 @@ export default function JobMonitor({ connection }) {
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                         width: col.w, maxWidth: col.w,
                       }} title={String(row[col.key] ?? '')}>
-                        {col.render ? col.render(row[col.key]) : String(row[col.key] ?? '—')}
+                        {col.render ? col.render(row[col.key], row) : String(row[col.key] ?? '—')}
                       </td>
                     ))}
                   </tr>
@@ -405,6 +463,17 @@ export default function JobMonitor({ connection }) {
             >
               {restarting ? 'Reiniciando…' : '↺ Reiniciar job'}
             </button>
+            {hasTaskmon && (
+              <button
+                onClick={() => setTelemetryFor({ JobName: selectedRow.JobName, JobCount: selectedRow.JobRunCount })}
+                title="Ver telemetría HANA de esta ejecución"
+                style={{
+                  padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                  border: '1px solid rgba(167,139,250,.4)',
+                  background: 'rgba(167,139,250,.12)', color: 'var(--purple)', cursor: 'pointer',
+                }}
+              >📊 Ver telemetría</button>
+            )}
             <button
               onClick={() => { setSelectedRow(null); setCancelMsg(''); setRestartMsg('') }}
               style={{
@@ -417,6 +486,17 @@ export default function JobMonitor({ connection }) {
       )}
 
       <TechLogs logs={logs} />
+
+      {/* Performance drawer */}
+      {telemetryFor && (
+        <PerformanceDrawer
+          connection={connection}
+          jobRef={telemetryFor}
+          tzMode={tzMode}
+          onClose={() => setTelemetryFor(null)}
+          addLog={addLogRef.current}
+        />
+      )}
 
       {/* Restart mode modal */}
       {restartModal && (
