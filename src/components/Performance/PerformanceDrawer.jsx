@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
@@ -62,6 +62,10 @@ export default function PerformanceDrawer({ connection, activity, jobRef, tzMode
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Ref para evitar que cambios en addLog reinicien el effect
+  const addLogRef = useRef(addLog)
+  addLogRef.current = addLog
+
   useEffect(() => {
     let cancelled = false
     async function run() {
@@ -70,11 +74,14 @@ export default function PerformanceDrawer({ connection, activity, jobRef, tzMode
         let activityId = activity?.ActivityId
         let record = activity
 
-        // Si nos pasaron jobRef en lugar de activity, resolver primero
+        // Si nos pasaron jobRef en lugar de activity, resolver primero.
+        // Filtramos solo por JobName: JobCount puede tener formato distinto entre
+        // JobHeaderSet (JobRunCount) y TASKMON (JobCount), y el orderby por StartTime
+        // desc nos da la ejecución más reciente que es lo que el usuario espera.
         if (!activityId && jobRef?.JobName) {
-          const filter = `JobName eq '${jobRef.JobName}'` + (jobRef.JobCount ? ` and JobCount eq '${jobRef.JobCount}'` : '')
+          const filter = `JobName eq '${jobRef.JobName}'`
           const path = `/xIBPxC_TASKMON_EXT_MAIN?$format=json&$top=1&$orderby=StartTime desc&$filter=${encodeURIComponent(filter)}`
-          const data = await proxy(connection.id, path, addLog)
+          const data = await proxy(connection.id, path, addLogRef.current)
           const r = data?.d?.results?.[0]
           if (!r) throw new Error(`Sin telemetría para ${jobRef.JobName}/${jobRef.JobCount}`)
           activityId = r.ActivityId
@@ -95,8 +102,8 @@ export default function PerformanceDrawer({ connection, activity, jobRef, tzMode
         if (!activityId) throw new Error('Actividad sin ID')
 
         const [infoRes, kpiRes] = await Promise.all([
-          proxy(connection.id, `/xIBPxC_TASKMON_EXT_MAIN('${activityId}')/to_info?$format=json&$top=200`, addLog),
-          proxy(connection.id, `/xIBPxC_TASKMON_EXT_MAIN('${activityId}')/to_kpis?$format=json&$top=500&$orderby=timestamp asc`, addLog),
+          proxy(connection.id, `/xIBPxC_TASKMON_EXT_MAIN('${activityId}')/to_info?$format=json&$top=200`, addLogRef.current),
+          proxy(connection.id, `/xIBPxC_TASKMON_EXT_MAIN('${activityId}')/to_kpis?$format=json&$top=500&$orderby=timestamp asc`, addLogRef.current),
         ])
         if (cancelled) return
         setInfo(infoRes?.d?.results ?? [])
@@ -109,7 +116,7 @@ export default function PerformanceDrawer({ connection, activity, jobRef, tzMode
     }
     run()
     return () => { cancelled = true }
-  }, [activity, jobRef, connection.id, addLog])
+  }, [activity, jobRef, connection.id])
 
   // Agrupa KPIs por nombre → series separadas para LineChart
   const kpiSeries = useMemo(() => {
