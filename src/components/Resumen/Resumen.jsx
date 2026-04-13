@@ -181,10 +181,13 @@ export default function Resumen({ connection }) {
     const textByJobName = {}
     filtered.forEach(r => { if (r.JobName) textByJobName[r.JobName] = r.JobText || r.JobName })
     taskmonRows.forEach(tr => {
-      if (!tr.JobName) return
+      // OriginalJobName es el campo que coincide con JobHeaderSet.JobName.
+      // El campo JobName de TASKMON es vacío para App Jobs reales.
+      const oj = tr.OriginalJobName
+      if (!oj) return
       const sec = Number(tr.DurationSeconds) || 0
       if (sec <= 0) return
-      const k = textByJobName[tr.JobName] || tr.JobName
+      const k = textByJobName[oj] || oj
       if (!durationMap[k]) durationMap[k] = { total: 0, count: 0 }
       durationMap[k].total += sec / 60 // a minutos
       durationMap[k].count += 1

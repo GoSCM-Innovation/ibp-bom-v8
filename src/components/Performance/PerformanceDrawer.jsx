@@ -75,19 +75,26 @@ export default function PerformanceDrawer({ connection, activity, jobRef, tzMode
         let record = activity
 
         // Si nos pasaron jobRef en lugar de activity, resolver primero.
-        // Filtramos solo por JobName: JobCount puede tener formato distinto entre
-        // JobHeaderSet (JobRunCount) y TASKMON (JobCount), y el orderby por StartTime
-        // desc nos da la ejecución más reciente que es lo que el usuario espera.
+        // OriginalJobName y JobCount NO son filtrables vía $filter en TASKMON,
+        // por lo que descargamos las últimas N actividades y filtramos en cliente.
         if (!activityId && jobRef?.JobName) {
-          const filter = `JobName eq '${jobRef.JobName}'`
-          const path = `/xIBPxC_TASKMON_EXT_MAIN?$format=json&$top=1&$orderby=StartTime desc&$filter=${encodeURIComponent(filter)}`
+          const fromUTC = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+          const filter = `StartTime ge datetimeoffset'${fromUTC}'`
+          const path = `/xIBPxC_TASKMON_EXT_MAIN?$format=json&$top=2000&$orderby=StartTime desc&$filter=${encodeURIComponent(filter)}`
           const data = await proxy(connection.id, path, addLogRef.current)
-          const r = data?.d?.results?.[0]
+          const all = data?.d?.results ?? []
+          const r = all.find(x =>
+            x.OriginalJobName === jobRef.JobName &&
+            (jobRef.JobCount ? x.JobCount === jobRef.JobCount : true)
+          ) || all.find(x => x.OriginalJobName === jobRef.JobName)
           if (!r) throw new Error(`Sin telemetría para ${jobRef.JobName}/${jobRef.JobCount}`)
           activityId = r.ActivityId
           record = {
             ActivityId: r.ActivityId, ComponentName: r.ComponentName, ActivityName: r.ActivityName,
-            TaskType: r.TaskType, JobName: r.JobName, JobCount: r.JobCount, FullName: r.FullName,
+            TaskType: r.TaskType,
+            JobName: r.OriginalJobName || r.JobName,
+            OriginalJobName: r.OriginalJobName,
+            JobCount: r.JobCount, FullName: r.FullName,
             JobStepNumber: Number(r.JobStepNumber) || 0,
             StartMs: parseOdataDate(r.StartTime), EndMs: parseOdataDate(r.EndTime),
             DurationSec: Number(r.DurationSeconds) || 0, DurationFmt: r.DurationFormatted || '',

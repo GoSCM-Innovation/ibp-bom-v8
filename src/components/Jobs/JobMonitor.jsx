@@ -59,8 +59,8 @@ function encodeODataString(val) {
 
 export default function JobMonitor({ connection }) {
   const hasTaskmon = !!(connection.com0068?.taskmon?.enabled && connection.com0068?.taskmon?.url)
-  const [taskmonMap, setTaskmonMap] = useState({}) // `${JobName}|${JobCount}` → { mem, cpu }
-  const [telemetryFor, setTelemetryFor] = useState(null) // jobRef para drawer
+  const [taskmonMap, setTaskmonMap] = useState({}) // `${OriginalJobName}|${JobCount}` → activity mapeada
+  const [telemetryFor, setTelemetryFor] = useState(null) // activity (objeto mapeado) para drawer
   const [statuses, setStatuses]       = useState([])
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
@@ -156,11 +156,32 @@ export default function JobMonitor({ connection }) {
         if (!res.ok || cancelled) return
         const map = {}
         for (const r of (data?.d?.results ?? [])) {
-          if (!r.JobName) continue
-          const key = `${r.JobName}|${r.JobCount}`
+          // OriginalJobName (GUID) es el campo que coincide con JobHeaderSet.JobName.
+          // El campo JobName de TASKMON suele venir vacío para App Jobs reales.
+          const oj = r.OriginalJobName
+          if (!oj) continue
+          const key = `${oj}|${r.JobCount}`
           // Quedarse con la primera (más reciente por orderby desc)
           if (!map[key]) {
             map[key] = {
+              ActivityId: r.ActivityId,
+              ComponentName: r.ComponentName,
+              ActivityName: r.ActivityName,
+              TaskType: r.TaskType,
+              JobName: r.OriginalJobName, // alias para mostrar el GUID en el drawer
+              OriginalJobName: r.OriginalJobName,
+              JobCount: r.JobCount,
+              FullName: r.FullName,
+              JobStepNumber: Number(r.JobStepNumber) || 0,
+              StartMs: (() => { const m = /\/Date\((-?\d+)/.exec(r.StartTime || ''); return m ? parseInt(m[1],10) : null })(),
+              EndMs:   (() => { const m = /\/Date\((-?\d+)/.exec(r.EndTime   || ''); return m ? parseInt(m[1],10) : null })(),
+              DurationSec: Number(r.DurationSeconds) || 0,
+              DurationFmt: r.DurationFormatted || '',
+              HanaMaxMemory: Number(r.HanaMaxMemory) || 0,
+              HanaCpuTime: Number(r.HanaCpuTime) || 0,
+              ProcessingTime: Number(r.ProcessingTime) || 0,
+              ResponseTime: Number(r.ResponseTime) || 0,
+              PctHanaMaxMemory: Number(r.PctHanaMaxMemory) || 0,
               mem: Number(r.HanaMaxMemory) || 0,
               cpu: Number(r.HanaCpuTime) || 0,
             }
@@ -465,7 +486,16 @@ export default function JobMonitor({ connection }) {
             </button>
             {hasTaskmon && (
               <button
-                onClick={() => setTelemetryFor({ JobName: selectedRow.JobName, JobCount: selectedRow.JobRunCount })}
+                onClick={() => {
+                  const key = `${selectedRow.JobName}|${selectedRow.JobRunCount}`
+                  const act = taskmonMap[key]
+                  if (act) {
+                    setTelemetryFor({ activity: act })
+                  } else {
+                    // Fallback: pasar jobRef para que el drawer intente resolver
+                    setTelemetryFor({ jobRef: { JobName: selectedRow.JobName, JobCount: selectedRow.JobRunCount } })
+                  }
+                }}
                 title="Ver telemetría HANA de esta ejecución"
                 style={{
                   padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
@@ -491,7 +521,8 @@ export default function JobMonitor({ connection }) {
       {telemetryFor && (
         <PerformanceDrawer
           connection={connection}
-          jobRef={telemetryFor}
+          activity={telemetryFor.activity}
+          jobRef={telemetryFor.jobRef}
           tzMode={tzMode}
           onClose={() => setTelemetryFor(null)}
           addLog={addLogRef.current}
