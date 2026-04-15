@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import ProgressBar from '../ui/ProgressBar'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -116,7 +117,8 @@ export default function ResourceStats({ connection }) {
   function handleRefresh() { setLoading(true); load() }
 
   return (
-    <div style={{ padding: 28 }}>
+    <div style={{ padding: 28, position: 'relative' }}>
+      <ProgressBar loading={loading} />
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>

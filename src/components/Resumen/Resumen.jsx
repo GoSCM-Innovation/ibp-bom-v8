@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import ProgressBar from '../ui/ProgressBar'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
@@ -171,12 +172,6 @@ export default function Resumen({ connection }) {
     .sort((a,b) => (b.JobPlannedStartDateTime||'').localeCompare(a.JobPlannedStartDateTime||''))
     .slice(0,5)
 
-  if (loading) return (
-    <div style={{ padding: 32, color: 'var(--text2)', fontSize: 13 }}>
-      Cargando resumen de {connection.name}…
-    </div>
-  )
-
   if (error) return (
     <div style={{ padding: 32 }}>
       <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>
@@ -184,8 +179,16 @@ export default function Resumen({ connection }) {
     </div>
   )
 
+  if (loading && rows.length === 0) return (
+    <div style={{ padding: 32, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
+      <ProgressBar loading />
+      Cargando resumen de {connection.name}…
+    </div>
+  )
+
   return (
-    <div style={{ padding: 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+    <div style={{ padding: 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
+      <ProgressBar loading={loading} />
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>

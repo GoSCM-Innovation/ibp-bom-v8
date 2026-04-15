@@ -31,6 +31,19 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 button { cursor: pointer; font-family: var(--font); }
 input, select, textarea { font-family: var(--font); }
 
+/* ─── Progress bar ───────────────────────────────────────── */
+@keyframes progress-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(500%); }
+}
+.progress-bar-shimmer {
+  height: 100%;
+  width: 20%;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), var(--accent), transparent);
+  animation: progress-slide 1.3s ease-in-out infinite;
+  border-radius: 0 2px 2px 0;
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 7px; height: 7px; }
 ::-webkit-scrollbar-track { background: var(--bg2); border-radius: 4px; }

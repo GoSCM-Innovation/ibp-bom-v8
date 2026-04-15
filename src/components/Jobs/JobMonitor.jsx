@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
+import ProgressBar from '../ui/ProgressBar'
 import {
   toSapTs, formatSapTs, toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
@@ -240,7 +241,8 @@ export default function JobMonitor({ connection }) {
   const isRestartable = selectedRow && RESTARTABLE_STATUSES.includes(selectedRow.JobStatus)
 
   return (
-    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
+    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
+      <ProgressBar loading={loading || cancelling || restarting} />
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexShrink: 0, gap: 12, flexWrap: 'wrap' }}>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
+import ProgressBar from '../ui/ProgressBar'
 
 const JOB_PATH = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
@@ -137,7 +138,8 @@ export default function Jobs({ connection }) {
   }
 
   if (loading) return (
-    <div style={{ padding: 28, color: 'var(--text2)', fontSize: 13 }}>
+    <div style={{ padding: 28, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
+      <ProgressBar loading />
       Cargando job templates de {connection.name}…
     </div>
   )
