@@ -58,6 +58,8 @@ export default function Performance({ connection }) {
   const [lastRefresh, setLastRefresh] = useState(null)
   const [selected, setSelected]       = useState(null)
   const [tzMode, setTzModeState]      = useState(() => getTzMode())
+  const [sortKey, setSortKey]         = useState('StartMs')
+  const [sortDir, setSortDir]         = useState('desc')
   const [logs, addLog] = useTechLogs()
   const addLogRef = useRef(addLog); addLogRef.current = addLog
 
@@ -160,6 +162,24 @@ export default function Performance({ connection }) {
       componentKeys: keys,
     }
   }, [rows, tzMode])
+
+  // Tabla ordenable
+  const sortedRows = useMemo(() => {
+    const mul = sortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const av = a[sortKey], bv = b[sortKey]
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      if (typeof av === 'string') return mul * av.localeCompare(bv)
+      return mul * (av - bv)
+    })
+  }, [rows, sortKey, sortDir])
+
+  function handleSort(key) {
+    if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
+  }
 
   // Top 10 por memoria
   const top10Mem = useMemo(() => (
@@ -295,36 +315,47 @@ export default function Performance({ connection }) {
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
             <thead>
               <tr style={{ background: 'var(--bg3, var(--bg))', position: 'sticky', top: 0, zIndex: 1 }}>
-                <Th>Inicio ({tzSuffix})</Th>
-                <Th>Actividad</Th>
-                <Th>Componente</Th>
-                <Th>Tipo</Th>
-                <Th>Job</Th>
-                <Th align="right">Duración</Th>
-                <Th align="right">Mem HANA</Th>
-                <Th align="right">CPU HANA</Th>
+                <SortTh sk="StartMs"         cur={sortKey} dir={sortDir} onSort={handleSort}>Inicio ({tzSuffix})</SortTh>
+                <SortTh sk="EndMs"           cur={sortKey} dir={sortDir} onSort={handleSort}>Fin ({tzSuffix})</SortTh>
+                <SortTh sk="ActivityName"    cur={sortKey} dir={sortDir} onSort={handleSort}>Actividad</SortTh>
+                <SortTh sk="ComponentName"   cur={sortKey} dir={sortDir} onSort={handleSort}>Componente</SortTh>
+                <SortTh sk="TaskType"        cur={sortKey} dir={sortDir} onSort={handleSort}>Tipo</SortTh>
+                <SortTh sk="JobName"         cur={sortKey} dir={sortDir} onSort={handleSort}>Job</SortTh>
+                <SortTh sk="JobCount"        cur={sortKey} dir={sortDir} onSort={handleSort}>Run</SortTh>
+                <SortTh sk="JobStepNumber"   cur={sortKey} dir={sortDir} onSort={handleSort}>Step</SortTh>
+                <SortTh sk="FullName"        cur={sortKey} dir={sortDir} onSort={handleSort}>Usuario</SortTh>
+                <SortTh sk="DurationSec"     cur={sortKey} dir={sortDir} onSort={handleSort} align="right">Duración</SortTh>
+                <SortTh sk="HanaMaxMemory"   cur={sortKey} dir={sortDir} onSort={handleSort} align="right">Mem HANA</SortTh>
+                <SortTh sk="PctHanaMaxMemory" cur={sortKey} dir={sortDir} onSort={handleSort} align="right">% Mem</SortTh>
+                <SortTh sk="HanaCpuTime"     cur={sortKey} dir={sortDir} onSort={handleSort} align="right">CPU HANA</SortTh>
+                <SortTh sk="ProcessingTime"  cur={sortKey} dir={sortDir} onSort={handleSort} align="right">Processing</SortTh>
+                <SortTh sk="ResponseTime"    cur={sortKey} dir={sortDir} onSort={handleSort} align="right">Response</SortTh>
               </tr>
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
-                <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text2)' }}>Cargando…</td></tr>
+                <tr><td colSpan={15} style={{ padding: 24, textAlign: 'center', color: 'var(--text2)' }}>Cargando…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text2)' }}>Sin datos en el período</td></tr>
-              ) : rows.map((r, i) => (
+                <tr><td colSpan={15} style={{ padding: 24, textAlign: 'center', color: 'var(--text2)' }}>Sin datos en el período</td></tr>
+              ) : sortedRows.map((r, i) => (
                 <tr key={r.ActivityId}
                   onClick={() => setSelected(r)}
-                  style={{
-                    background: i % 2 === 0 ? 'var(--bg)' : 'var(--bg2)',
-                    cursor: 'pointer',
-                  }}>
+                  style={{ background: i % 2 === 0 ? 'var(--bg)' : 'var(--bg2)', cursor: 'pointer' }}>
                   <Td mono>{fmtDateCell(r.StartMs, tzMode)}</Td>
+                  <Td mono>{fmtDateCell(r.EndMs, tzMode)}</Td>
                   <Td>{r.ActivityName}</Td>
                   <Td>{r.ComponentName}</Td>
                   <Td>{TASKTYPE_LABEL[r.TaskType] || r.TaskType || '—'}</Td>
                   <Td mono>{r.JobName || '—'}</Td>
+                  <Td align="center">{r.JobCount || '—'}</Td>
+                  <Td align="center">{r.JobStepNumber || '—'}</Td>
+                  <Td>{r.FullName || '—'}</Td>
                   <Td align="right">{r.DurationFmt || `${r.DurationSec.toFixed(3)}s`}</Td>
                   <Td align="right">{fmtBytes(r.HanaMaxMemory)}</Td>
+                  <Td align="right">{r.PctHanaMaxMemory > 0 ? `${r.PctHanaMaxMemory.toFixed(1)}%` : '—'}</Td>
                   <Td align="right">{fmtMicroSec(r.HanaCpuTime)}</Td>
+                  <Td align="right">{fmtMicroSec(r.ProcessingTime * 1000)}</Td>
+                  <Td align="right">{fmtMicroSec(r.ResponseTime * 1000)}</Td>
                 </tr>
               ))}
             </tbody>
@@ -347,12 +378,19 @@ export default function Performance({ connection }) {
   )
 }
 
-function Th({ children, align = 'left' }) {
+function SortTh({ children, sk, cur, dir, onSort, align = 'left' }) {
+  const active = cur === sk
   return (
-    <th style={{
-      padding: '9px 12px', textAlign: align, color: 'var(--text2)', fontWeight: 600,
-      whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)', fontSize: 11,
-    }}>{children}</th>
+    <th onClick={() => onSort(sk)} style={{
+      padding: '9px 12px', textAlign: align, color: active ? 'var(--text)' : 'var(--text2)',
+      fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)',
+      fontSize: 11, cursor: 'pointer', userSelect: 'none',
+    }}>
+      {children}
+      <span style={{ marginLeft: 4, opacity: active ? 1 : 0.3, fontSize: 9 }}>
+        {active ? (dir === 'asc' ? '▲' : '▼') : '▼'}
+      </span>
+    </th>
   )
 }
 function Td({ children, align = 'left', mono }) {
