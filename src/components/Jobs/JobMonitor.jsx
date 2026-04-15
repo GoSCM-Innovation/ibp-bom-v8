@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
-import PerformanceDrawer from '../Performance/PerformanceDrawer'
 import {
   toSapTs, formatSapTs, toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
@@ -44,8 +43,6 @@ function encodeODataString(val) {
 }
 
 export default function JobMonitor({ connection }) {
-  const hasTaskmon = !!(connection.com0068?.taskmon?.enabled && connection.com0068?.taskmon?.url)
-  const [telemetryFor, setTelemetryFor] = useState(null) // jobRef para drawer
   const [statuses, setStatuses]       = useState([])
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
@@ -408,23 +405,6 @@ export default function JobMonitor({ connection }) {
             >
               {restarting ? 'Reiniciando…' : '↺ Reiniciar job'}
             </button>
-            {hasTaskmon && (
-              <button
-                onClick={() => setTelemetryFor({
-                  JobName:           selectedRow.JobName,
-                  JobCount:          selectedRow.JobRunCount,
-                  JobStartDateTime:  selectedRow.JobStartDateTime,
-                  JobEndDateTime:    selectedRow.JobEndDateTime,
-                  JobText:           selectedRow.JobText,
-                })}
-                title="Ver telemetría HANA de esta ejecución"
-                style={{
-                  padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                  border: '1px solid rgba(167,139,250,.4)',
-                  background: 'rgba(167,139,250,.12)', color: 'var(--purple)', cursor: 'pointer',
-                }}
-              >📊 Ver telemetría</button>
-            )}
             <button
               onClick={() => { setSelectedRow(null); setCancelMsg(''); setRestartMsg('') }}
               style={{
@@ -437,17 +417,6 @@ export default function JobMonitor({ connection }) {
       )}
 
       <TechLogs logs={logs} />
-
-      {/* Performance drawer */}
-      {telemetryFor && (
-        <PerformanceDrawer
-          connection={connection}
-          jobRef={telemetryFor}
-          tzMode={tzMode}
-          onClose={() => setTelemetryFor(null)}
-          addLog={addLogRef.current}
-        />
-      )}
 
       {/* Restart mode modal */}
       {restartModal && (

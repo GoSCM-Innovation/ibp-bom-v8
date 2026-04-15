@@ -21,10 +21,6 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       url:      initial?.com0068?.url      || '',
       user:     initial?.com0068?.user     || '',
       password: '',
-      taskmon: {
-        enabled: !!initial?.com0068?.taskmon?.enabled,
-        url:     initial?.com0068?.taskmon?.url || '',
-      },
     },
   })
   const [saving, setSaving] = useState(false)
@@ -32,9 +28,6 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
 
   function setGeneral(k, v) { setForm(p => ({ ...p, [k]: v })) }
   function setAgreement(key, k, v) { setForm(p => ({ ...p, [key]: { ...p[key], [k]: v } })) }
-  function setTaskmon(k, v) {
-    setForm(p => ({ ...p, com0068: { ...p.com0068, taskmon: { ...p.com0068.taskmon, [k]: v } } }))
-  }
 
   function validateAgreement(a, name, isNew) {
     const hasAny = a.url || a.user || a.password
@@ -82,10 +75,6 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
           url:  form.com0068.url.replace(/\/$/, ''),
           user: form.com0068.user,
           ...(form.com0068.password ? { password: form.com0068.password } : {}),
-          taskmon: {
-            enabled: !!form.com0068.taskmon.enabled,
-            url:     (form.com0068.taskmon.url || '').replace(/\/$/, ''),
-          },
         }
       } else if (initial) {
         body.com0068 = null
@@ -132,46 +121,12 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       {/* SAP_COM_0068 */}
       <AgreementSection
         title="SAP_COM_0068 — Resource Consumption"
-        subtitle="Resource Stats · Job Performance (opcional)"
+        subtitle="Resource Stats"
         values={form.com0068}
         onChange={(k, v) => setAgreement('com0068', k, v)}
         isEditing={!!initial}
         hasExisting={!!initial?.com0068?.user}
       />
-
-      {/* Task Monitor (sub-servicio de COM_0068) */}
-      <div style={{
-        marginLeft: 0, marginBottom: 20, padding: '12px 14px',
-        background: 'var(--bg)', border: '1px dashed var(--border)', borderRadius: 8,
-      }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={!!form.com0068.taskmon.enabled}
-            onChange={e => setTaskmon('enabled', e.target.checked)}
-            style={{ accentColor: 'var(--accent)' }}
-          />
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>
-              Habilitar Job Performance (Task Monitor)
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>
-              Telemetría de ejecución (CPU HANA, memoria HANA, duración real). Usa las mismas credenciales de COM_0068.
-            </div>
-          </div>
-        </label>
-        {form.com0068.taskmon.enabled && (
-          <div style={{ marginTop: 12 }}>
-            <Field
-              label="URL del servicio TASKMON_EXT_SRV"
-              value={form.com0068.taskmon.url}
-              onChange={v => setTaskmon('url', v)}
-              placeholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata/IBP/TASKMON_EXT_SRV"
-              mono
-            />
-          </div>
-        )}
-      </div>
 
       {form.name && form.ambiente && (
         <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text2)' }}>

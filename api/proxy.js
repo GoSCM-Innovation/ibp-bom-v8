@@ -47,23 +47,14 @@ export default async function handler(req, res) {
     const conn = connections.find(c => c.id === connectionId)
     if (!conn) return res.status(404).json({ error: 'Conexión no encontrada' })
 
-    // com === '0068_taskmon' → usa credenciales de com0068 pero URL de com0068.taskmon
-    const isTaskmon = com === '0068_taskmon'
-    const agreementKey = (com === '0068' || isTaskmon) ? 'com0068' : 'com0326'
+    const agreementKey = com === '0068' ? 'com0068' : 'com0326'
     const agreement = conn[agreementKey]
 
     if (!agreement?.url || !agreement?.user || !agreement?.password) {
       return res.status(400).json({ error: `SAP_COM_${agreementKey === 'com0068' ? '0068' : '0326'} no configurado para esta conexión` })
     }
 
-    if (isTaskmon) {
-      if (!agreement.taskmon?.enabled || !agreement.taskmon?.url) {
-        return res.status(400).json({ error: 'Task Monitor no está habilitado para esta conexión' })
-      }
-      serviceRoot = agreement.taskmon.url
-    } else {
-      serviceRoot = agreement.url
-    }
+    serviceRoot = agreement.url
     user = agreement.user
     password = decrypt(agreement.password)
 

@@ -3,13 +3,11 @@ import Jobs from '../Jobs/Jobs'
 import JobMonitor from '../Jobs/JobMonitor'
 import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
-import Performance from '../Performance/Performance'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 
 export default function SystemView({ connection }) {
   const has0326 = !!(connection.com0326?.url && connection.com0326?.user)
   const has0068 = !!(connection.com0068?.url && connection.com0068?.user)
-  const hasTaskmon = has0068 && !!(connection.com0068?.taskmon?.enabled && connection.com0068?.taskmon?.url)
 
   const APPS = [
     ...(has0326 ? [
@@ -19,9 +17,6 @@ export default function SystemView({ connection }) {
     ] : []),
     ...(has0068 ? [
       { id: 'stats', label: 'Resource Stats' },
-    ] : []),
-    ...(hasTaskmon ? [
-      { id: 'perf', label: 'Job Performance' },
     ] : []),
   ]
 
@@ -73,7 +68,6 @@ export default function SystemView({ connection }) {
         {activeApp === 'jobs'     && <Jobs         connection={connection} />}
         {activeApp === 'monitor'  && <JobMonitor   connection={connection} />}
         {activeApp === 'stats'    && <ResourceStats connection={connection} />}
-        {activeApp === 'perf'     && <Performance    connection={connection} />}
       </div>
     </div>
   )
