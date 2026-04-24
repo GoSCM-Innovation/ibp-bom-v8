@@ -1,6 +1,5 @@
 import crypto from 'crypto'
 
-const ALLOWED_HOST = '.scmibp.ondemand.com'
 const REDIS_URL = process.env.KV_REST_API_URL
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN
 const KEY = 'ibp:connections'
@@ -67,12 +66,7 @@ export default async function handler(req, res) {
 
   if (!url || !user || !password) return res.status(400).json({ error: 'Missing url, user or password' })
 
-  try {
-    const host = new URL(url).hostname
-    if (!host.endsWith(ALLOWED_HOST)) return res.status(403).json({ error: 'Host no permitido' })
-  } catch {
-    return res.status(400).json({ error: 'URL inválida' })
-  }
+  try { new URL(url) } catch { return res.status(400).json({ error: 'URL inválida' }) }
 
   try {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
