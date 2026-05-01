@@ -522,23 +522,44 @@ function DetailRow({ label, value }) {
 
 const OPTION_LABEL = { EQ: '=', NE: '≠', LT: '<', LE: '≤', GT: '>', GE: '≥', BT: '…', CP: '~' }
 
-// Mapeo parcial de nombres técnicos SAP IBP → etiqueta descriptiva
+// La API (JobTemplateParameterSet) no expone labels individuales — vienen del DDIC ABAP.
+// Mapa construido con nombres confirmados desde llamadas reales al sistema.
 const PARAM_LABEL = {
-  P_PTGUID:  'Planning Area',
+  // Confirmados desde capturas reales
+  P_ACT:     'Action',
+  P_AREA:    'Planning Area',
+  P_COMM:    'Comment',
+  P_CPDATE:  'Copy Date',
+  P_CPMETH:  'Copy Method',
+  P_CPTIME:  'Copy Time',
+  P_FRPID:   'From Period',
+  P_PPROP:   'Period Properties',
+  P_TOPID:   'To Period',
+  P_VFROM:   'Source Version',
+  S_KEYFG:   'Key Figure',
+  // Estándar IBP — planeación
+  P_PTGUID:  'Planning Area (GUID)',
   P_VRSIO:   'Version',
   P_PSTEP:   'Planning Step',
-  P_KEYFIG:  'Key Figure',
+  P_VTO:     'Target Version',
+  P_SCENAR:  'Scenario',
+  P_SIMVER:  'Sim. Version',
+  // Tiempo
   P_HORIZF:  'Horizon From',
   P_HORIZT:  'Horizon To',
   P_DATFR:   'Date From',
   P_DATTO:   'Date To',
-  P_SIMVER:  'Sim. Version',
-  P_SELOPT:  'Selection Option',
+  // Usuarios / jobs
+  P_USERS:   'Users',
+  P_USGRP:   'User Group',
+  P_USERID:  'User ID',
   P_JOBNAM:  'Job Name',
   P_JOBCNT:  'Job Count',
-  P_USERID:  'User ID',
   P_RUNMOD:  'Run Mode',
-  P_SCENAR:  'Scenario',
+  P_TESTM:   'Test Mode',
+  // Key figures
+  P_KEYFIG:  'Key Figure',
+  S_KYFGR:   'Key Figure Range',
 }
 
 function paramLabel(name) {
