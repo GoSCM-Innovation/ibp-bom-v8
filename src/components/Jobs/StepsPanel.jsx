@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { formatSapTs } from '../../utils/dateUtils'
+import { formatSapTs, parseSapTs } from '../../utils/dateUtils'
 
 const MSG_STYLE = {
   A: { label: 'Abort',   color: '#ff6b6b', bg: 'rgba(255,107,107,.08)' },
@@ -9,16 +9,50 @@ const MSG_STYLE = {
   S: { label: 'Success', color: '#22c55e', bg: 'rgba(34,197,94,.08)'   },
 }
 
+const SEV_STYLE = {
+  S: { color: '#22c55e', bg: 'rgba(34,197,94,.12)',   border: 'rgba(34,197,94,.3)'   },
+  W: { color: '#fbbf24', bg: 'rgba(251,191,36,.12)',  border: 'rgba(251,191,36,.3)'  },
+  E: { color: '#ff6b6b', bg: 'rgba(255,107,107,.12)', border: 'rgba(255,107,107,.3)' },
+  A: { color: '#ff6b6b', bg: 'rgba(255,107,107,.12)', border: 'rgba(255,107,107,.3)' },
+  I: { color: '#3b82f6', bg: 'rgba(59,130,246,.12)',  border: 'rgba(59,130,246,.3)'  },
+}
+
 function enc(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
+function fmtDuration(ms) {
+  if (ms == null || ms < 0 || isNaN(ms)) return null
+  const secs = Math.floor(ms / 1000)
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  const s    = secs % 60
+  if (mins < 60) return `${mins}m ${s > 0 ? ` ${s}s` : ''}`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return `${h}h ${m > 0 ? ` ${m}m` : ''}`
+}
+
+function calcDuration(step, stepsArr, jobEnd) {
+  const start = parseSapTs(step.StepStartDateTime)
+  if (!start) return null
+  const sorted  = [...stepsArr].sort((a, b) => Number(a.StepNumber) - Number(b.StepNumber))
+  const idx     = sorted.findIndex(s => Number(s.StepNumber) === Number(step.StepNumber))
+  const endTs   = sorted[idx + 1]?.StepStartDateTime ?? jobEnd
+  const end     = parseSapTs(endTs)
+  if (!end) return null
+  return fmtDuration(end - start)
+}
+
 export default function StepsPanel({ job, connectionId, statuses, tzMode, onClose }) {
-  const [steps, setSteps]       = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState('')
+  const [steps,    setSteps]    = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [error,    setError]    = useState('')
   const [expanded, setExpanded] = useState(null)
-  const [logs, setLogs]         = useState({})
+  // logInfos: { [stepNumber]: { loading, records[], error } } — pre-cargado para todos los pasos
+  const [logInfos, setLogInfos] = useState({})
+  // messages: { [stepNumber]: { loading, data[], error } } — lazy al expandir
+  const [messages, setMessages] = useState({})
 
   const proxy = useCallback(async (path) => {
     const res = await fetch('/api/proxy', {
@@ -29,18 +63,21 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
     return res.json()
   }, [connectionId])
 
+  // Fase 1: cargar pasos
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError(''); setSteps([]); setExpanded(null); setLogs({})
+    setLoading(true); setError(''); setSteps([]); setExpanded(null); setLogInfos({}); setMessages({})
     async function load() {
       try {
-        const path = `/JobHeaderSet(JobName=${enc(job.JobName)},JobRunCount=${enc(job.JobRunCount)})/JobStepSet`
-        const data = await proxy(path)
+        const data = await proxy(
+          `/JobHeaderSet(JobName=${enc(job.JobName)},JobRunCount=${enc(job.JobRunCount)})/JobStepSet`
+        )
         if (cancelled) return
         if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
         const results = (data?.d?.results ?? data?.value ?? [])
           .sort((a, b) => (Number(a.StepNumber) || 0) - (Number(b.StepNumber) || 0))
         setSteps(results)
+        loadAllLogInfos(results)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -51,29 +88,54 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
     return () => { cancelled = true }
   }, [job.JobName, job.JobRunCount, proxy])
 
-  async function expandStep(step) {
-    const n = Number(step.StepNumber)
-    if (expanded === n) { setExpanded(null); return }
-    setExpanded(n)
-    const nrLogs = Number(step.NrOfLogs) || 0
-    if (nrLogs === 0 || logs[n]) return
-    setLogs(p => ({ ...p, [n]: { loading: true, messages: null, error: '' } }))
-    try {
-      const infoPath = `/JobStepSet(JobName=${enc(step.JobName)},JobRunCount=${enc(step.JobRunCount)},StepNumber=${n})/JobStepLogInfoSet`
-      const infoData = await proxy(infoPath)
-      if (infoData.error) throw new Error(infoData.error + (infoData.detail ? ': ' + infoData.detail : ''))
-      const infos = infoData?.d?.results ?? infoData?.value ?? []
-      const allMsgs = []
-      for (const info of infos) {
-        const msgPath = `/JobStepLogInfoSet(JobName=${enc(info.JobName)},JobRunCount=${enc(info.JobRunCount)},StepNumber=${Number(info.StepNumber)},LogHandle=${enc(info.LogHandle)})/JobLogMessageSet`
-        const msgData = await proxy(msgPath)
-        const msgs = msgData?.d?.results ?? msgData?.value ?? []
-        allMsgs.push(...msgs)
+  // Fase 2: cargar JobStepLogInfoSet de todos los pasos con logs en paralelo
+  function loadAllLogInfos(stepsArr) {
+    const withLogs = stepsArr.filter(s => Number(s.NrOfLogs) > 0)
+    if (!withLogs.length) return
+    const init = {}
+    withLogs.forEach(s => { init[Number(s.StepNumber)] = { loading: true, records: [], error: '' } })
+    setLogInfos(init)
+    withLogs.forEach(async (step) => {
+      const n = Number(step.StepNumber)
+      try {
+        const data = await proxy(
+          `/JobStepSet(JobName=${enc(step.JobName)},JobRunCount=${enc(step.JobRunCount)},StepNumber=${n})/JobStepLogInfoSet`
+        )
+        if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
+        setLogInfos(p => ({ ...p, [n]: { loading: false, records: data?.d?.results ?? data?.value ?? [], error: '' } }))
+      } catch (e) {
+        setLogInfos(p => ({ ...p, [n]: { loading: false, records: [], error: e.message } }))
       }
-      setLogs(p => ({ ...p, [n]: { loading: false, messages: allMsgs, error: '' } }))
+    })
+  }
+
+  // Fase 3: cuando se expande un paso y sus logInfos ya están listos, cargar mensajes
+  const loadMessages = useCallback(async (n, records) => {
+    setMessages(p => ({ ...p, [n]: { loading: true, data: [], error: '' } }))
+    try {
+      const allMsgs = []
+      for (const info of records) {
+        const data = await proxy(
+          `/JobStepLogInfoSet(JobName=${enc(info.JobName)},JobRunCount=${enc(info.JobRunCount)},StepNumber=${Number(info.StepNumber)},LogHandle=${enc(info.LogHandle)})/JobLogMessageSet`
+        )
+        allMsgs.push(...(data?.d?.results ?? data?.value ?? []))
+      }
+      setMessages(p => ({ ...p, [n]: { loading: false, data: allMsgs, error: '' } }))
     } catch (e) {
-      setLogs(p => ({ ...p, [n]: { loading: false, messages: [], error: e.message } }))
+      setMessages(p => ({ ...p, [n]: { loading: false, data: [], error: e.message } }))
     }
+  }, [proxy])
+
+  useEffect(() => {
+    if (expanded === null) return
+    const li = logInfos[expanded]
+    if (!li || li.loading || !li.records.length) return
+    if (messages[expanded]) return
+    loadMessages(expanded, li.records)
+  }, [expanded, logInfos, messages, loadMessages])
+
+  function toggleExpand(step) {
+    setExpanded(prev => prev === Number(step.StepNumber) ? null : Number(step.StepNumber))
   }
 
   function statusStyle(code) {
@@ -82,34 +144,32 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
     return { ...c, text: s?.JobStatusText || code || '—' }
   }
 
+  // Suma de conteos de mensajes para un paso (agrega todos sus LogHandles)
+  function counts(n) {
+    const recs = logInfos[n]?.records ?? []
+    const sum  = k => recs.reduce((s, r) => s + (Number(r[k]) || 0), 0)
+    return { A: sum('MsgCntA'), E: sum('MsgCntE'), W: sum('MsgCntW'), I: sum('MsgCntI'), S: sum('MsgCntS'), all: sum('MsgCntAll') }
+  }
+
   const jobSt       = statusStyle(job.JobStatus)
   const failedCount = steps.filter(s => ['A', 'U'].includes(s.StepStatus)).length
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 400 }}
-      />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 400 }} />
 
-      {/* Drawer */}
       <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: 'min(580px, 95vw)',
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(600px, 95vw)',
         background: 'var(--bg)', borderLeft: '1px solid var(--border2)',
         zIndex: 401, display: 'flex', flexDirection: 'column',
-        boxShadow: '-8px 0 32px rgba(0,0,0,.4)',
-        animation: 'stepsPanelSlide .2s ease-out',
+        boxShadow: '-8px 0 32px rgba(0,0,0,.4)', animation: 'stepsPanelSlide .2s ease-out',
       }}>
 
-        {/* Panel header */}
+        {/* ── Cabecera del panel ── */}
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
-                Pasos del job
-              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Pasos del job</div>
               <div style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {job.JobText || job.JobName}
               </div>
@@ -118,81 +178,54 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-              <span style={{
-                padding: '3px 10px', borderRadius: 20, fontSize: 10, fontWeight: 700,
-                background: jobSt.bg, color: jobSt.color, border: `1px solid ${jobSt.border}`,
-              }}>
+              <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 10, fontWeight: 700, background: jobSt.bg, color: jobSt.color, border: `1px solid ${jobSt.border}` }}>
                 {jobSt.text}
               </span>
-              <button
-                onClick={onClose}
-                style={{
-                  background: 'none', border: '1px solid var(--border)', borderRadius: 6,
-                  color: 'var(--text2)', fontSize: 13, cursor: 'pointer',
-                  padding: '4px 10px', lineHeight: 1,
-                }}
-              >✕</button>
+              <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', fontSize: 13, cursor: 'pointer', padding: '4px 10px', lineHeight: 1 }}>✕</button>
             </div>
           </div>
-
           {!loading && steps.length > 0 && (
             <div style={{ marginTop: 10, display: 'flex', gap: 14, fontSize: 10, color: 'var(--text3)' }}>
               <span>{steps.length} paso{steps.length !== 1 ? 's' : ''}</span>
               <span>{steps.filter(s => s.StepStatus === 'F').length} finalizados</span>
-              {failedCount > 0 && (
-                <span style={{ color: '#ff6b6b', fontWeight: 700 }}>
-                  {failedCount} fallido{failedCount !== 1 ? 's' : ''}
-                </span>
-              )}
+              {failedCount > 0 && <span style={{ color: '#ff6b6b', fontWeight: 700 }}>{failedCount} fallido{failedCount !== 1 ? 's' : ''}</span>}
             </div>
           )}
         </div>
 
-        {/* Steps content */}
+        {/* ── Lista de pasos ── */}
         <div style={{ flex: 1, overflow: 'auto', padding: '14px 20px' }}>
 
-          {loading && (
-            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>
-              Cargando pasos…
-            </div>
-          )}
-
-          {error && (
-            <div style={{
-              background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)',
-              borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12,
-            }}>✕ {error}</div>
-          )}
-
+          {loading && <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>Cargando pasos…</div>}
+          {error   && <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>}
           {!loading && !error && steps.length === 0 && (
-            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>
-              Sin pasos registrados para este job.
-            </div>
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>Sin pasos registrados para este job.</div>
           )}
 
           {steps.map(step => {
             const n       = Number(step.StepNumber)
             const isOpen  = expanded === n
-            const logSt   = logs[n]
             const st      = statusStyle(step.StepStatus)
-            const rcError = step.StepAppRC != null && Number(step.StepAppRC) !== 0
+            const rcErr   = step.StepAppRC != null && Number(step.StepAppRC) !== 0
             const nrLogs  = Number(step.NrOfLogs) || 0
+            const li      = logInfos[n]
+            const cnt     = counts(n)
+            const dur     = calcDuration(step, steps, job.JobEndDateTime)
+
+            // Primer registro de log info (generalmente 1 por paso)
+            const liRec   = li?.records?.[0]
 
             return (
-              <div
-                key={n}
-                style={{
-                  marginBottom: 8, borderRadius: 8, overflow: 'hidden',
-                  border: `1px solid ${isOpen ? 'var(--border2)' : 'var(--border)'}`,
-                  background: isOpen ? 'var(--bg2)' : 'transparent',
-                }}
-              >
-                {/* Step row */}
-                <div
-                  onClick={() => expandStep(step)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer' }}
-                >
-                  {/* Step number bubble */}
+              <div key={n} style={{
+                marginBottom: 8, borderRadius: 8, overflow: 'hidden',
+                border: `1px solid ${isOpen ? 'var(--border2)' : 'var(--border)'}`,
+                background: isOpen ? 'var(--bg2)' : 'transparent',
+              }}>
+
+                {/* ── Fila del paso ── */}
+                <div onClick={() => toggleExpand(step)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer' }}>
+
+                  {/* Número */}
                   <span style={{
                     width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
                     background: 'var(--bg3)', border: '1px solid var(--border)',
@@ -200,127 +233,170 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
                     fontSize: 10, fontWeight: 700, color: 'var(--text2)',
                   }}>{n}</span>
 
-                  {/* Description + timestamp */}
+                  {/* Descripción + inicio */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 12, fontWeight: 600, color: '#fff',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {step.JobCatalogEntryText || step.JobCatalogEntryName || `Paso ${n}`}
                     </div>
                     {step.StepStartDateTime && (
                       <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 1 }}>
-                        {formatSapTs(step.StepStartDateTime, tzMode)}
+                        Inicio: {formatSapTs(step.StepStartDateTime, tzMode)}
                       </div>
                     )}
                   </div>
 
-                  {/* Status badge */}
-                  <span style={{
-                    padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 700, flexShrink: 0,
-                    background: st.bg, color: st.color, border: `1px solid ${st.border}`,
-                  }}>
+                  {/* Estado */}
+                  <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 700, flexShrink: 0, background: st.bg, color: st.color, border: `1px solid ${st.border}` }}>
                     {st.text}
                   </span>
 
-                  {/* RC error badge */}
-                  {rcError && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, flexShrink: 0,
-                      color: '#ff6b6b', background: 'rgba(255,107,107,.1)',
-                      border: '1px solid rgba(255,107,107,.3)', borderRadius: 4, padding: '2px 6px',
-                    }}>
+                  {/* RC error */}
+                  {rcErr && (
+                    <span style={{ fontSize: 10, fontWeight: 700, flexShrink: 0, color: '#ff6b6b', background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 4, padding: '2px 6px' }}>
                       RC {step.StepAppRC}
                     </span>
                   )}
 
-                  {/* Logs count badge */}
-                  {nrLogs > 0 && (
-                    <span style={{
-                      fontSize: 10, color: 'var(--text3)', flexShrink: 0,
-                      background: 'var(--bg3)', border: '1px solid var(--border)',
-                      borderRadius: 4, padding: '2px 6px',
-                    }}>
-                      {nrLogs} log{nrLogs !== 1 ? 's' : ''}
+                  {/* Duración */}
+                  {dur && (
+                    <span style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>
+                      ⏱ {dur}
                     </span>
                   )}
 
-                  <span style={{ color: 'var(--text3)', fontSize: 10, flexShrink: 0, marginLeft: 2 }}>
-                    {isOpen ? '▲' : '▼'}
-                  </span>
+                  {/* Conteo de mensajes por tipo (solo si cargado y hay logs) */}
+                  {nrLogs > 0 && li && !li.loading && (
+                    <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                      {(cnt.A + cnt.E) > 0 && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#ff6b6b', background: 'rgba(255,107,107,.12)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 3, padding: '1px 5px' }}>
+                          E {cnt.A + cnt.E}
+                        </span>
+                      )}
+                      {cnt.W > 0 && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,.12)', border: '1px solid rgba(251,191,36,.3)', borderRadius: 3, padding: '1px 5px' }}>
+                          W {cnt.W}
+                        </span>
+                      )}
+                      {(cnt.A + cnt.E + cnt.W) === 0 && cnt.all > 0 && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,.12)', border: '1px solid rgba(34,197,94,.3)', borderRadius: 3, padding: '1px 5px' }}>
+                          ✓ {cnt.all}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {nrLogs > 0 && li?.loading && (
+                    <span style={{ fontSize: 9, color: 'var(--text3)' }}>…</span>
+                  )}
+
+                  <span style={{ color: 'var(--text3)', fontSize: 10, flexShrink: 0, marginLeft: 2 }}>{isOpen ? '▲' : '▼'}</span>
                 </div>
 
-                {/* Expanded detail */}
+                {/* ── Detalle expandido ── */}
                 {isOpen && (
-                  <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px', background: 'var(--bg3)' }}>
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '14px 14px', background: 'var(--bg3)' }}>
 
-                    {/* Metadata row */}
-                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12, fontSize: 11 }}>
-                      <span>
-                        <span style={{ color: 'var(--text3)' }}>Catálogo: </span>
-                        <span style={{ color: 'var(--text2)', fontFamily: 'var(--mono)', fontSize: 10 }}>
-                          {step.JobCatalogEntryName || '—'}
-                        </span>
-                      </span>
-                      <span>
-                        <span style={{ color: 'var(--text3)' }}>RC: </span>
-                        <span style={{ color: rcError ? '#ff6b6b' : '#22c55e', fontWeight: 700 }}>
-                          {step.StepAppRC ?? '—'}
-                        </span>
-                      </span>
-                      <span>
-                        <span style={{ color: 'var(--text3)' }}>Resultados: </span>
-                        <span style={{ color: 'var(--text)' }}>{step.StepHasResults ? '✓ Sí' : '—'}</span>
-                      </span>
+                    {/* Sección: datos técnicos del paso */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Detalle del paso</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px' }}>
+                        <DetailRow label="Catálogo" value={<span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{step.JobCatalogEntryName || '—'}</span>} />
+                        <DetailRow label="Return Code" value={
+                          <span style={{ fontWeight: 700, color: rcErr ? '#ff6b6b' : '#22c55e' }}>{step.StepAppRC ?? '—'}</span>
+                        } />
+                        <DetailRow label="Inicio" value={formatSapTs(step.StepStartDateTime, tzMode)} />
+                        {dur && <DetailRow label="Duración" value={dur} />}
+                        <DetailRow label="Resultados" value={step.StepHasResults ? '✓ Sí' : '—'} />
+                      </div>
                     </div>
 
-                    {/* Log messages area */}
-                    {nrLogs === 0 && (
-                      <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>
-                        Sin mensajes de log.
+                    {/* Sección: info del log del paso */}
+                    {nrLogs > 0 && liRec && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Log de aplicación</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', marginBottom: 10 }}>
+                          <DetailRow label="Severidad" value={
+                            (() => {
+                              const sv = SEV_STYLE[liRec.Severity] ?? SEV_STYLE.I
+                              return (
+                                <span style={{ padding: '1px 7px', borderRadius: 10, fontSize: 10, fontWeight: 700, background: sv.bg, color: sv.color, border: `1px solid ${sv.border}` }}>
+                                  {liRec.SeverityText || liRec.Severity || '—'}
+                                </span>
+                              )
+                            })()
+                          } />
+                          <DetailRow label="Completado" value={formatSapTs(liRec.CreaDateTime, tzMode)} />
+                          <DetailRow label="Ejecutado por" value={liRec.CreaUserLong || liRec.CreaUser || '—'} />
+                          <DetailRow label="Nº de log" value={<span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{liRec.LogNumber?.replace(/^0+/, '') || '—'}</span>} />
+                        </div>
+                        {/* Desglose de conteos por tipo */}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {[
+                            { key: 'A', label: 'Abort',   v: cnt.A,   c: MSG_STYLE.A },
+                            { key: 'E', label: 'Error',   v: cnt.E,   c: MSG_STYLE.E },
+                            { key: 'W', label: 'Warning', v: cnt.W,   c: MSG_STYLE.W },
+                            { key: 'I', label: 'Info',    v: cnt.I,   c: MSG_STYLE.I },
+                            { key: 'S', label: 'Success', v: cnt.S,   c: MSG_STYLE.S },
+                          ].map(({ key, label, v, c }) => (
+                            <span key={key} style={{
+                              fontSize: 10, fontWeight: 600,
+                              color: v > 0 ? c.color : 'var(--text3)',
+                              background: v > 0 ? c.bg : 'transparent',
+                              border: `1px solid ${v > 0 ? c.color + '44' : 'var(--border)'}`,
+                              borderRadius: 4, padding: '2px 7px',
+                            }}>
+                              {label}: {v}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
-                    {logSt?.loading && (
-                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando mensajes…</div>
-                    )}
-                    {logSt?.error && (
-                      <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {logSt.error}</div>
-                    )}
-                    {logSt?.messages?.length === 0 && !logSt?.loading && !logSt?.error && (
-                      <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Sin mensajes.</div>
-                    )}
-                    {logSt?.messages?.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        {logSt.messages.map((msg, mi) => {
-                          const m    = MSG_STYLE[msg.MsgType] ?? { label: msg.MsgType || '·', color: 'var(--text2)', bg: 'transparent' }
-                          const text = msg.MsgText
-                            || [msg.MsgId, msg.MsgNo, msg.MsgV1, msg.MsgV2, msg.MsgV3, msg.MsgV4]
-                                .filter(Boolean).join(' ')
-                          return (
-                            <div
-                              key={mi}
-                              style={{
-                                display: 'flex', gap: 8, padding: '5px 8px',
-                                borderRadius: 4, background: m.bg, alignItems: 'flex-start',
-                              }}
-                            >
-                              <span style={{
-                                fontSize: 9, fontWeight: 700, flexShrink: 0, lineHeight: 1.4, marginTop: 1,
-                                color: m.color, background: `${m.color}22`,
-                                border: `1px solid ${m.color}44`, borderRadius: 3, padding: '1px 5px',
-                              }}>
-                                {m.label}
-                              </span>
-                              <span style={{
-                                fontSize: 11, color: 'var(--text)', lineHeight: 1.5, wordBreak: 'break-word',
-                              }}>
-                                {text || '—'}
-                              </span>
-                            </div>
-                          )
-                        })}
+
+                    {/* Sección: mensajes */}
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                        Mensajes {cnt.all > 0 ? `(${cnt.all})` : ''}
                       </div>
-                    )}
+
+                      {nrLogs === 0 && <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Sin mensajes de log.</div>}
+                      {li?.loading     && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando info de log…</div>}
+                      {li?.error       && <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {li.error}</div>}
+                      {messages[n]?.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando mensajes…</div>}
+                      {messages[n]?.error   && <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {messages[n].error}</div>}
+
+                      {messages[n]?.data?.length === 0 && !messages[n]?.loading && !messages[n]?.error && nrLogs > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Sin mensajes disponibles.</div>
+                      )}
+
+                      {messages[n]?.data?.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {messages[n].data.map((msg, mi) => {
+                            const m    = MSG_STYLE[msg.MsgType] ?? { label: msg.MsgType || '·', color: 'var(--text2)', bg: 'transparent' }
+                            const text = msg.MsgText || [msg.MsgId, msg.MsgNo, msg.MsgV1, msg.MsgV2, msg.MsgV3, msg.MsgV4].filter(Boolean).join(' ')
+                            const code = msg.MsgId && msg.MsgNo ? `${msg.MsgId}/${msg.MsgNo}` : null
+                            return (
+                              <div key={mi} style={{ display: 'flex', gap: 8, padding: '5px 8px', borderRadius: 4, background: m.bg, alignItems: 'flex-start' }}>
+                                {/* Tipo */}
+                                <span style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, lineHeight: 1.4, marginTop: 1, color: m.color, background: `${m.color}22`, border: `1px solid ${m.color}44`, borderRadius: 3, padding: '1px 5px' }}>
+                                  {m.label}
+                                </span>
+                                {/* Texto */}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                                    {text || '—'}
+                                  </div>
+                                  {code && (
+                                    <div style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 2 }}>
+                                      {code}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
                   </div>
                 )}
               </div>
@@ -336,5 +412,14 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
         }
       `}</style>
     </>
+  )
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <span style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--text)' }}>{value}</span>
+    </div>
   )
 }
