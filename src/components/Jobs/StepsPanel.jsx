@@ -54,8 +54,7 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
   // messages: { [stepNumber]: { loading, data[], error } } — lazy al expandir
   const [messages,   setMessages]   = useState({})
   // params: parámetros del job desde JobParamValuesStructGet
-  const [params,     setParams]     = useState({ loading: true, data: [], error: '' })
-  const [paramsOpen, setParamsOpen] = useState(false)
+  const [params, setParams] = useState({ loading: true, data: [], error: '' })
 
   const proxy = useCallback(async (path) => {
     const res = await fetch('/api/proxy', {
@@ -219,10 +218,7 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
         {/* ── Lista de pasos ── */}
         <div style={{ flex: 1, overflow: 'auto', padding: '14px 20px' }}>
 
-          {/* ── Sección: Parámetros del job ── */}
-          <ParamsSection params={params} open={paramsOpen} onToggle={() => setParamsOpen(p => !p)} />
-
-          {loading && <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>Cargando pasos…</div>}
+          {loading &&<div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>Cargando pasos…</div>}
           {error   && <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>}
           {!loading && !error && steps.length === 0 && (
             <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>Sin pasos registrados para este job.</div>
@@ -377,6 +373,54 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
                       </div>
                     )}
 
+                    {/* Sección: parámetros del paso */}
+                    {(() => {
+                      const sp = params.data.filter(p => String(p.StepNr) === String(step.StepNumber))
+                      const isAuthErr = params.error && (params.error.includes('APJ_RT/028') || params.error.includes('not authorized'))
+                      if (!params.loading && !params.error && sp.length === 0) return null
+                      return (
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Parámetros</div>
+                          {params.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando parámetros…</div>}
+                          {params.error && isAuthErr && (
+                            <div style={{ fontSize: 11, color: '#fbbf24' }}>
+                              ⚠ Sin acceso — el usuario técnico del Communication Arrangement solo puede leer parámetros de sus propios jobs. Para acceder a jobs de otros usuarios se requiere el rol <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>SAP_BCG_APPLICATION_JOB_DISP</code>.
+                            </div>
+                          )}
+                          {params.error && !isAuthErr && <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {params.error}</div>}
+                          {sp.length > 0 && (
+                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr>
+                                  {['Parámetro', 'Op', 'Valor'].map(h => (
+                                    <th key={h} style={{ textAlign: 'left', fontSize: 9, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingBottom: 5, borderBottom: '1px solid var(--border)', paddingRight: 10 }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sp.map((p, i) => {
+                                  const label = paramLabel(p.JobParameterName)
+                                  const isRaw = label === p.JobParameterName
+                                  const op    = OPTION_LABEL[p.Option] ?? p.Option ?? '='
+                                  const value = p.High && p.High !== p.Low ? `${p.Low} → ${p.High}` : (p.Low ?? '—')
+                                  return (
+                                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                                      <td style={{ padding: '5px 10px 5px 0', verticalAlign: 'top' }}>
+                                        <div style={{ fontSize: 11, color: 'var(--text)' }}>{isRaw ? <span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{label}</span> : label}</div>
+                                        {!isRaw && <div style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}>{p.JobParameterName}</div>}
+                                      </td>
+                                      <td style={{ padding: '5px 10px 5px 0', fontSize: 11, color: 'var(--text3)', verticalAlign: 'top' }}>{op}</td>
+                                      <td style={{ padding: '5px 0', fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', wordBreak: 'break-all', verticalAlign: 'top' }}>{value}</td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )
+                    })()}
+
                     {/* Sección: mensajes */}
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
@@ -452,79 +496,25 @@ function DetailRow({ label, value }) {
 
 const OPTION_LABEL = { EQ: '=', NE: '≠', LT: '<', LE: '≤', GT: '>', GE: '≥', BT: '…', CP: '~' }
 
-function ParamsSection({ params, open, onToggle }) {
-  const isAuthError = params.error && (params.error.includes('APJ_RT/028') || params.error.includes('not authorized'))
-  const count = params.data.length
+// Mapeo parcial de nombres técnicos SAP IBP → etiqueta descriptiva
+const PARAM_LABEL = {
+  P_PTGUID:  'Planning Area',
+  P_VRSIO:   'Version',
+  P_PSTEP:   'Planning Step',
+  P_KEYFIG:  'Key Figure',
+  P_HORIZF:  'Horizon From',
+  P_HORIZT:  'Horizon To',
+  P_DATFR:   'Date From',
+  P_DATTO:   'Date To',
+  P_SIMVER:  'Sim. Version',
+  P_SELOPT:  'Selection Option',
+  P_JOBNAM:  'Job Name',
+  P_JOBCNT:  'Job Count',
+  P_USERID:  'User ID',
+  P_RUNMOD:  'Run Mode',
+  P_SCENAR:  'Scenario',
+}
 
-  return (
-    <div style={{ marginBottom: 14, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
-      {/* Cabecera colapsable */}
-      <div
-        onClick={onToggle}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer', background: open ? 'var(--bg2)' : 'transparent', userSelect: 'none' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Parámetros del job</span>
-          {params.loading && <span style={{ fontSize: 9, color: 'var(--text3)' }}>…</span>}
-          {!params.loading && !params.error && (
-            <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '1px 7px' }}>{count}</span>
-          )}
-          {params.error && !params.loading && (
-            <span style={{ fontSize: 9, color: isAuthError ? '#fbbf24' : '#ff6b6b' }}>{isAuthError ? '⚠ sin acceso' : '✕ error'}</span>
-          )}
-        </div>
-        <span style={{ fontSize: 10, color: 'var(--text3)' }}>{open ? '▲' : '▼'}</span>
-      </div>
-
-      {/* Contenido */}
-      {open && (
-        <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg3)', padding: '12px 14px' }}>
-          {params.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando parámetros…</div>}
-
-          {params.error && isAuthError && (
-            <div style={{ fontSize: 11, color: '#fbbf24', lineHeight: 1.6 }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>Acceso no autorizado a parámetros</div>
-              <div style={{ color: 'var(--text2)' }}>
-                <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>JobParamValuesStructGet</code> solo devuelve parámetros cuando el job fue ejecutado por el usuario técnico del Communication Arrangement. Para jobs de otros usuarios, SAP IBP requiere el rol <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>SAP_BCG_APPLICATION_JOB_DISP</code> o que el Communication User esté configurado como el <em>JobUser</em> del job.
-              </div>
-            </div>
-          )}
-
-          {params.error && !isAuthError && (
-            <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {params.error}</div>
-          )}
-
-          {!params.loading && !params.error && count === 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Sin parámetros disponibles.</div>
-          )}
-
-          {!params.loading && !params.error && count > 0 && (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-              <thead>
-                <tr>
-                  {[['Paso', '40px'], ['Parámetro', ''], ['Op', '40px'], ['Valor', '']].map(([h, w]) => (
-                    <th key={h} style={{ width: w || undefined, textAlign: 'left', fontSize: 9, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingBottom: 6, borderBottom: '1px solid var(--border)', paddingRight: 10 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {params.data.map((p, i) => {
-                  const op    = OPTION_LABEL[p.Option] ?? p.Option ?? '='
-                  const value = p.High && p.High !== p.Low ? `${p.Low} → ${p.High}` : (p.Low ?? '—')
-                  return (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '5px 10px 5px 0', color: 'var(--text3)', fontFamily: 'var(--mono)', fontSize: 10 }}>{p.StepNr ?? '—'}</td>
-                      <td style={{ padding: '5px 10px 5px 0', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 10, wordBreak: 'break-all' }}>{p.JobParameterName || '—'}</td>
-                      <td style={{ padding: '5px 10px 5px 0', color: 'var(--text3)', textAlign: 'center' }}>{op}</td>
-                      <td style={{ padding: '5px 0', color: 'var(--text2)', fontFamily: 'var(--mono)', fontSize: 10, wordBreak: 'break-all' }}>{value}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-    </div>
-  )
+function paramLabel(name) {
+  return PARAM_LABEL[name] ?? name
 }
