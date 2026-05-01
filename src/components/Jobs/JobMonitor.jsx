@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
+import StepsPanel from './StepsPanel'
 import {
   toSapTs, formatSapTs, toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
@@ -58,6 +59,7 @@ export default function JobMonitor({ connection }) {
   const [restarting, setRestarting]     = useState(false)
   const [restartMsg, setRestartMsg]     = useState('')
   const [restartModal, setRestartModal] = useState(false)
+  const [stepsJob, setStepsJob]         = useState(null)
   const [tzMode, setTzModeState]        = useState(() => getTzMode())
   const resizing = useRef(null)
   const timerRef = useRef(null)
@@ -378,6 +380,18 @@ export default function JobMonitor({ connection }) {
 
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button
+              onClick={() => setStepsJob(selectedRow)}
+              title="Ver los pasos de ejecución de este job"
+              style={{
+                padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                border: '1px solid rgba(139,92,246,.4)',
+                background: 'rgba(139,92,246,.12)',
+                color: '#a78bfa', cursor: 'pointer',
+              }}
+            >
+              ▤ Ver pasos{selectedRow?.JobStepCount > 0 ? ` (${selectedRow.JobStepCount})` : ''}
+            </button>
+            <button
               onClick={handleCancel}
               disabled={!isCancelable || cancelling}
               title={!isCancelable ? 'Solo se pueden cancelar jobs en ejecución' : 'Cancelar este job en SAP IBP'}
@@ -421,6 +435,16 @@ export default function JobMonitor({ connection }) {
       <TechLogs logs={logs} />
 
       {/* Restart mode modal */}
+      {stepsJob && (
+        <StepsPanel
+          job={stepsJob}
+          connectionId={connection.id}
+          statuses={statuses}
+          tzMode={tzMode}
+          onClose={() => setStepsJob(null)}
+        />
+      )}
+
       {restartModal && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)',
