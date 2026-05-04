@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { formatSapTs, parseSapTs } from '../../utils/dateUtils'
+import { proxyCall } from '../../services/proxyCall'
 
 const MSG_STYLE = {
   A: { label: 'Abort',   color: '#ff6b6b', bg: 'rgba(255,107,107,.08)' },
@@ -44,7 +45,7 @@ function calcDuration(step, stepsArr, jobEnd) {
   return fmtDuration(end - start)
 }
 
-export default function StepsPanel({ job, connectionId, statuses, tzMode, onClose }) {
+export default function StepsPanel({ job, connection, session, statuses, tzMode, onClose }) {
   const [steps,      setSteps]      = useState([])
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
@@ -59,13 +60,9 @@ export default function StepsPanel({ job, connectionId, statuses, tzMode, onClos
   const [paramsExpanded, setParamsExpanded] = useState({})
 
   const proxy = useCallback(async (path) => {
-    const res = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionId, path }),
-    })
+    const res = await proxyCall({ connection, session, path })
     return res.json()
-  }, [connectionId])
+  }, [connection, session])
 
   // Parámetros del job (JobParamValuesStructGet) — carga en paralelo con los pasos
   useEffect(() => {

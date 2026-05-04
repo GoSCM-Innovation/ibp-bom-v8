@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import ProgressBar from '../ui/ProgressBar'
+import { proxyCall } from '../../services/proxyCall'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
@@ -21,7 +22,7 @@ const STATUS_COLORS = {
   X: '#374151', k: '#6b7280',
 }
 
-export default function Resumen({ connection }) {
+export default function Resumen({ connection, session }) {
   const [rows, setRows]           = useState([])
   const [statuses, setStatuses]   = useState([])
   const [loading, setLoading]     = useState(true)
@@ -47,16 +48,12 @@ export default function Resumen({ connection }) {
 
   const proxyPost = useCallback(async (path) => {
     const start = performance.now()
-    const res = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionId: connection.id, path }),
-    })
+    const res = await proxyCall({ connection, session, path })
     const data = await res.json()
     const duration = Math.round(performance.now() - start)
-    addLogRef.current({ method: 'POST', path, status: res.status, duration, detail: data.error || 'OK' })
+    addLogRef.current({ method: 'GET', path, status: res.status, duration, detail: data.error || 'OK' })
     return data
-  }, [connection.id])
+  }, [connection, session])
 
   useEffect(() => {
     proxyPost('/JobStatusInfoSet').then(data => {

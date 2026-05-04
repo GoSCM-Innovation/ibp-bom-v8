@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import StepsPanel from './StepsPanel'
+import { proxyCall } from '../../services/proxyCall'
 import {
   toSapTs, formatSapTs, toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
@@ -44,7 +45,7 @@ function encodeODataString(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
-export default function JobMonitor({ connection }) {
+export default function JobMonitor({ connection, session }) {
   const [statuses, setStatuses]       = useState([])
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
@@ -81,16 +82,12 @@ export default function JobMonitor({ connection }) {
 
   const proxyPost = useCallback(async (path, opts = {}) => {
     const start = performance.now()
-    const res = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionId: connection.id, path, ...opts }),
-    })
+    const res = await proxyCall({ connection, session, path, method: opts.method || 'GET' })
     const data = await res.json()
     const duration = Math.round(performance.now() - start)
-    addLogRef.current({ method: opts.method || 'POST', path, status: res.status, duration, detail: data.error || 'OK' })
+    addLogRef.current({ method: opts.method || 'GET', path, status: res.status, duration, detail: data.error || 'OK' })
     return data
-  }, [connection.id])
+  }, [connection, session])
 
   // Load status codes once
   useEffect(() => {
@@ -438,7 +435,8 @@ export default function JobMonitor({ connection }) {
       {stepsJob && (
         <StepsPanel
           job={stepsJob}
-          connectionId={connection.id}
+          connection={connection}
+          session={session}
           statuses={statuses}
           tzMode={tzMode}
           onClose={() => setStepsJob(null)}

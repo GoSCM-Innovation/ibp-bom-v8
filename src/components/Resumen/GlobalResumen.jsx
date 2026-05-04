@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import ProgressBar from '../ui/ProgressBar'
+import { proxyCall } from '../../services/proxyCall'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
@@ -28,7 +29,7 @@ const STATUS_LABELS = {
 
 const CONN_COLORS = ['#3b82f6', '#34d399', '#f97316', '#8b5cf6', '#06b6d4', '#ff6b6b', '#fbbf24', '#a78bfa']
 
-export default function GlobalResumen({ connections }) {
+export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
   const [connData, setConnData] = useState({}) // { connId: { rows, error, loading } }
   const [lastRefresh, setLastRefresh] = useState(null)
   const [tzMode, setTzModeState]      = useState(() => getTzMode())
@@ -52,17 +53,18 @@ export default function GlobalResumen({ connections }) {
   const loadAll = useCallback(async () => {
     const results = {}
     await Promise.all(connections.map(async (conn) => {
+      const session = sessions[conn.id]
+      if (!session) {
+        results[conn.id] = { rows: [], error: '', loading: false, noSession: true }
+        return
+      }
       results[conn.id] = { rows: [], error: '', loading: true }
       const start = performance.now()
       try {
-        const res = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ connectionId: conn.id, path: '/JobHeaderSet' }),
-        })
+        const res = await proxyCall({ connection: conn, session, path: '/JobHeaderSet' })
         const data = await res.json()
         const duration = Math.round(performance.now() - start)
-        addLogRef.current({ method: 'POST', path: `/JobHeaderSet (${conn.name})`, status: res.status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} rows` })
+        addLogRef.current({ method: 'GET', path: `/JobHeaderSet (${conn.name})`, status: res.status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} rows` })
         if (data.error) {
           results[conn.id] = { rows: [], error: data.error, loading: false }
         } else {
@@ -70,13 +72,13 @@ export default function GlobalResumen({ connections }) {
         }
       } catch (e) {
         const duration = Math.round(performance.now() - start)
-        addLogRef.current({ method: 'POST', path: `/JobHeaderSet (${conn.name})`, status: 0, duration, detail: e.message })
+        addLogRef.current({ method: 'GET', path: `/JobHeaderSet (${conn.name})`, status: 0, duration, detail: e.message })
         results[conn.id] = { rows: [], error: e.message, loading: false }
       }
     }))
     setConnData(results)
     setLastRefresh(new Date())
-  }, [connections])
+  }, [connections, sessions])
 
   useEffect(() => {
     if (connections.length === 0) return
@@ -104,6 +106,8 @@ export default function GlobalResumen({ connections }) {
   // Per-connection summary
   const connSummaries = connections.map((conn, idx) => {
     const d = connData[conn.id]
+    const hasSession = !!sessions[conn.id]
+    if (!hasSession) return { conn, idx, loading: false, total: 0, finished: 0, failed: 0, running: 0, scheduled: 0, successRate: 0, error: '', noSession: true }
     if (!d || d.loading) return { conn, idx, loading: true, total: 0, finished: 0, failed: 0, running: 0, scheduled: 0, successRate: 0, error: '' }
     if (d.error) return { conn, idx, loading: false, total: 0, finished: 0, failed: 0, running: 0, scheduled: 0, successRate: 0, error: d.error }
     const rows = filterRows(d.rows)
@@ -295,7 +299,13 @@ export default function GlobalResumen({ connections }) {
                     {cs.conn.name}
                   </td>
                   <td style={tdStyle}>
-                    {cs.loading ? (
+                    {cs.noSession ? (
+                      <button onClick={() => onLogin?.(cs.conn.id)} style={{
+                        fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, cursor: 'pointer',
+                        background: 'rgba(255,255,255,.06)', color: 'var(--text3)',
+                        border: '1px solid rgba(255,255,255,.12)',
+                      }}>🔒 Iniciar sesión</button>
+                    ) : cs.loading ? (
                       <span style={{ color: 'var(--text3)' }}>Cargando…</span>
                     ) : cs.error ? (
                       <span style={{ ...statusBadge, background: 'rgba(255,107,107,.15)', color: 'var(--red)', border: '1px solid rgba(255,107,107,.3)' }}>Error</span>

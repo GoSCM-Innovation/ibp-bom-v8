@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import ProgressBar from '../ui/ProgressBar'
+import { proxyCall } from '../../services/proxyCall'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -37,7 +38,7 @@ function downsample(rows, intervalMs) {
     }))
 }
 
-export default function ResourceStats({ connection }) {
+export default function ResourceStats({ connection, session }) {
   const [range,       setRange]       = useState(RANGES[2]) // 24h default
   const [data,        setData]        = useState([])
   const [current,     setCurrent]     = useState(null)
@@ -58,11 +59,7 @@ export default function ResourceStats({ connection }) {
       const filter = `Timestamp%20gt%20datetimeoffset'${encodeURIComponent(from)}'`
       const path = `/RES_CONS_STATS?$format=json&$filter=${filter}`
 
-      const res = await fetch('/api/proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: connection.id, path, com: '0068' }),
-      })
+      const res = await proxyCall({ connection, session, path, com: '0068' })
       if (!res.ok) throw new Error((await res.json()).error || `Error ${res.status}`)
       const json = await res.json()
 
@@ -90,7 +87,7 @@ export default function ResourceStats({ connection }) {
     } finally {
       setLoading(false)
     }
-  }, [connection.id, range])
+  }, [connection, session, range])
 
   useEffect(() => {
     setLoading(true)

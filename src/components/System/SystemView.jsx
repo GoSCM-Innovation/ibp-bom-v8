@@ -78,10 +78,10 @@ export default function SystemView({ connection, session, onLogout }) {
             Ve a Conexiones para agregar SAP_COM_0326 o SAP_COM_0068.
           </div>
         )}
-        {activeApp === 'resumen'  && <Resumen      connection={connection} />}
-        {activeApp === 'jobs'     && <Jobs         connection={connection} />}
-        {activeApp === 'monitor'  && <JobMonitor   connection={connection} />}
-        {activeApp === 'stats'    && <ResourceStats connection={connection} />}
+        {activeApp === 'resumen'  && <Resumen       connection={connection} session={session} />}
+        {activeApp === 'jobs'     && <Jobs          connection={connection} session={session} />}
+        {activeApp === 'monitor'  && <JobMonitor    connection={connection} session={session} />}
+        {activeApp === 'stats'    && <ResourceStats connection={connection} session={session} />}
       </div>
     </div>
   )

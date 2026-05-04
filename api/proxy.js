@@ -1,35 +1,3 @@
-import crypto from 'crypto'
-
-const REDIS_URL = process.env.KV_REST_API_URL
-const REDIS_TOKEN = process.env.KV_REST_API_TOKEN
-const KEY = 'ibp:connections'
-
-async function redisGet(key) {
-  const resp = await fetch(`${REDIS_URL}/pipeline`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify([['GET', key]])
-  })
-  const data = await resp.json()
-  const result = data[0]?.result
-  if (!result) return []
-  try {
-    const parsed = JSON.parse(result)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function decrypt(text) {
-  try {
-    const secret = process.env.ENCRYPTION_SECRET || 'default-secret-change-me'
-    const [ivHex, encrypted] = text.split(':')
-    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(secret.padEnd(32).slice(0, 32)), Buffer.from(ivHex, 'hex'))
-    return decipher.update(encrypted, 'hex', 'utf8') + decipher.final('utf8')
-  } catch { return '' }
-}
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS')
@@ -37,32 +5,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  let { connectionId, path, url, user, password, method = 'GET', body, injectJobUser, com } = req.body
-  let serviceRoot = null
-
-  if (connectionId) {
-    if (!REDIS_URL || !REDIS_TOKEN) return res.status(500).json({ error: 'Redis no configurado' })
-    const connections = await redisGet(KEY)
-    const conn = connections.find(c => c.id === connectionId)
-    if (!conn) return res.status(404).json({ error: 'Conexión no encontrada' })
-
-    const agreementKey = com === '0068' ? 'com0068' : 'com0326'
-    const agreement = conn[agreementKey]
-
-    if (!agreement?.url || !agreement?.user || !agreement?.password) {
-      return res.status(400).json({ error: `SAP_COM_${agreementKey === 'com0068' ? '0068' : '0326'} no configurado para esta conexión` })
-    }
-
-    serviceRoot = agreement.url
-    user = agreement.user
-    password = decrypt(agreement.password)
-
-    if (injectJobUser) {
-      const jobUser = conn.jobUser || agreement.user
-      path = (path || '') + `&JobUser=%27${encodeURIComponent(jobUser)}%27`
-    }
-    url = serviceRoot + (path || '')
-  }
+  const { url, serviceRoot, user, password, method = 'GET', body } = req.body
 
   if (!url || !user || !password) return res.status(400).json({ error: 'Missing url, user or password' })
 
@@ -70,7 +13,11 @@ export default async function handler(req, res) {
 
   try {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
-    const baseHeaders = { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json, application/xml, */*', 'Content-Type': 'application/json' }
+    const baseHeaders = {
+      'Authorization': `Basic ${auth}`,
+      'Accept': 'application/json, application/xml, */*',
+      'Content-Type': 'application/json',
+    }
 
     let csrfToken = null
     let sessionCookies = ''

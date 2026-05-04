@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
+import { proxyCall } from '../../services/proxyCall'
 
 const JOB_PATH = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
@@ -9,7 +10,7 @@ function encodeODataString(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
-function EjecutarBtn({ row, connectionId }) {
+function EjecutarBtn({ row, connection, session }) {
   const [status, setStatus] = useState(null) // null | 'loading' | 'ok' | 'error'
   const [msg, setMsg] = useState('')
 
@@ -19,15 +20,11 @@ function EjecutarBtn({ row, connectionId }) {
     if (!window.confirm(`¿Ejecutar el job "${label}"?\n\nEsta acción lanzará el job en SAP IBP.`)) return
     setStatus('loading'); setMsg('')
     try {
-      const r = await fetch('/api/proxy', {
+      const r = await proxyCall({
+        connection, session,
+        path: `/JobSchedule?JobTemplateName=${encodeODataString(row.JobTemplateName)}&JobText=${encodeODataString(label)}`,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          connectionId,
-          path: `/JobSchedule?JobTemplateName=${encodeODataString(row.JobTemplateName)}&JobText=${encodeODataString(label)}`,
-          method: 'POST',
-          injectJobUser: true,
-        }),
+        injectJobUser: true,
       })
       const data = await r.json()
       if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
@@ -71,7 +68,7 @@ function EjecutarBtn({ row, connectionId }) {
 
 const TD = { padding: '6px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
 
-export default function Jobs({ connection }) {
+export default function Jobs({ connection, session }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -85,24 +82,20 @@ export default function Jobs({ connection }) {
   useEffect(() => {
     setLoading(true); setError(''); setRows([]); setSearch('')
     const start = performance.now()
-    fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionId: connection.id, path: JOB_PATH }),
-    })
+    proxyCall({ connection, session, path: JOB_PATH })
       .then(r => {
         const status = r.status
         return r.json().then(data => ({ data, status }))
       })
       .then(({ data, status }) => {
         const duration = Math.round(performance.now() - start)
-        addLog({ method: 'POST', path: JOB_PATH, status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} templates` })
+        addLog({ method: 'GET', path: JOB_PATH, status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} templates` })
         if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
         setRows(data?.d?.results ?? data?.value ?? [])
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [connection.id])
+  }, [connection, session])
 
   const filtered = search.trim()
     ? rows.filter(row => Object.values(row).some(v => String(v ?? '').toLowerCase().includes(search.toLowerCase())))
@@ -241,7 +234,7 @@ export default function Jobs({ connection }) {
                       {String(row[col] ?? '')}
                     </td>
                   ))}
-                  <EjecutarBtn row={row} connectionId={connection.id} />
+                  <EjecutarBtn row={row} connection={connection} session={session} />
                 </tr>
               ))}
             </tbody>
