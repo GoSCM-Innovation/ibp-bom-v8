@@ -11,16 +11,24 @@ import {
 const REFRESH_MS = 30000
 const DEFAULT_HOURS = 24
 
-const PALETTE = [
-  { bg: 'rgba(34,197,94,.15)',   color: '#22c55e', border: 'rgba(34,197,94,.3)' },
-  { bg: 'rgba(251,191,36,.15)',  color: '#fbbf24', border: 'rgba(251,191,36,.3)' },
-  { bg: 'rgba(255,107,107,.15)', color: '#ff6b6b', border: 'rgba(255,107,107,.3)' },
-  { bg: 'rgba(59,130,246,.15)',  color: '#3b82f6', border: 'rgba(59,130,246,.3)' },
-  { bg: 'rgba(139,92,246,.15)',  color: '#8b5cf6', border: 'rgba(139,92,246,.3)' },
-  { bg: 'rgba(249,115,22,.15)',  color: '#f97316', border: 'rgba(249,115,22,.3)' },
-  { bg: 'rgba(6,182,212,.15)',   color: '#06b6d4', border: 'rgba(6,182,212,.3)' },
-  { bg: 'rgba(156,163,175,.15)', color: '#9ca3af', border: 'rgba(156,163,175,.3)' },
-]
+const mk = (hex) => ({ color: hex, bg: `${hex}26`, border: `${hex}4d` })
+const STATUS_COLORS = {
+  A: mk('#ef4444'), // Failed
+  U: mk('#ef4444'), // User Error
+  C: mk('#f97316'), // Canceled
+  c: mk('#fb923c'), // Canceling
+  W: mk('#eab308'), // Finished with Warning
+  F: mk('#22c55e'), // Finished
+  P: mk('#3b82f6'), // Released
+  R: mk('#06b6d4'), // In Process
+  S: mk('#8b5cf6'), // Scheduled
+  Y: mk('#14b8a6'), // Ready
+  K: mk('#6b7280'), // Skipped
+  k: mk('#6b7280'), // Skip
+  D: mk('#4b5563'), // Deleted
+  X: mk('#9ca3af'), // Unknown
+}
+const FALLBACK_COLOR = mk('#9ca3af')
 
 // P=Released, R=In Process, S=Scheduled, Y=Ready
 const CANCELABLE_STATUSES = ['P', 'R', 'S', 'Y']
@@ -93,7 +101,7 @@ export default function JobMonitor({ connection, session }) {
   useEffect(() => {
     proxyPost('/JobStatusInfoSet').then(data => {
       const results = data?.d?.results ?? data?.value ?? []
-      setStatuses(results.map((s, i) => ({ ...s, color: PALETTE[i % PALETTE.length] })))
+      setStatuses(results.map(s => ({ ...s, color: STATUS_COLORS[s.JobStatus] ?? FALLBACK_COLOR })))
     }).catch(() => {})
   }, [proxyPost])
 
