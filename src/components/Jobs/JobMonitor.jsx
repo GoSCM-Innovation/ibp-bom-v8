@@ -199,7 +199,7 @@ export default function JobMonitor({ connection, session }) {
 
   function StatusBadge({ code }) {
     const s = statuses.find(x => x.JobStatus === code)
-    const c = s?.color || PALETTE[7]
+    const c = s?.color ?? FALLBACK_COLOR
     return (
       <span style={{
         display: 'inline-block', padding: '2px 8px', borderRadius: 20, fontSize: 10,
@@ -282,7 +282,7 @@ export default function JobMonitor({ connection, session }) {
       {/* Status filter tabs */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexShrink: 0, flexWrap: 'wrap' }}>
         <FilterBtn active={activeStatus === 'ALL'} onClick={() => setActiveStatus('ALL')}
-          label="Todos" count={filteredBase.length} color={PALETTE[3]} />
+          label="Todos" count={filteredBase.length} color={mk('#3b82f6')} />
         {statuses.map(s => (
           <FilterBtn key={s.JobStatus} active={activeStatus === s.JobStatus}
             onClick={() => setActiveStatus(s.JobStatus)}
