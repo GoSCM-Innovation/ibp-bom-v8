@@ -1,7 +1,7 @@
 const W = 220
 const W_MIN = 52
 
-export default function Sidebar({ connections, activeId, onSelect, expanded, onToggle, loading, isMobile = false, mobileOpen = false }) {
+export default function Sidebar({ connections, sessions = {}, activeId, onSelect, expanded, onToggle, isMobile = false, mobileOpen = false }) {
   const w = expanded ? W : W_MIN
 
   return (
@@ -46,7 +46,6 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
         active={activeId === 'connections'}
         expanded={expanded}
         onClick={() => onSelect('connections')}
-        accent
       />
 
       {/* Resumen general link */}
@@ -57,7 +56,6 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
         active={activeId === 'resumen-general'}
         expanded={expanded}
         onClick={() => onSelect('resumen-general')}
-        accent
       />
 
       {/* Divider */}
@@ -67,9 +65,10 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
 
       {/* Connection list */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {loading
-          ? expanded && <div style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text3)' }}>Cargando...</div>
-          : connections.map((c, idx) => (
+        {connections.map((c, idx) => {
+          const hasCredentials = c.com0326?.url || c.com0068?.url
+          const loggedIn = !!sessions[c.id]
+          return (
             <SidebarItem
               key={c.id}
               id={c.id}
@@ -79,9 +78,10 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
               active={activeId === c.id}
               expanded={expanded}
               onClick={() => onSelect(c.id)}
+              sessionStatus={hasCredentials ? (loggedIn ? 'online' : 'offline') : null}
             />
-          ))
-        }
+          )
+        })}
       </div>
 
       {/* Add new */}
@@ -100,7 +100,7 @@ export default function Sidebar({ connections, activeId, onSelect, expanded, onT
   )
 }
 
-function SidebarItem({ label, icon, numberIcon, active, expanded, onClick, accent }) {
+function SidebarItem({ label, icon, numberIcon, active, expanded, onClick, sessionStatus }) {
   return (
     <button onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center',
@@ -127,12 +127,28 @@ function SidebarItem({ label, icon, numberIcon, active, expanded, onClick, accen
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 10, fontWeight: 700, flexShrink: 0,
           color: active ? 'var(--accent)' : 'var(--text2)',
-        }}>{icon}</span>
+          position: 'relative',
+        }}>
+          {icon}
+          {/* Session indicator dot */}
+          {sessionStatus && (
+            <span style={{
+              position: 'absolute', bottom: -2, right: -2,
+              width: 7, height: 7, borderRadius: '50%',
+              background: sessionStatus === 'online' ? '#34d399' : 'rgba(255,255,255,.25)',
+              border: '1.5px solid var(--bg2)',
+            }} />
+          )}
+        </span>
       ) : (
         <span style={{ fontSize: 14, flexShrink: 0, width: 22, textAlign: 'center' }}>{icon}</span>
       )}
       {expanded && (
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{label}</span>
+      )}
+      {/* Lock icon when expanded and offline */}
+      {expanded && sessionStatus === 'offline' && (
+        <span style={{ fontSize: 9, color: 'var(--text3)', flexShrink: 0 }}>🔒</span>
       )}
     </button>
   )

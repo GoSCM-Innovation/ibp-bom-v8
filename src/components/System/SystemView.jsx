@@ -5,7 +5,7 @@ import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 
-export default function SystemView({ connection }) {
+export default function SystemView({ connection, session, onLogout }) {
   const has0326 = !!(connection.com0326?.url && connection.com0326?.user)
   const has0068 = !!(connection.com0068?.url && connection.com0068?.user)
 
@@ -32,10 +32,24 @@ export default function SystemView({ connection }) {
         padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
       }}>
         <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{connection.name}</div>
-          <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>{displayUrl}</div>
+          <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
+            {session ? session.user : displayUrl}
+          </div>
         </div>
+        {session && onLogout && (
+          <button onClick={onLogout} title="Cerrar sesión" style={{
+            background: 'none', border: '1px solid rgba(255,255,255,.12)', borderRadius: 6,
+            color: 'var(--text3)', fontSize: 11, fontWeight: 600, padding: '4px 10px',
+            cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--red)'; e.currentTarget.style.color = 'var(--red)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,.12)'; e.currentTarget.style.color = 'var(--text3)' }}
+          >
+            Cerrar sesión
+          </button>
+        )}
       </div>
 
       {/* App sub-tabs */}
