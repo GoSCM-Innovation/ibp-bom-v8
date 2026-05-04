@@ -1,12 +1,18 @@
 const key = id => `ibp_session_${id}`
 
-export function getSession(connId) {
-  try { return JSON.parse(localStorage.getItem(key(connId))) || null }
-  catch { return null }
+function isValidSession(s) {
+  return s && (s.com0326 || s.com0068)
 }
 
-export function setSession(connId, user, password) {
-  localStorage.setItem(key(connId), JSON.stringify({ user, password }))
+export function getSession(connId) {
+  try {
+    const s = JSON.parse(localStorage.getItem(key(connId))) || null
+    return isValidSession(s) ? s : null
+  } catch { return null }
+}
+
+export function setSession(connId, creds) {
+  localStorage.setItem(key(connId), JSON.stringify(creds))
 }
 
 export function clearSession(connId) {

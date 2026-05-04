@@ -35,7 +35,7 @@ export default function SystemView({ connection, session, onLogout }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{connection.name}</div>
           <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
-            {session ? session.user : displayUrl}
+            {session ? (session.com0326?.user || session.com0068?.user || '—') : displayUrl}
           </div>
         </div>
         {session && onLogout && (

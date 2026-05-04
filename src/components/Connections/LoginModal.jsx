@@ -1,22 +1,34 @@
 import { useState, useEffect, useRef } from 'react'
 import ConnectionAvatar from './ConnectionAvatar'
 
-export default function LoginModal({ conn, onLogin, onCancel }) {
-  const defaultUser = conn.com0326?.user || conn.com0068?.user || ''
-  const [user, setUser] = useState(defaultUser)
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const passwordRef = useRef(null)
+const COM_META = {
+  com0326: { name: 'SAP_COM_0326', desc: 'Application Jobs' },
+  com0068: { name: 'SAP_COM_0068', desc: 'Resource Stats' },
+}
 
-  useEffect(() => {
-    passwordRef.current?.focus()
-  }, [])
+export default function LoginModal({ conn, onLogin, onCancel }) {
+  const activeKeys = ['com0326', 'com0068'].filter(k => conn[k]?.url)
+  const multi = activeKeys.length > 1
+
+  const [creds, setCreds] = useState(() =>
+    Object.fromEntries(activeKeys.map(k => [k, { user: conn[k]?.user || '', password: '' }]))
+  )
+  const [error, setError] = useState('')
+  const firstPasswordRef = useRef(null)
+
+  useEffect(() => { firstPasswordRef.current?.focus() }, [])
+
+  function setField(key, field, value) {
+    setCreds(p => ({ ...p, [key]: { ...p[key], [field]: value } }))
+  }
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (!user)     { setError('El usuario es obligatorio'); return }
-    if (!password) { setError('La contraseña es obligatoria'); return }
-    onLogin(user, password)
+    for (const k of activeKeys) {
+      if (!creds[k].user)     { setError(`Usuario requerido para ${COM_META[k].name}`); return }
+      if (!creds[k].password) { setError(`Contraseña requerida para ${COM_META[k].name}`); return }
+    }
+    onLogin(creds)
   }
 
   return (
@@ -27,7 +39,7 @@ export default function LoginModal({ conn, onLogin, onCancel }) {
     }} onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
       <div style={{
         background: 'var(--bg2)', border: '1px solid var(--border2)',
-        borderRadius: 12, padding: 28, width: 340, maxWidth: '90vw',
+        borderRadius: 12, padding: 28, width: 360, maxWidth: '90vw',
         boxShadow: '0 24px 48px rgba(0,0,0,.5)',
       }}>
         {/* Header */}
@@ -40,29 +52,42 @@ export default function LoginModal({ conn, onLogin, onCancel }) {
         </div>
 
         <form onSubmit={handleSubmit} autoComplete="on">
-          {/* Hidden username field for password manager autocomplete */}
           <input type="hidden" name="connection-id" value={conn.id} />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <Field
-              label="Usuario"
-              name="username"
-              value={user}
-              onChange={setUser}
-              placeholder={defaultUser || 'COM_USER'}
-              autoComplete="username"
-              mono
-            />
-            <Field
-              label="Contraseña"
-              name="password"
-              value={password}
-              onChange={setPassword}
-              placeholder="••••••••"
-              type="password"
-              autoComplete="current-password"
-              inputRef={passwordRef}
-            />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: multi ? 20 : 14 }}>
+            {activeKeys.map((k, i) => (
+              <div key={k}>
+                {multi && (
+                  <>
+                    {i > 0 && <div style={{ height: 1, background: 'var(--border)', marginBottom: 20 }} />}
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 12 }}>
+                      {COM_META[k].name} — {COM_META[k].desc}
+                    </div>
+                  </>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <Field
+                    label="Usuario"
+                    name={`username-${k}`}
+                    value={creds[k].user}
+                    onChange={v => setField(k, 'user', v)}
+                    placeholder={conn[k]?.user || 'COM_USER'}
+                    autoComplete="username"
+                    mono
+                  />
+                  <Field
+                    label="Contraseña"
+                    name={`password-${k}`}
+                    value={creds[k].password}
+                    onChange={v => setField(k, 'password', v)}
+                    placeholder="••••••••"
+                    type="password"
+                    autoComplete="current-password"
+                    inputRef={i === 0 ? firstPasswordRef : undefined}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
 
           {error && (
@@ -72,11 +97,11 @@ export default function LoginModal({ conn, onLogin, onCancel }) {
           <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
             <button type="button" onClick={onCancel} style={{
               background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
-              color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 16px',
+              color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 16px', cursor: 'pointer',
             }}>Cancelar</button>
             <button type="submit" style={{
               background: 'var(--accent)', border: 'none', borderRadius: 6,
-              color: '#000', fontSize: 12, fontWeight: 700, padding: '7px 20px',
+              color: '#000', fontSize: 12, fontWeight: 700, padding: '7px 20px', cursor: 'pointer',
             }}>Ingresar</button>
           </div>
         </form>

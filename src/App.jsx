@@ -56,9 +56,9 @@ export default function App() {
     if (isMobile) setSidebarOpen(false)
   }
 
-  function handleLogin(connId, user, password) {
-    setSession(connId, user, password)
-    setSessions(p => ({ ...p, [connId]: { user, password } }))
+  function handleLogin(connId, creds) {
+    setSession(connId, creds)
+    setSessions(p => ({ ...p, [connId]: creds }))
     setLoginTarget(null)
     setActiveId(connId)
     if (isMobile) setSidebarOpen(false)
@@ -115,7 +115,7 @@ export default function App() {
       {loginConn && (
         <LoginModal
           conn={loginConn}
-          onLogin={(user, pwd) => handleLogin(loginTarget, user, pwd)}
+          onLogin={(creds) => handleLogin(loginTarget, creds)}
           onCancel={() => setLoginTarget(null)}
         />
       )}

@@ -1,10 +1,12 @@
 export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser }) {
-  const agreement = com === '0068' ? connection.com0068 : connection.com0326
+  const comKey = `com${com}`
+  const agreement = connection[comKey]
   const serviceRoot = agreement?.url || ''
+  const sessionCreds = session?.[comKey] || {}
 
   let fullPath = path || ''
   if (injectJobUser) {
-    const jobUser = connection.jobUser || session?.user || agreement?.user || ''
+    const jobUser = connection.jobUser || sessionCreds.user || agreement?.user || ''
     if (jobUser) fullPath += `&JobUser=%27${encodeURIComponent(jobUser)}%27`
   }
 
@@ -14,8 +16,8 @@ export async function proxyCall({ connection, session, com = '0326', path, metho
     body: JSON.stringify({
       url: serviceRoot + fullPath,
       serviceRoot,
-      user: session?.user || agreement?.user || '',
-      password: session?.password || '',
+      user: sessionCreds.user || agreement?.user || '',
+      password: sessionCreds.password || '',
       method,
       ...(body !== undefined && { body }),
     }),
