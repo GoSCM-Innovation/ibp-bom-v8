@@ -1,14 +1,11 @@
 import { useState } from 'react'
 import ConnectionForm from './ConnectionForm'
 import ConnectionAvatar from './ConnectionAvatar'
-import TechLogs, { useTechLogs } from '../TechLogs'
+import { remove } from '../../services/connectionStorage'
 
 export default function Connections({ connections, onSaved, onDeleted, onSelect }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [testing, setTesting] = useState(null)
-  const [testResult, setTestResult] = useState({})
-  const [logs, addLog] = useTechLogs()
 
   function handleEdit(conn) {
     setEditing(conn)
@@ -26,37 +23,10 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
     onSaved()
   }
 
-  async function handleDelete(id, name) {
+  function handleDelete(id, name) {
     if (!confirm(`¿Eliminar la conexión "${name}"?`)) return
-    await fetch('/api/connections', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
+    remove(id)
     onDeleted(id)
-  }
-
-  async function handleTest(conn) {
-    setTesting(conn.id)
-    setTestResult(p => ({ ...p, [conn.id]: null }))
-    const start = performance.now()
-    const com = conn.com0326?.url ? '0326' : conn.com0068?.url ? '0068' : '0326'
-    try {
-      const res = await fetch('/api/proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: conn.id, path: '/$metadata', com }),
-      })
-      const duration = Math.round(performance.now() - start)
-      addLog({ method: 'POST', path: `/$metadata (${conn.name})`, status: res.status, duration, detail: res.ok ? 'Conexión exitosa' : 'Error de conexión' })
-      setTestResult(p => ({ ...p, [conn.id]: res.ok ? 'ok' : 'error' }))
-    } catch (e) {
-      const duration = Math.round(performance.now() - start)
-      addLog({ method: 'POST', path: `/$metadata (${conn.name})`, status: 0, duration, detail: e.message })
-      setTestResult(p => ({ ...p, [conn.id]: 'error' }))
-    } finally {
-      setTesting(null)
-    }
   }
 
   return (
@@ -66,7 +36,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
         <div>
           <div style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Conexiones</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 3 }}>
-            Gestiona los sistemas SAP IBP disponibles para el equipo de soporte
+            Tus conexiones SAP IBP, guardadas en este navegador
           </div>
         </div>
         <button onClick={handleNew} style={{
@@ -112,40 +82,27 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
 
       {/* Connection cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {connections.map((conn, idx) => (
+        {connections.map((conn) => (
           <div key={conn.id} style={{
             background: 'var(--bg2)', border: '1px solid var(--border)',
             borderRadius: 10, padding: '16px 20px',
             display: 'flex', alignItems: 'center', gap: 16,
           }}>
 
-            {/* Avatar */}
             <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={40} />
 
-            {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{conn.name}</div>
+              {conn.com0326?.user && (
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
+                  {conn.com0326.user}
+                </div>
+              )}
             </div>
 
-            {/* Test result */}
-            {testResult[conn.id] && (
-              <div style={{
-                fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
-                background: testResult[conn.id] === 'ok' ? 'rgba(52,211,153,.15)' : 'rgba(255,107,107,.15)',
-                color: testResult[conn.id] === 'ok' ? 'var(--green)' : 'var(--red)',
-                border: `1px solid ${testResult[conn.id] === 'ok' ? 'rgba(52,211,153,.3)' : 'rgba(255,107,107,.3)'}`,
-              }}>
-                {testResult[conn.id] === 'ok' ? '✓ Conectado' : '✕ Error'}
-              </div>
-            )}
-
-            {/* Actions */}
             <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <button onClick={() => onSelect(conn.id)} style={btnStyle('var(--cyan)')}>
                 Abrir
-              </button>
-              <button onClick={() => handleTest(conn)} disabled={testing === conn.id} style={btnStyle('var(--text2)')}>
-                {testing === conn.id ? '...' : 'Probar'}
               </button>
               <button onClick={() => handleEdit(conn)} style={btnStyle('var(--text2)')}>
                 Editar
@@ -157,8 +114,6 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
           </div>
         ))}
       </div>
-
-      <TechLogs logs={logs} />
     </div>
   )
 }

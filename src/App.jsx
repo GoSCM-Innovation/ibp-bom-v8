@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar/Sidebar'
 import Connections from './components/Connections/Connections'
 import SystemView from './components/System/SystemView'
 import GlobalResumen from './components/Resumen/GlobalResumen'
+import { getAll } from './services/connectionStorage'
 import './App.css'
 
 function useIsMobile() {
@@ -17,34 +18,23 @@ function useIsMobile() {
 }
 
 export default function App() {
-  const [connections, setConnections] = useState([])
+  const [connections, setConnections] = useState(() => getAll())
   const [activeId, setActiveId] = useState('connections')
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
-  const [sidebarOpen, setSidebarOpen] = useState(false) // mobile drawer
-  const [loading, setLoading] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const isMobile = useIsMobile()
 
-  useEffect(() => { fetchConnections() }, [])
-
-  // Auto-collapse sidebar when switching to mobile
   useEffect(() => {
     if (isMobile) setSidebarExpanded(false)
   }, [isMobile])
 
-  async function fetchConnections() {
-    try {
-      const res = await fetch('/api/connections')
-      if (res.ok) setConnections(await res.json())
-    } catch (e) {
-      console.error('Error loading connections:', e)
-    } finally {
-      setLoading(false)
-    }
+  function refreshConnections() {
+    setConnections(getAll())
   }
 
   function handleDeleted(id) {
     if (activeId === id) setActiveId('connections')
-    fetchConnections()
+    refreshConnections()
   }
 
   function handleSelect(id) {
@@ -56,7 +46,7 @@ export default function App() {
 
   function renderMain() {
     if (activeId === 'connections') {
-      return <Connections connections={connections} onSaved={fetchConnections} onDeleted={handleDeleted} onSelect={handleSelect} />
+      return <Connections connections={connections} onSaved={refreshConnections} onDeleted={handleDeleted} onSelect={handleSelect} />
     }
     if (activeId === 'resumen-general') {
       return <GlobalResumen connections={connections} />
@@ -72,7 +62,6 @@ export default function App() {
       <Header onMenuToggle={isMobile ? () => setSidebarOpen(p => !p) : null} />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
 
-        {/* Backdrop for mobile drawer */}
         <div
           className={`sidebar-backdrop${sidebarOpen ? ' open' : ''}`}
           onClick={() => setSidebarOpen(false)}
@@ -84,7 +73,7 @@ export default function App() {
           onSelect={handleSelect}
           expanded={sidebarExpanded}
           onToggle={() => setSidebarExpanded(p => !p)}
-          loading={loading}
+          loading={false}
           isMobile={isMobile}
           mobileOpen={sidebarOpen}
         />

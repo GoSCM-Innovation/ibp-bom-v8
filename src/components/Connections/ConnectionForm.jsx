@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { upsert } from '../../services/connectionStorage'
 
 const AMBIENTES = [
   { value: '', label: 'Seleccionar...' },
@@ -13,85 +14,61 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     jobUser:  initial?.jobUser  || '',
     logoUrl:  initial?.logoUrl  || '',
     com0326: {
-      url:      initial?.com0326?.url      || '',
-      user:     initial?.com0326?.user     || '',
-      password: '',
+      url:  initial?.com0326?.url  || '',
+      user: initial?.com0326?.user || '',
     },
     com0068: {
-      url:      initial?.com0068?.url      || '',
-      user:     initial?.com0068?.user     || '',
-      password: '',
+      url:  initial?.com0068?.url  || '',
+      user: initial?.com0068?.user || '',
     },
   })
-  const [saving, setSaving] = useState(false)
-  const [error,  setError]  = useState('')
+  const [error, setError] = useState('')
 
   function setGeneral(k, v) { setForm(p => ({ ...p, [k]: v })) }
   function setAgreement(key, k, v) { setForm(p => ({ ...p, [key]: { ...p[key], [k]: v } })) }
 
-  function validateAgreement(a, name, isNew) {
-    const hasAny = a.url || a.user || a.password
-    if (!hasAny) return null // vacío completo → se omite, ok
+  function validateAgreement(a, name) {
+    const hasAny = a.url || a.user
+    if (!hasAny) return null
     if (!a.url)  return `${name}: falta la URL`
     if (!a.user) return `${name}: falta el usuario`
-    if (isNew && !a.password) return `${name}: la contraseña es obligatoria para conexiones nuevas`
     return null
   }
 
-  async function handleSave() {
+  function handleSave() {
     if (!form.name)    { setError('El nombre es obligatorio'); return }
     if (!form.ambiente) { setError('Selecciona un ambiente'); return }
 
-    const isNew = !initial
-    const err326 = validateAgreement(form.com0326, 'SAP_COM_0326', isNew)
-    const err068 = validateAgreement(form.com0068, 'SAP_COM_0068', isNew)
+    const err326 = validateAgreement(form.com0326, 'SAP_COM_0326')
+    const err068 = validateAgreement(form.com0068, 'SAP_COM_0068')
     if (err326) { setError(err326); return }
     if (err068) { setError(err068); return }
 
-    setSaving(true); setError('')
-    try {
-      const body = {
-        name:     `${form.name} (${form.ambiente})`,
-        ambiente: form.ambiente,
-        jobUser:  form.jobUser,
-        logoUrl:  form.logoUrl,
-      }
-      if (initial) body.id = initial.id
-
-      // Incluir acuerdo solo si tiene url+user (password es opcional en edición)
-      if (form.com0326.url || form.com0326.user) {
-        body.com0326 = {
-          url:  form.com0326.url.replace(/\/$/, ''),
-          user: form.com0326.user,
-          ...(form.com0326.password ? { password: form.com0326.password } : {}),
-        }
-      } else if (initial) {
-        // Edición: el usuario vació la sección → eliminar el acuerdo
-        body.com0326 = null
-      }
-
-      if (form.com0068.url || form.com0068.user) {
-        body.com0068 = {
-          url:  form.com0068.url.replace(/\/$/, ''),
-          user: form.com0068.user,
-          ...(form.com0068.password ? { password: form.com0068.password } : {}),
-        }
-      } else if (initial) {
-        body.com0068 = null
-      }
-
-      const res = await fetch('/api/connections', {
-        method:  initial ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error((await res.json()).error || 'Error')
-      onSaved()
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setSaving(false)
+    const conn = {
+      ...(initial ? { ...initial } : {}),
+      name:     `${form.name} (${form.ambiente})`,
+      ambiente: form.ambiente,
+      jobUser:  form.jobUser,
+      logoUrl:  form.logoUrl,
     }
+
+    const has326 = form.com0326.url || form.com0326.user
+    const has068 = form.com0068.url || form.com0068.user
+
+    if (has326) {
+      conn.com0326 = { url: form.com0326.url.replace(/\/$/, ''), user: form.com0326.user }
+    } else {
+      delete conn.com0326
+    }
+
+    if (has068) {
+      conn.com0068 = { url: form.com0068.url.replace(/\/$/, ''), user: form.com0068.user }
+    } else {
+      delete conn.com0068
+    }
+
+    upsert(conn)
+    onSaved()
   }
 
   return (
@@ -104,7 +81,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
         <Field label="Nombre conexión" value={form.name} onChange={v => setGeneral('name', v)} placeholder="ej: IBP Cliente ABC" />
         <SelectField label="Ambiente" value={form.ambiente} onChange={v => setGeneral('ambiente', v)} options={AMBIENTES} />
-        <Field label="Usuario de negocio (JobUser)" value={form.jobUser} onChange={v => setGeneral('jobUser', v)} placeholder="EXT_USUARIO" mono />
+        <Field label="Usuario de negocio (JobUser, opcional)" value={form.jobUser} onChange={v => setGeneral('jobUser', v)} placeholder="EXT_USUARIO" mono />
         <Field label="URL del logo (opcional)" value={form.logoUrl} onChange={v => setGeneral('logoUrl', v)} placeholder="https://empresa.com/logo.png" />
       </div>
 
@@ -114,8 +91,6 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         subtitle="Resumen · Job Templates · Job Monitor"
         values={form.com0326}
         onChange={(k, v) => setAgreement('com0326', k, v)}
-        isEditing={!!initial}
-        hasExisting={!!initial?.com0326?.user}
       />
 
       {/* SAP_COM_0068 */}
@@ -124,12 +99,14 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         subtitle="Resource Stats"
         values={form.com0068}
         onChange={(k, v) => setAgreement('com0068', k, v)}
-        isEditing={!!initial}
-        hasExisting={!!initial?.com0068?.user}
       />
 
+      <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text2)' }}>
+        La contraseña se pedirá al iniciar sesión en cada conexión — no se guarda aquí.
+      </div>
+
       {form.name && form.ambiente && (
-        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text2)' }}>
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text2)' }}>
           Nombre final: <strong style={{ color: 'var(--text)' }}>{form.name} ({form.ambiente})</strong>
         </div>
       )}
@@ -140,16 +117,16 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
           background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
           color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 18px',
         }}>Cancelar</button>
-        <button type="button" disabled={saving} onClick={handleSave} style={{
+        <button type="button" onClick={handleSave} style={{
           background: 'var(--accent)', border: 'none', borderRadius: 6,
           color: '#000', fontSize: 12, fontWeight: 700, padding: '7px 18px',
-        }}>{saving ? 'Guardando...' : initial ? 'Guardar cambios' : 'Crear conexión'}</button>
+        }}>{initial ? 'Guardar cambios' : 'Crear conexión'}</button>
       </div>
     </div>
   )
 }
 
-function AgreementSection({ title, subtitle, values, onChange, isEditing, hasExisting }) {
+function AgreementSection({ title, subtitle, values, onChange }) {
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ marginBottom: 10 }}>
@@ -158,16 +135,9 @@ function AgreementSection({ title, subtitle, values, onChange, isEditing, hasExi
         </div>
         <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{subtitle}</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <Field label="URL API" value={values.url} onChange={v => onChange('url', v)} placeholder="https://tenant-api.scmibp.ondemand.com/..." mono />
-        <Field label="Usuario" value={values.user} onChange={v => onChange('user', v)} placeholder="COM_USER" mono />
-        <Field
-          label={isEditing && hasExisting ? 'Contraseña (vacío = mantener)' : 'Contraseña'}
-          value={values.password}
-          onChange={v => onChange('password', v)}
-          type="password"
-          placeholder={isEditing && hasExisting ? '••••••••' : 'Contraseña'}
-        />
+        <Field label="Usuario de comunicación" value={values.user} onChange={v => onChange('user', v)} placeholder="COM_USER" mono />
       </div>
     </div>
   )
