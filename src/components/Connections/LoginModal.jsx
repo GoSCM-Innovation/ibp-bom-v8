@@ -7,13 +7,13 @@ const COM_META = {
 }
 
 export default function LoginModal({ conn, existingSession, onLogin, onCancel }) {
-  const activeKeys = ['com0326', 'com0068'].filter(
-    k => conn[k]?.url && !existingSession?.[k]?.password
-  )
-  const multi = activeKeys.length > 1
+  // All configured agreements, split by whether they already have credentials
+  const allKeys    = ['com0326', 'com0068'].filter(k => conn[k]?.url)
+  const pendingKeys = allKeys.filter(k => !existingSession?.[k]?.password)
+  const multi      = allKeys.length > 1
 
   const [creds, setCreds] = useState(() =>
-    Object.fromEntries(activeKeys.map(k => [k, { user: conn[k]?.user || '', password: '' }]))
+    Object.fromEntries(pendingKeys.map(k => [k, { user: conn[k]?.user || '', password: '' }]))
   )
   const [error, setError] = useState('')
   const firstPasswordRef = useRef(null)
@@ -26,7 +26,7 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
 
   function handleSubmit(e) {
     e.preventDefault()
-    for (const k of activeKeys) {
+    for (const k of pendingKeys) {
       if (!creds[k].user)     { setError(`Usuario requerido para ${COM_META[k].name}`); return }
       if (!creds[k].password) { setError(`Contraseña requerida para ${COM_META[k].name}`); return }
     }
@@ -56,40 +56,62 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
         <form onSubmit={handleSubmit} autoComplete="on">
           <input type="hidden" name="connection-id" value={conn.id} />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: multi ? 20 : 14 }}>
-            {activeKeys.map((k, i) => (
-              <div key={k}>
-                {multi && (
-                  <>
-                    {i > 0 && <div style={{ height: 1, background: 'var(--border)', marginBottom: 20 }} />}
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {allKeys.map((k, i) => {
+              const authenticated = !!existingSession?.[k]?.password
+              return (
+                <div key={k}>
+                  {i > 0 && <div style={{ height: 1, background: 'var(--border)', margin: '16px 0' }} />}
+
+                  {/* Agreement label — always shown when multi */}
+                  {multi && (
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: 10,
+                      color: authenticated ? 'var(--text3)' : 'var(--accent)' }}>
                       {COM_META[k].name} — {COM_META[k].desc}
                     </div>
-                  </>
-                )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <Field
-                    label="Usuario"
-                    name={`username-${k}`}
-                    value={creds[k].user}
-                    onChange={v => setField(k, 'user', v)}
-                    placeholder={conn[k]?.user || 'COM_USER'}
-                    autoComplete="username"
-                    mono
-                  />
-                  <Field
-                    label="Contraseña"
-                    name={`password-${k}`}
-                    value={creds[k].password}
-                    onChange={v => setField(k, 'password', v)}
-                    placeholder="••••••••"
-                    type="password"
-                    autoComplete="current-password"
-                    inputRef={i === 0 ? firstPasswordRef : undefined}
-                  />
+                  )}
+
+                  {authenticated ? (
+                    /* Already logged in — show OK row */
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      background: 'rgba(52,211,153,.07)', border: '1px solid rgba(52,211,153,.2)',
+                      borderRadius: 8, padding: '10px 14px',
+                    }}>
+                      <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text2)' }}>
+                        {existingSession[k].user}
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#34d399', letterSpacing: '.04em' }}>
+                        ✓ activo
+                      </span>
+                    </div>
+                  ) : (
+                    /* Needs credentials */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <Field
+                        label="Usuario"
+                        name={`username-${k}`}
+                        value={creds[k].user}
+                        onChange={v => setField(k, 'user', v)}
+                        placeholder={conn[k]?.user || 'COM_USER'}
+                        autoComplete="username"
+                        mono
+                      />
+                      <Field
+                        label="Contraseña"
+                        name={`password-${k}`}
+                        value={creds[k].password}
+                        onChange={v => setField(k, 'password', v)}
+                        placeholder="••••••••"
+                        type="password"
+                        autoComplete="current-password"
+                        inputRef={pendingKeys.indexOf(k) === 0 ? firstPasswordRef : undefined}
+                      />
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {error && (
