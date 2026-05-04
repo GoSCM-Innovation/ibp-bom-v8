@@ -43,11 +43,15 @@ export default function App() {
     refreshConnections()
   }
 
+  function sessionIsComplete(conn, session) {
+    const needed = ['com0326', 'com0068'].filter(k => conn[k]?.url)
+    return needed.length > 0 && needed.every(k => session?.[k]?.password)
+  }
+
   function handleSelect(id) {
     if (id !== 'connections' && id !== 'resumen-general') {
       const conn = connections.find(c => c.id === id)
-      const needsCredentials = conn?.com0326?.url || conn?.com0068?.url
-      if (needsCredentials && !sessions[id]) {
+      if (conn && !sessionIsComplete(conn, sessions[id])) {
         setLoginTarget(id)
         return
       }
@@ -57,8 +61,9 @@ export default function App() {
   }
 
   function handleLogin(connId, creds) {
-    setSession(connId, creds)
-    setSessions(p => ({ ...p, [connId]: creds }))
+    const merged = { ...sessions[connId], ...creds }
+    setSession(connId, merged)
+    setSessions(p => ({ ...p, [connId]: merged }))
     setLoginTarget(null)
     setActiveId(connId)
     if (isMobile) setSidebarOpen(false)
@@ -115,6 +120,7 @@ export default function App() {
       {loginConn && (
         <LoginModal
           conn={loginConn}
+          existingSession={sessions[loginTarget]}
           onLogin={(creds) => handleLogin(loginTarget, creds)}
           onCancel={() => setLoginTarget(null)}
         />

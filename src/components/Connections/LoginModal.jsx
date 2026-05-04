@@ -6,8 +6,10 @@ const COM_META = {
   com0068: { name: 'SAP_COM_0068', desc: 'Resource Stats' },
 }
 
-export default function LoginModal({ conn, onLogin, onCancel }) {
-  const activeKeys = ['com0326', 'com0068'].filter(k => conn[k]?.url)
+export default function LoginModal({ conn, existingSession, onLogin, onCancel }) {
+  const activeKeys = ['com0326', 'com0068'].filter(
+    k => conn[k]?.url && !existingSession?.[k]?.password
+  )
   const multi = activeKeys.length > 1
 
   const [creds, setCreds] = useState(() =>
