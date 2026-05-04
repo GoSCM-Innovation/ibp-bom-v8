@@ -79,7 +79,7 @@ export default function Header({ onMenuToggle }) {
         <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,.12)' }} />
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '.01em', lineHeight: 1.2 }}>
-            Customer Success Control Tower
+            SAP IBP Control Tower
           </div>
         </div>
       </div>
