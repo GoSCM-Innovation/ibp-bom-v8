@@ -135,42 +135,75 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
   }
 
   // Metadatos de templates por JobCatalogEntryName de cada paso:
-  // parámetros visibles (HiddenInd ≠ X), orden canónico y sección de cada parámetro.
+  // - JobTemplateRead        → label legible + flag hidden por parámetro
+  // - JobTemplateParameterSet → grupo al que pertenece cada parámetro
+  // - JobTemplateParamGroupSet → texto del grupo (sección)
   function loadAllTemplateMeta(stepsArr) {
     const catalogs = [...new Set(stepsArr.map(s => s.JobCatalogEntryName).filter(Boolean))]
     if (!catalogs.length) return
     const init = {}
-    catalogs.forEach(c => { init[c] = { loading: true, hasData: false, visibleParams: null, paramOrder: [], groupMap: {} } })
+    catalogs.forEach(c => { init[c] = { loading: true, hasData: false, visibleParams: null, paramOrder: [], groupMap: {}, labelMap: {} } })
     setTemplateMeta(init)
     catalogs.forEach(async (catalog) => {
       try {
-        const [pData, gData] = await Promise.all([
+        const [tplData, pData, gData] = await Promise.all([
+          proxy(`/JobTemplateRead?JobTemplateName=${enc(catalog)}`),
           proxy(`/JobTemplateParameterSet?$filter=BasicJobCatalogEntryName+eq+${enc(catalog)}`),
           proxy(`/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(catalog)}`),
         ])
-        const tParams = pData?.d?.results ?? pData?.value ?? []
+
+        // Labels + hidden desde JobTemplateRead (TemplateData es un JSON string)
+        let tplParams = []
+        try {
+          const parsed = JSON.parse(tplData?.d?.TemplateData ?? 'null')
+          tplParams = parsed?.templates?.[0]?.sequences?.[0]?.seq_param_val ?? []
+        } catch { /* JSON inválido — tplParams queda vacío */ }
+
+        // Grupo por parámetro desde JobTemplateParameterSet
+        const pParams = pData?.d?.results ?? pData?.value ?? []
+        // Texto de grupo desde JobTemplateParamGroupSet
         const groups  = gData?.d?.results ?? gData?.value ?? []
-        if (tParams.length) {
+
+        if (tplParams.length || pParams.length) {
+          // Construir labelMap y set de ocultos desde JobTemplateRead
+          const labelMap  = {}
+          const hiddenSet = new Set()
+          tplParams.forEach(p => {
+            if (p.label) labelMap[p.name] = p.label
+            if (p.hidden === true) hiddenSet.add(p.name)
+          })
+
+          // Texto de cada grupo
           const groupText = {}
           groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
+
+          // Grupo por nombre de parámetro (desde JobTemplateParameterSet)
+          const groupByParam = {}
+          pParams.forEach(p => { groupByParam[p.JobTemplateParameterName] = p.JobTemplateParamGroupName })
+
+          // Orden canónico: usar el orden de JobTemplateRead si está disponible,
+          // si no, el de JobTemplateParameterSet; en ambos casos excluir hidden.
+          const orderedNames = tplParams.length
+            ? tplParams.filter(p => !hiddenSet.has(p.name)).map(p => p.name)
+            : pParams.filter(p => p.JobTempParamHiddenInd !== 'X').map(p => p.JobTemplateParameterName)
+
           const visibleParams = new Set()
           const paramOrder    = []
           const groupMap      = {}
-          tParams.forEach(p => {
-            const txt = groupText[p.JobTemplateParamGroupName]
-            if (txt) groupMap[p.JobTemplateParameterName] = txt
-            if (p.JobTempParamHiddenInd !== 'X') {
-              visibleParams.add(p.JobTemplateParameterName)
-              paramOrder.push(p.JobTemplateParameterName)
-            }
+          orderedNames.forEach(name => {
+            visibleParams.add(name)
+            paramOrder.push(name)
+            const grpText = groupText[groupByParam[name]]
+            if (grpText) groupMap[name] = grpText
           })
-          setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: true, visibleParams, paramOrder, groupMap } }))
+
+          setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: true, visibleParams, paramOrder, groupMap, labelMap } }))
         } else {
-          // Catalog no estándar (custom YY1_*/Z*): fallback estático, sin filtrado
-          setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK } }))
+          // Catalog sin metadatos (custom Z*/YY1_*): fallback estático, sin filtrado
+          setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK, labelMap: {} } }))
         }
       } catch {
-        setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK } }))
+        setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK, labelMap: {} } }))
       }
     })
   }
@@ -426,7 +459,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
 
                       // Metadatos del template del paso (por JobCatalogEntryName)
                       const meta = templateMeta[step.JobCatalogEntryName]
-                        ?? { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK }
+                        ?? { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK, labelMap: {} }
 
                       // Filtrar parámetros ocultos (solo si la API devolvió datos para este catalog)
                       const sp = meta.hasData && meta.visibleParams
@@ -512,7 +545,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                           <tbody>
                                             {list.map((p, i) => {
-                                              const label  = paramLabel(p.JobParameterName)
+                                              const label  = meta.labelMap?.[p.JobParameterName] ?? paramLabel(p.JobParameterName)
                                               const isRaw  = label === p.JobParameterName
                                               const op     = OPTION_LABEL[p.Option] ?? p.Option ?? '='
                                               const isEq   = !p.Option || p.Option === 'EQ'
@@ -671,8 +704,9 @@ const PARAM_SECTION_FALLBACK = {
   S_SUBN:   'Planning Scope',
 }
 
-// La API (JobTemplateParameterSet) no expone labels individuales — vienen del DDIC ABAP.
-// Mapa construido con nombres confirmados desde llamadas reales al sistema.
+// Fallback estático de labels para cuando JobTemplateRead no devuelve datos
+// (templates custom Z*/YY1_* sin metadatos en la API).
+// Para templates estándar /IBP/*, los labels vienen de meta.labelMap (JobTemplateRead).
 const PARAM_LABEL = {
   // Confirmados desde capturas reales
   P_ACT:     'Action',
