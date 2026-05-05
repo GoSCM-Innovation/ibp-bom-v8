@@ -314,6 +314,12 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
             // Primer registro de log info (generalmente 1 por paso)
             const liRec   = li?.records?.[0]
 
+            // Nombre del paso: "{CatalogText}: {P_OPNAME}" si el paso tiene operador
+            const opName  = params.data.find(p => String(p.StepNr) === String(step.StepNumber) && p.JobParameterName === 'P_OPNAME')?.Low
+            const stepTitle = opName
+              ? `${step.JobCatalogEntryText || step.JobCatalogEntryName}: ${opName}`
+              : (step.JobCatalogEntryText || step.JobCatalogEntryName || `Paso ${n}`)
+
             return (
               <div key={n} style={{
                 marginBottom: 8, borderRadius: 8, overflow: 'hidden',
@@ -335,7 +341,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                   {/* Descripción + inicio */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {step.JobCatalogEntryText || step.JobCatalogEntryName || `Paso ${n}`}
+                      {stepTitle}
                     </div>
                     {step.StepStartDateTime && (
                       <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 1 }}>
