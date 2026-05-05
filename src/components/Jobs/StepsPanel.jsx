@@ -58,8 +58,9 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
   const [params,         setParams]         = useState({ loading: true, data: [], error: '' })
   // paramsExpanded: qué pasos tienen la sección de parámetros abierta
   const [paramsExpanded, setParamsExpanded] = useState({})
-  // paramSections: { loading, map: { paramName → sectionText } } — desde API + fallback estático
-  const [paramSections, setParamSections] = useState({ loading: true, map: {} })
+  // templateMeta: { [catalogEntryName]: { loading, hasData, visibleParams: Set|null, paramOrder: [], groupMap: {} } }
+  // Indexado por JobCatalogEntryName de cada paso — determina parámetros visibles, orden y secciones.
+  const [templateMeta, setTemplateMeta] = useState({})
 
   const proxy = useCallback(async (path) => {
     const res = await proxyCall({ connection, session, path })
@@ -86,48 +87,10 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
     return () => { cancelled = true }
   }, [job.JobName, job.JobRunCount, proxy])
 
-  // Secciones de parámetros: JobTemplateParamGroupSet + JobTemplateParameterSet
-  // Para templates Z* (custom) la API devuelve vacío → usa el mapa estático de fallback.
-  useEffect(() => {
-    let cancelled = false
-    setParamSections({ loading: true, map: {} })
-    async function loadSections() {
-      const tmpl = job.JobTemplateName
-      if (!tmpl) { setParamSections({ loading: false, map: PARAM_SECTION_FALLBACK }); return }
-      try {
-        const [gData, pData] = await Promise.all([
-          proxy(`/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(tmpl)}&$select=JobTemplateParamGroupName,JobTemplateParamGroupText`),
-          proxy(`/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(tmpl)}&$select=JobTemplateParameterName,JobTemplateParamGroupName`),
-        ])
-        if (cancelled) return
-        const groups  = gData?.d?.results ?? gData?.value ?? []
-        const tParams = pData?.d?.results ?? pData?.value ?? []
-        if (groups.length && tParams.length) {
-          const groupText = {}
-          groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
-          const apiMap = {}
-          tParams.forEach(p => {
-            const txt = groupText[p.JobTemplateParamGroupName]
-            if (txt) apiMap[p.JobTemplateParameterName] = txt
-          })
-          // API tiene precedencia; el fallback cubre parámetros no presentes en el template
-          setParamSections({ loading: false, map: { ...PARAM_SECTION_FALLBACK, ...apiMap } })
-        } else {
-          // Template Z* custom: usar solo el mapa estático
-          setParamSections({ loading: false, map: PARAM_SECTION_FALLBACK })
-        }
-      } catch {
-        if (!cancelled) setParamSections({ loading: false, map: PARAM_SECTION_FALLBACK })
-      }
-    }
-    loadSections()
-    return () => { cancelled = true }
-  }, [job.JobTemplateName, proxy])
-
   // Fase 1: cargar pasos
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError(''); setSteps([]); setExpanded(null); setLogInfos({}); setMessages({})
+    setLoading(true); setError(''); setSteps([]); setExpanded(null); setLogInfos({}); setMessages({}); setTemplateMeta({})
     async function load() {
       try {
         const data = await proxy(
@@ -139,6 +102,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
           .sort((a, b) => (Number(a.StepNumber) || 0) - (Number(b.StepNumber) || 0))
         setSteps(results)
         loadAllLogInfos(results)
+        loadAllTemplateMeta(results)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -166,6 +130,47 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
         setLogInfos(p => ({ ...p, [n]: { loading: false, records: data?.d?.results ?? data?.value ?? [], error: '' } }))
       } catch (e) {
         setLogInfos(p => ({ ...p, [n]: { loading: false, records: [], error: e.message } }))
+      }
+    })
+  }
+
+  // Metadatos de templates por JobCatalogEntryName de cada paso:
+  // parámetros visibles (HiddenInd ≠ X), orden canónico y sección de cada parámetro.
+  function loadAllTemplateMeta(stepsArr) {
+    const catalogs = [...new Set(stepsArr.map(s => s.JobCatalogEntryName).filter(Boolean))]
+    if (!catalogs.length) return
+    const init = {}
+    catalogs.forEach(c => { init[c] = { loading: true, hasData: false, visibleParams: null, paramOrder: [], groupMap: {} } })
+    setTemplateMeta(init)
+    catalogs.forEach(async (catalog) => {
+      try {
+        const [pData, gData] = await Promise.all([
+          proxy(`/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(catalog)}`),
+          proxy(`/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(catalog)}`),
+        ])
+        const tParams = pData?.d?.results ?? pData?.value ?? []
+        const groups  = gData?.d?.results ?? gData?.value ?? []
+        if (tParams.length) {
+          const groupText = {}
+          groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
+          const visibleParams = new Set()
+          const paramOrder    = []
+          const groupMap      = {}
+          tParams.forEach(p => {
+            const txt = groupText[p.JobTemplateParamGroupName]
+            if (txt) groupMap[p.JobTemplateParameterName] = txt
+            if (p.JobTempParamHiddenInd !== 'X') {
+              visibleParams.add(p.JobTemplateParameterName)
+              paramOrder.push(p.JobTemplateParameterName)
+            }
+          })
+          setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: true, visibleParams, paramOrder, groupMap } }))
+        } else {
+          // Catalog no estándar (custom YY1_*/Z*): fallback estático, sin filtrado
+          setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK } }))
+        }
+      } catch {
+        setTemplateMeta(prev => ({ ...prev, [catalog]: { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK } }))
       }
     })
   }
@@ -414,16 +419,40 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
 
                     {/* Sección: parámetros del paso (colapsable, agrupados por sección) */}
                     {(() => {
-                      const sp        = params.data.filter(p => String(p.StepNr) === String(step.StepNumber))
+                      const rawSp     = params.data.filter(p => String(p.StepNr) === String(step.StepNumber))
                       const isAuthErr = params.error && (params.error.includes('APJ_RT/028') || params.error.includes('not authorized'))
                       const isPOpen   = !!paramsExpanded[n]
-                      if (!params.loading && !params.error && sp.length === 0) return null
+                      if (!params.loading && !params.error && rawSp.length === 0) return null
 
-                      // Agrupar parámetros por sección (usando el mapa API + fallback estático)
-                      const secMap = paramSections.map
+                      // Metadatos del template del paso (por JobCatalogEntryName)
+                      const meta = templateMeta[step.JobCatalogEntryName]
+                        ?? { loading: false, hasData: false, visibleParams: null, paramOrder: [], groupMap: PARAM_SECTION_FALLBACK }
+
+                      // Filtrar parámetros ocultos (solo si la API devolvió datos para este catalog)
+                      const sp = meta.hasData && meta.visibleParams
+                        ? rawSp.filter(p => meta.visibleParams.has(p.JobParameterName))
+                        : rawSp
+
+                      // Ordenar según posición en el template
+                      const sorted = meta.paramOrder.length
+                        ? [...sp].sort((a, b) => {
+                            const ia = meta.paramOrder.indexOf(a.JobParameterName)
+                            const ib = meta.paramOrder.indexOf(b.JobParameterName)
+                            if (ia === -1 && ib === -1) return 0
+                            if (ia === -1) return 1
+                            if (ib === -1) return -1
+                            return ia - ib
+                          })
+                        : sp
+
+                      // Si la API filtró y no queda ningún parámetro visible, ocultar sección
+                      if (!params.loading && !params.error && !meta.loading && meta.hasData && sorted.length === 0) return null
+
+                      // Agrupar por sección
+                      const secMap = meta.groupMap
                       const grouped = {}
                       const ungrouped = []
-                      sp.forEach(p => {
+                      sorted.forEach(p => {
                         const sec = secMap[p.JobParameterName]
                         if (sec) { if (!grouped[sec]) grouped[sec] = []; grouped[sec].push(p) }
                         else ungrouped.push(p)
@@ -443,9 +472,11 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                               <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Parámetros</span>
-                              {params.loading && <span style={{ fontSize: 9, color: 'var(--text3)' }}>…</span>}
-                              {!params.loading && !params.error && sp.length > 0 && (
-                                <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '1px 6px' }}>{sp.length}</span>
+                              {(params.loading || meta.loading) && <span style={{ fontSize: 9, color: 'var(--text3)' }}>…</span>}
+                              {!params.loading && !meta.loading && !params.error && sorted.length > 0 && (
+                                <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '1px 6px' }}>
+                                  {sorted.length}{meta.hasData && rawSp.length > sorted.length ? ` / ${rawSp.length}` : ''}
+                                </span>
                               )}
                               {params.error && !params.loading && (
                                 <span style={{ fontSize: 9, color: isAuthErr ? '#fbbf24' : '#ff6b6b' }}>{isAuthErr ? '⚠ sin acceso' : '✕ error'}</span>
