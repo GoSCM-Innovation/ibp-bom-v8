@@ -145,7 +145,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
     catalogs.forEach(async (catalog) => {
       try {
         const [pData, gData] = await Promise.all([
-          proxy(`/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(catalog)}`),
+          proxy(`/JobTemplateParameterSet?$filter=BasicJobCatalogEntryName+eq+${enc(catalog)}`),
           proxy(`/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(catalog)}`),
         ])
         const tParams = pData?.d?.results ?? pData?.value ?? []
