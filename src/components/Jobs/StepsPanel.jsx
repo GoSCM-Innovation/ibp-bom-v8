@@ -58,6 +58,8 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
   const [params,         setParams]         = useState({ loading: true, data: [], error: '' })
   // paramsExpanded: qué pasos tienen la sección de parámetros abierta
   const [paramsExpanded, setParamsExpanded] = useState({})
+  // paramSections: { loading, map: { paramName → sectionText } } — desde API + fallback estático
+  const [paramSections, setParamSections] = useState({ loading: true, map: {} })
 
   const proxy = useCallback(async (path) => {
     const res = await proxyCall({ connection, session, path })
@@ -83,6 +85,44 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
     loadParams()
     return () => { cancelled = true }
   }, [job.JobName, job.JobRunCount, proxy])
+
+  // Secciones de parámetros: JobTemplateParamGroupSet + JobTemplateParameterSet
+  // Para templates Z* (custom) la API devuelve vacío → usa el mapa estático de fallback.
+  useEffect(() => {
+    let cancelled = false
+    setParamSections({ loading: true, map: {} })
+    async function loadSections() {
+      const tmpl = job.JobTemplateName
+      if (!tmpl) { setParamSections({ loading: false, map: PARAM_SECTION_FALLBACK }); return }
+      try {
+        const [gData, pData] = await Promise.all([
+          proxy(`/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(tmpl)}&$select=JobTemplateParamGroupName,JobTemplateParamGroupText`),
+          proxy(`/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(tmpl)}&$select=JobTemplateParameterName,JobTemplateParamGroupName`),
+        ])
+        if (cancelled) return
+        const groups  = gData?.d?.results ?? gData?.value ?? []
+        const tParams = pData?.d?.results ?? pData?.value ?? []
+        if (groups.length && tParams.length) {
+          const groupText = {}
+          groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
+          const apiMap = {}
+          tParams.forEach(p => {
+            const txt = groupText[p.JobTemplateParamGroupName]
+            if (txt) apiMap[p.JobTemplateParameterName] = txt
+          })
+          // API tiene precedencia; el fallback cubre parámetros no presentes en el template
+          setParamSections({ loading: false, map: { ...PARAM_SECTION_FALLBACK, ...apiMap } })
+        } else {
+          // Template Z* custom: usar solo el mapa estático
+          setParamSections({ loading: false, map: PARAM_SECTION_FALLBACK })
+        }
+      } catch {
+        if (!cancelled) setParamSections({ loading: false, map: PARAM_SECTION_FALLBACK })
+      }
+    }
+    loadSections()
+    return () => { cancelled = true }
+  }, [job.JobTemplateName, proxy])
 
   // Fase 1: cargar pasos
   useEffect(() => {
@@ -372,18 +412,34 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                       </div>
                     )}
 
-                    {/* Sección: parámetros del paso (colapsable) */}
+                    {/* Sección: parámetros del paso (colapsable, agrupados por sección) */}
                     {(() => {
                       const sp        = params.data.filter(p => String(p.StepNr) === String(step.StepNumber))
                       const isAuthErr = params.error && (params.error.includes('APJ_RT/028') || params.error.includes('not authorized'))
-                      const isOpen    = !!paramsExpanded[n]
+                      const isPOpen   = !!paramsExpanded[n]
                       if (!params.loading && !params.error && sp.length === 0) return null
+
+                      // Agrupar parámetros por sección (usando el mapa API + fallback estático)
+                      const secMap = paramSections.map
+                      const grouped = {}
+                      const ungrouped = []
+                      sp.forEach(p => {
+                        const sec = secMap[p.JobParameterName]
+                        if (sec) { if (!grouped[sec]) grouped[sec] = []; grouped[sec].push(p) }
+                        else ungrouped.push(p)
+                      })
+                      const orderedSecs = [
+                        ...SECTION_ORDER.filter(s => grouped[s]),
+                        ...Object.keys(grouped).filter(s => !SECTION_ORDER.includes(s)),
+                      ]
+                      if (ungrouped.length) orderedSecs.push(null) // null = sin sección
+
                       return (
                         <div style={{ marginBottom: 14, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
                           {/* Cabecera toggle */}
                           <div
                             onClick={() => setParamsExpanded(p => ({ ...p, [n]: !p[n] }))}
-                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', background: isOpen ? 'rgba(255,255,255,.03)' : 'transparent', userSelect: 'none' }}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', background: isPOpen ? 'rgba(255,255,255,.03)' : 'transparent', userSelect: 'none' }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                               <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Parámetros</span>
@@ -395,10 +451,11 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                                 <span style={{ fontSize: 9, color: isAuthErr ? '#fbbf24' : '#ff6b6b' }}>{isAuthErr ? '⚠ sin acceso' : '✕ error'}</span>
                               )}
                             </div>
-                            <span style={{ fontSize: 10, color: 'var(--text3)' }}>{isOpen ? '▲' : '▼'}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text3)' }}>{isPOpen ? '▲' : '▼'}</span>
                           </div>
+
                           {/* Contenido */}
-                          {isOpen && (
+                          {isPOpen && (
                             <div style={{ borderTop: '1px solid var(--border)', padding: '10px 10px' }}>
                               {params.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando…</div>}
                               {params.error && isAuthErr && (
@@ -407,36 +464,58 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                                 </div>
                               )}
                               {params.error && !isAuthErr && <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {params.error}</div>}
+
                               {sp.length > 0 && (
-                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                  <thead>
-                                    <tr>
-                                      {['Parámetro', 'Op', 'Valor'].map(h => (
-                                        <th key={h} style={{ textAlign: 'left', fontSize: 9, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingBottom: 5, borderBottom: '1px solid var(--border)', paddingRight: 10 }}>{h}</th>
-                                      ))}
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {sp.map((p, i) => {
-                                      const label = paramLabel(p.JobParameterName)
-                                      const isRaw = label === p.JobParameterName
-                                      const op    = OPTION_LABEL[p.Option] ?? p.Option ?? '='
-                                      const value = p.High && p.High !== p.Low ? `${p.Low} → ${p.High}` : (p.Low ?? '—')
-                                      return (
-                                        <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                                          <td style={{ padding: '5px 10px 5px 0', verticalAlign: 'top' }}>
-                                            <div style={{ fontSize: 11, color: 'var(--text)' }}>
-                                              {isRaw ? <span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{label}</span> : label}
-                                            </div>
-                                            {!isRaw && <div style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}>{p.JobParameterName}</div>}
-                                          </td>
-                                          <td style={{ padding: '5px 10px 5px 0', fontSize: 11, color: 'var(--text3)', verticalAlign: 'top' }}>{op}</td>
-                                          <td style={{ padding: '5px 0', fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', wordBreak: 'break-all', verticalAlign: 'top' }}>{value}</td>
-                                        </tr>
-                                      )
-                                    })}
-                                  </tbody>
-                                </table>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                  {orderedSecs.map(sec => {
+                                    const list = sec ? grouped[sec] : ungrouped
+                                    if (!list?.length) return null
+                                    return (
+                                      <div key={sec ?? '__ungrouped'}>
+                                        {/* Encabezado de sección */}
+                                        {sec && (
+                                          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid var(--border)' }}>
+                                            {sec}
+                                          </div>
+                                        )}
+                                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                          <tbody>
+                                            {list.map((p, i) => {
+                                              const label  = paramLabel(p.JobParameterName)
+                                              const isRaw  = label === p.JobParameterName
+                                              const op     = OPTION_LABEL[p.Option] ?? p.Option ?? '='
+                                              const isEq   = !p.Option || p.Option === 'EQ'
+                                              const value  = p.High && p.High !== p.Low
+                                                ? `${p.Low} → ${p.High}`
+                                                : (p.Low ?? '')
+                                              return (
+                                                <tr key={i} style={{ borderBottom: i < list.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
+                                                  <td style={{ padding: '4px 10px 4px 0', verticalAlign: 'top', width: '42%' }}>
+                                                    {isRaw
+                                                      ? <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text3)' }}>{label}</span>
+                                                      : (
+                                                        <>
+                                                          <div style={{ fontSize: 11, color: 'var(--text)' }}>{label}</div>
+                                                          <div style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}>{p.JobParameterName}</div>
+                                                        </>
+                                                      )
+                                                    }
+                                                  </td>
+                                                  {!isEq && (
+                                                    <td style={{ padding: '4px 8px 4px 0', fontSize: 11, color: 'var(--text3)', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{op}</td>
+                                                  )}
+                                                  <td style={{ padding: '4px 0', fontSize: 11, color: value ? 'var(--text2)' : 'var(--text3)', fontStyle: value ? 'normal' : 'italic', fontFamily: 'var(--mono)', wordBreak: 'break-all', verticalAlign: 'top' }}>
+                                                    {value || '—'}
+                                                  </td>
+                                                </tr>
+                                              )
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
                               )}
                             </div>
                           )}
@@ -518,6 +597,48 @@ function DetailRow({ label, value }) {
 }
 
 const OPTION_LABEL = { EQ: '=', NE: '≠', LT: '<', LE: '≤', GT: '>', GE: '≥', BT: '…', CP: '~' }
+
+// Orden canónico de secciones (igual que SAP IBP UI).
+const SECTION_ORDER = ['General', 'Control Parameters', 'Planning Start Settings', 'Planning Scope']
+
+// Mapa estático paramName → sección.
+// Fuente: JobTemplateParamGroupSet + JobTemplateParameterSet del template
+// /IBP/RM_CONFIRMATION_RUN_V2 (consultado vía API 2026-05-05).
+// Usado como fallback cuando el template del job no tiene grupos en la API
+// (templates Z* custom con JobCatalogEntryName vacío).
+const PARAM_SECTION_FALLBACK = {
+  // General
+  P_ALGO:   'General',
+  P_AREA:   'General',
+  P_OPER:   'General',
+  P_SCEN:   'General',
+  P_SIMVE:  'General',
+  P_TYPE:   'General',
+  P_VERS:   'General',
+  // Control Parameters
+  P_ATD:    'Control Parameters',
+  P_CBP:    'Control Parameters',
+  P_CLMD:   'Control Parameters',
+  P_LOG:    'Control Parameters',
+  P_PRF:    'Control Parameters',
+  P_PRM:    'Control Parameters',
+  P_STR:    'Control Parameters',
+  P_SUGF:   'Control Parameters',
+  P_TAP:    'Control Parameters',
+  S_VERS:   'Control Parameters',
+  // Planning Start Settings
+  P_DATE:   'Planning Start Settings',
+  P_REFDAY: 'Planning Start Settings',
+  P_TZONE:  'Planning Start Settings',
+  P_WDAY:   'Planning Start Settings',
+  // Planning Scope
+  P_FLTID:  'Planning Scope',
+  P_PLSCOP: 'Planning Scope',
+  S_DISPO:  'Planning Scope',
+  S_LOCNO:  'Planning Scope',
+  S_MATNR:  'Planning Scope',
+  S_SUBN:   'Planning Scope',
+}
 
 // La API (JobTemplateParameterSet) no expone labels individuales — vienen del DDIC ABAP.
 // Mapa construido con nombres confirmados desde llamadas reales al sistema.
