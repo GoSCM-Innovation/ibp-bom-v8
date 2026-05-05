@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { proxyCall } from '../../services/proxyCall'
 
 function enc(val) {
@@ -33,17 +33,91 @@ function labelOf(name, labelMap) {
 const SECTION_ORDER = ['General', 'Control Parameters', 'Planning Start Settings', 'Planning Scope']
 
 export default function ScheduleModal({ row, connection, session, onClose, onSuccess }) {
-  const [meta, setMeta]           = useState({ loading: true, params: [], error: '' })
-  // formValues: { [`${stepNr}|${name}`]: { low, high, option, sign } }
+  const [meta, setMeta]             = useState({ loading: true, params: [], error: '' })
   const [formValues, setFormValues] = useState({})
-  const [executing, setExecuting] = useState(false)
-  const [execError, setExecError] = useState('')
+  const [dynHidden, setDynHidden]   = useState(new Set())
+  const [dynReadOnly, setDynReadOnly] = useState(new Set())
+  const [executing, setExecuting]   = useState(false)
+  const [execError, setExecError]   = useState('')
+
+  // Ref to always access latest formValues in the blur handler without stale closure
+  const formValuesRef = useRef({})
+  const paramsRef     = useRef([])
+  formValuesRef.current = formValues
 
   const label = row.JobTemplateText || row.JobTemplateName
+
+  // Call JobScheduleCheck and apply dynamic visibility + auto-fill defaults
+  async function doScheduleCheck(currentValues, currentParams) {
+    const values = currentValues ?? formValuesRef.current
+    const params = currentParams ?? paramsRef.current
+    if (!params.length) return
+
+    const checkVals = params
+      .filter(p => {
+        const fv = values[`${p.stepNr}|${p.name}`]
+        return fv?.low?.trim() || fv?.high?.trim()
+      })
+      .map(p => {
+        const fv = values[`${p.stepNr}|${p.name}`]
+        return {
+          NAME:    p.name,
+          T_VALUE: [{ SIGN: fv.sign || 'I', OPTION: fv.option || 'EQ', LOW: fv.low || '', HIGH: fv.high || '' }],
+        }
+      })
+
+    const paramStr = JSON.stringify({ VALUES: checkVals })
+
+    try {
+      const r = await proxyCall({
+        connection, session,
+        path:   `/JobScheduleCheck?JobTemplateName=${enc(row.JobTemplateName)}&JobParameterValues=${enc(paramStr)}`,
+        method: 'POST',
+      })
+      const data = await r.json()
+      const d = data?.d ?? {}
+
+      // Apply DynamicProperties (hidden / readOnly overrides)
+      const dp = JSON.parse(d.DynamicProperties || '[]')
+      const newHidden   = new Set()
+      const newReadOnly = new Set()
+      dp.forEach(p => {
+        if (p.hidden)   newHidden.add(p.jobParameterName)
+        if (p.readOnly) newReadOnly.add(p.jobParameterName)
+      })
+      setDynHidden(newHidden)
+      setDynReadOnly(newReadOnly)
+
+      // Auto-fill defaults for empty fields
+      if (d.ChangedInd) {
+        const returned = JSON.parse(d.JobParameterValues || '{"VALUES":[]}')
+        setFormValues(prev => {
+          const updated = { ...prev }
+          ;(returned.VALUES ?? []).forEach(v => {
+            const param = params.find(p => p.name === v.NAME)
+            if (!param) return
+            const key = `${param.stepNr}|${param.name}`
+            const first = v.T_VALUE?.[0]
+            if (!updated[key]?.low?.trim() && first?.LOW) {
+              updated[key] = {
+                low:    first.LOW   ?? '',
+                high:   first.HIGH  ?? '',
+                option: first.OPTION ?? 'EQ',
+                sign:   first.SIGN   ?? 'I',
+              }
+            }
+          })
+          return updated
+        })
+      }
+    } catch { /* errores de check son silenciosos */ }
+  }
 
   useEffect(() => {
     setMeta({ loading: true, params: [], error: '' })
     setFormValues({})
+    setDynHidden(new Set())
+    setDynReadOnly(new Set())
     setExecError('')
 
     const name = row.JobTemplateName
@@ -56,11 +130,9 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       const pParams = pData?.d?.results ?? pData?.value ?? []
       const groups  = gData?.d?.results ?? gData?.value ?? []
 
-      // Group text map
       const groupText = {}
       groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
 
-      // Group by param name from JobTemplateParameterSet
       const groupByParam = {}
       const mandatorySet = new Set()
       const readOnlySet  = new Set()
@@ -72,8 +144,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         if (p.JobTempParamHiddenInd    === 'X') hiddenSetApi.add(p.JobTemplateParameterName)
       })
 
-      // Parse sequences from JobTemplateRead
-      let tplParams = []  // [{stepNr, name, label, hidden}]
+      let tplParams = []
       try {
         const td = JSON.parse(tplData?.d?.TemplateData ?? 'null')
         const sequences = td?.templates?.[0]?.sequences ?? []
@@ -85,10 +156,8 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         })
       } catch { /* fall through */ }
 
-      // Build final param list
       let params = []
       if (tplParams.length > 0) {
-        // Use order from JobTemplateRead, filter hidden
         const labelMap = {}
         tplParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
         params = tplParams
@@ -102,7 +171,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
             readOnly:  readOnlySet.has(p.name),
           }))
       } else if (pParams.length > 0) {
-        // Fallback: use JobTemplateParameterSet, all params at StepNr=1
         params = pParams
           .filter(p => p.JobTempParamHiddenInd !== 'X')
           .map(p => ({
@@ -115,14 +183,18 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           }))
       }
 
-      // Initialize form values (empty)
       const init = {}
       params.forEach(p => {
         const key = `${p.stepNr}|${p.name}`
         init[key] = { low: '', high: '', option: 'EQ', sign: 'I' }
       })
+
+      paramsRef.current = params
       setFormValues(init)
       setMeta({ loading: false, params, error: '' })
+
+      // Check inicial: obtiene visibilidad dinámica + auto-fill de defaults
+      doScheduleCheck(init, params)
     }).catch(e => {
       setMeta({ loading: false, params: [], error: e.message })
     })
@@ -133,10 +205,15 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     setFormValues(prev => ({ ...prev, [key]: { ...(prev[key] ?? { low: '', high: '', option: 'EQ', sign: 'I' }), [field]: value } }))
   }
 
+  // Re-check al salir de un campo para actualizar visibilidad dinámica
+  function handleBlur() {
+    doScheduleCheck()
+  }
+
   async function handleExecute() {
-    // Validate mandatory
     const missing = meta.params.filter(p => {
       if (!p.mandatory) return false
+      if (dynHidden.has(p.name)) return false
       const key = `${p.stepNr}|${p.name}`
       return !(formValues[key]?.low?.trim())
     })
@@ -148,13 +225,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     setExecuting(true)
     setExecError('')
 
-    // Build JobParameterValues: only params with a value or all params if none specified
     const allParams = meta.params
     const paramValues = allParams
       .filter(p => {
         const key = `${p.stepNr}|${p.name}`
         const fv = formValues[key]
-        return fv?.low?.trim() || fv?.high?.trim() // only include params with a value
+        return fv?.low?.trim() || fv?.high?.trim()
       })
       .map(p => {
         const key = `${p.stepNr}|${p.name}`
@@ -162,10 +238,10 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         return {
           StepNr:           p.stepNr,
           JobParameterName: p.name,
-          Sign:             fv.sign  || 'I',
+          Sign:             fv.sign   || 'I',
           Option:           fv.option || 'EQ',
-          Low:              fv.low   ?? '',
-          High:             fv.high  ?? '',
+          Low:              fv.low    ?? '',
+          High:             fv.high   ?? '',
         }
       })
 
@@ -186,10 +262,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     }
   }
 
-  // Group params by section for display
-  const grouped  = {}
-  const ungrouped = [];
-  (meta.params ?? []).forEach(p => {
+  // Combina hidden estático + dinámico para filtrar params visibles
+  const visibleParams = (meta.params ?? []).filter(p => !dynHidden.has(p.name))
+
+  const grouped   = {}
+  const ungrouped = []
+  visibleParams.forEach(p => {
     if (p.group) { if (!grouped[p.group]) grouped[p.group] = []; grouped[p.group].push(p) }
     else ungrouped.push(p)
   })
@@ -199,7 +277,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
   ]
   if (ungrouped.length) orderedSecs.push(null)
 
-  const hasParams = meta.params.length > 0
+  const hasParams = visibleParams.length > 0
 
   return (
     <>
@@ -280,9 +358,10 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                     )}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {list.map(p => {
-                        const key = `${p.stepNr}|${p.name}`
-                        const fv  = formValues[key] ?? { low: '', high: '', option: 'EQ', sign: 'I' }
-                        const isRange = fv.option === 'BT'
+                        const key      = `${p.stepNr}|${p.name}`
+                        const fv       = formValues[key] ?? { low: '', high: '', option: 'EQ', sign: 'I' }
+                        const isRange  = fv.option === 'BT'
+                        const isRO     = p.readOnly || dynReadOnly.has(p.name)
                         return (
                           <div key={key}>
                             <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -304,12 +383,13 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                                 {/* Option selector */}
                                 <select
                                   value={fv.option}
-                                  disabled={p.readOnly}
+                                  disabled={isRO}
                                   onChange={e => setField(p.stepNr, p.name, 'option', e.target.value)}
+                                  onBlur={handleBlur}
                                   style={{
                                     background: 'var(--bg2)', border: '1px solid var(--border)',
                                     borderRadius: 5, color: 'var(--text2)', fontSize: 10,
-                                    padding: '5px 6px', cursor: p.readOnly ? 'default' : 'pointer',
+                                    padding: '5px 6px', cursor: isRO ? 'default' : 'pointer',
                                     flexShrink: 0, width: 52,
                                   }}
                                 >
@@ -326,27 +406,29 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                                 <input
                                   type="text"
                                   value={fv.low}
-                                  disabled={p.readOnly}
+                                  disabled={isRO}
                                   placeholder={p.mandatory ? 'requerido' : ''}
                                   onChange={e => setField(p.stepNr, p.name, 'low', e.target.value)}
+                                  onBlur={handleBlur}
                                   style={{
                                     flex: 1, background: 'var(--bg2)',
                                     border: `1px solid ${p.mandatory && !fv.low?.trim() ? 'rgba(255,107,107,.5)' : 'var(--border)'}`,
                                     borderRadius: 5, color: 'var(--text)', fontSize: 11,
                                     padding: '6px 10px', outline: 'none',
-                                    opacity: p.readOnly ? 0.5 : 1,
+                                    opacity: isRO ? 0.5 : 1,
                                   }}
                                 />
-                                {/* High value (only for range) */}
+                                {/* High value (solo para rango) */}
                                 {isRange && (
                                   <>
                                     <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>→</span>
                                     <input
                                       type="text"
                                       value={fv.high}
-                                      disabled={p.readOnly}
+                                      disabled={isRO}
                                       placeholder="hasta"
                                       onChange={e => setField(p.stepNr, p.name, 'high', e.target.value)}
+                                      onBlur={handleBlur}
                                       style={{
                                         flex: 1, background: 'var(--bg2)',
                                         border: '1px solid var(--border)',
