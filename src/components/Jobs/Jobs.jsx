@@ -2,69 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
+import ScheduleModal from './ScheduleModal'
 
-const JOB_PATH = '/JobTemplateSet'
+const JOB_PATH    = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
-
-function encodeODataString(val) {
-  return `%27${encodeURIComponent(val)}%27`
-}
-
-function EjecutarBtn({ row, connection, session }) {
-  const [status, setStatus] = useState(null) // null | 'loading' | 'ok' | 'error'
-  const [msg, setMsg] = useState('')
-
-  async function handleEjecutar(e) {
-    e.stopPropagation()
-    const label = row.JobTemplateText || row.JobTemplateName
-    if (!window.confirm(`¿Ejecutar el job "${label}"?\n\nEsta acción lanzará el job en SAP IBP.`)) return
-    setStatus('loading'); setMsg('')
-    try {
-      const r = await proxyCall({
-        connection, session,
-        path: `/JobSchedule?JobTemplateName=${encodeODataString(row.JobTemplateName)}&JobText=${encodeODataString(label)}`,
-        method: 'POST',
-        injectJobUser: true,
-      })
-      const data = await r.json()
-      if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
-      setStatus('ok')
-    } catch (e) {
-      setStatus('error'); setMsg(e.message)
-    }
-  }
-
-  if (status === 'loading') return (
-    <td style={TD} onClick={e => e.stopPropagation()}>
-      <span style={{ fontSize: 11, color: 'var(--text2)' }}>Ejecutando…</span>
-    </td>
-  )
-
-  if (status === 'ok') return (
-    <td style={TD} onClick={e => e.stopPropagation()}>
-      <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>✓ Enviado</span>
-    </td>
-  )
-
-  if (status === 'error') return (
-    <td style={{ ...TD, maxWidth: 320 }} onClick={e => e.stopPropagation()}>
-      <span style={{ fontSize: 11, color: 'var(--red)', whiteSpace: 'normal', wordBreak: 'break-word' }}>✕ {msg}</span>
-    </td>
-  )
-
-  return (
-    <td style={TD} onClick={e => e.stopPropagation()}>
-      <button
-        onClick={handleEjecutar}
-        style={{
-          padding: '4px 12px', borderRadius: 5, border: '1px solid rgba(34,197,94,.35)',
-          background: 'rgba(34,197,94,.08)', color: '#22c55e',
-          fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-        }}
-      >▶ Ejecutar</button>
-    </td>
-  )
-}
 
 const TD = { padding: '6px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
 
@@ -78,6 +19,9 @@ export default function Jobs({ connection, session }) {
   const [search, setSearch] = useState('')
   const resizing = useRef(null)
   const [logs, addLog] = useTechLogs()
+  // Modal de configuración de parámetros
+  const [scheduleRow, setScheduleRow]       = useState(null)  // template seleccionado
+  const [scheduledRows, setScheduledRows]   = useState({})    // { [JobTemplateName]: 'ok' }
 
   useEffect(() => {
     setLoading(true); setError(''); setRows([]); setSearch('')
@@ -234,7 +178,20 @@ export default function Jobs({ connection, session }) {
                       {String(row[col] ?? '')}
                     </td>
                   ))}
-                  <EjecutarBtn row={row} connection={connection} session={session} />
+                  <td style={TD} onClick={e => e.stopPropagation()}>
+                    {scheduledRows[row.JobTemplateName] === 'ok' ? (
+                      <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>✓ Enviado</span>
+                    ) : (
+                      <button
+                        onClick={() => setScheduleRow(row)}
+                        style={{
+                          padding: '4px 12px', borderRadius: 5, border: '1px solid rgba(34,197,94,.35)',
+                          background: 'rgba(34,197,94,.08)', color: '#22c55e',
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >▶ Ejecutar</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -243,6 +200,16 @@ export default function Jobs({ connection, session }) {
       )}
 
       <TechLogs logs={logs} />
+
+      {scheduleRow && (
+        <ScheduleModal
+          row={scheduleRow}
+          connection={connection}
+          session={session}
+          onClose={() => setScheduleRow(null)}
+          onSuccess={() => setScheduledRows(prev => ({ ...prev, [scheduleRow.JobTemplateName]: 'ok' }))}
+        />
+      )}
     </div>
   )
 }

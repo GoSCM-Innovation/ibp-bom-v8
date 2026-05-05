@@ -44,7 +44,20 @@ export default async function handler(req, res) {
     const resp = await fetch(url, opts)
     if (!resp.ok) {
       const text = await resp.text()
-      return res.status(resp.status).json({ error: `SAP IBP returned ${resp.status}`, detail: text.substring(0, 500) })
+      // Intentar extraer mensaje legible del cuerpo (JSON o XML de OData)
+      let detail = text.substring(0, 800)
+      try {
+        const j = JSON.parse(text)
+        const msg = j?.error?.message?.value ?? j?.error?.message
+        const code = j?.error?.code
+        if (msg) detail = code ? `[${code}] ${msg}` : msg
+      } catch {
+        // XML: extraer <code> y <message>
+        const code = text.match(/<code>([^<]*)<\/code>/)?.[1]
+        const msg  = text.match(/<message[^>]*>([^<]*)<\/message>/)?.[1]
+        if (msg) detail = code ? `[${code}] ${msg}` : msg
+      }
+      return res.status(resp.status).json({ error: `SAP IBP returned ${resp.status}`, detail })
     }
     const contentType = resp.headers.get('content-type') || ''
     if (contentType.includes('xml')) {
