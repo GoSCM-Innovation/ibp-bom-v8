@@ -143,13 +143,17 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         if (p.JobTempParamHiddenInd    === 'X') hiddenSetApi.add(p.JobTemplateParameterName)
       })
 
-      // Valores pre-configurados
+      // Valores pre-configurados desde TemplateValuesGet
+      // Clave: "${STEP_NR}|${NAME}" — NAME es el nombre corto (sin step ID), STEP_NR identifica el paso
       const prefilledValues = {}
       try {
         const tvParsed = JSON.parse(tvData?.d?.ParameterValues ?? 'null')
         ;(tvParsed?.VALUES ?? []).forEach(v => {
           const first = v.T_VALUE?.[0]
-          if (first != null) prefilledValues[v.NAME] = { low: first.LOW ?? '', high: first.HIGH ?? '', option: first.OPTION ?? 'EQ', sign: first.SIGN ?? 'I' }
+          if (first != null) {
+            const tvKey = `${v.STEP_NR ?? 1}|${v.NAME}`
+            prefilledValues[tvKey] = { low: first.LOW ?? '', high: first.HIGH ?? '', option: first.OPTION ?? 'EQ', sign: first.SIGN ?? 'I' }
+          }
         })
       } catch { /* ignorar */ }
 
@@ -220,16 +224,24 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         }]
       }
 
-      // Inicializar form con valores pre-configurados o vacíos
+      // Inicializar form: TemplateValuesGet > seq_param_val.value > vacío
       const init = {}
       finalSteps.forEach(step => {
         step.params.forEach(p => {
           const key = `${p.stepNr}|${p.name}`
-          const rd = p.rawDefault
-          const seqDefault = rd != null
-            ? { low: rd.low ?? '', high: '', option: rd.opt ?? 'EQ', sign: rd.sign ?? 'I' }
+
+          // TemplateValuesGet usa nombre corto (posiciones 1-8, recortado) + STEP_NR
+          const baseName = p.name.slice(0, 8).trimEnd()
+          const tvVal    = prefilledValues[`${p.stepNr}|${baseName}`]
+
+          // seq_param_val.value llega como array [{sign,opt,low}] en la API real
+          const rd      = p.rawDefault
+          const rdFirst = Array.isArray(rd) ? rd[0] : rd
+          const seqDefault = rdFirst != null
+            ? { low: rdFirst.low ?? '', high: '', option: rdFirst.opt ?? 'EQ', sign: rdFirst.sign ?? 'I' }
             : null
-          init[key] = prefilledValues[p.name] ?? seqDefault ?? { low: '', high: '', option: 'EQ', sign: 'I' }
+
+          init[key] = tvVal ?? seqDefault ?? { low: '', high: '', option: 'EQ', sign: 'I' }
         })
       })
 
