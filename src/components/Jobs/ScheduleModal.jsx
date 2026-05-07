@@ -170,8 +170,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     const val      = preValues[key]
     const low      = val?.low ?? ''
     const hasValue = low.trim() !== ''
-    const shortName    = bn(p.name)
-    const showTechName = p.label !== shortName
 
     if (p.isCheckbox) {
       const checked = low === 'X'
@@ -186,9 +184,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           <span style={{ fontSize: 11, color: checked ? 'var(--text)' : 'var(--text3)', fontWeight: 500 }}>
             {p.label}
           </span>
-          {showTechName && (
-            <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{shortName}</span>
-          )}
         </div>
       )
     }
@@ -197,9 +192,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       <div key={`${stepNr}|${p.name}`} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, minWidth: 0 }}>
         <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {p.label}
-          {showTechName && (
-            <span style={{ fontSize: 9, fontFamily: 'var(--mono)', marginLeft: 4 }}>{shortName}</span>
-          )}
         </span>
         <span style={{
           fontSize: 11,
