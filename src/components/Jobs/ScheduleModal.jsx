@@ -113,8 +113,13 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
 
         const params = rawParams
-          // Mostrar solo params registrados en JobTemplateParameterSet (allowlist de visibilidad de IBP)
           .filter(p => allowedSet.has(p.name))
+          .filter(p => {
+            // Ocultar params sin valor configurado (checkboxes siempre visibles por su estado booleano)
+            if (p.check_box === true) return true
+            const v = pv[`${stepNr}|${bn(p.name)}`]
+            return (v?.low ?? '').trim() !== ''
+          })
           .map(p => ({
             name:       p.name,
             label:      labelOf(p.name, labelMap),
