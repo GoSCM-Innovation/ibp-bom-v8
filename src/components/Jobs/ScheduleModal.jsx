@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
 
 function enc(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
-// Extrae el nombre corto (8 chars, trimEnd) del nombre completo que incluye UUID del step
 function bn(fullName) {
   return fullName.slice(0, 8).trimEnd()
 }
@@ -37,130 +36,36 @@ function labelOf(name, labelMap) {
   return labelMap?.[name] ?? PARAM_LABEL[base] ?? base
 }
 
-const SECTION_ORDER = ['General', 'Control Parameters', 'Planning Start Settings', 'Planning Scope']
-
 export default function ScheduleModal({ row, connection, session, onClose, onSuccess }) {
-  const [loading, setLoading]             = useState(true)
-  const [loadError, setLoadError]         = useState('')
-  const [steps, setSteps]                 = useState([])
-  const [formValues, setFormValues]       = useState({})
-  const [dynHidden, setDynHidden]         = useState(new Set())
-  const [dynReadOnly, setDynReadOnly]     = useState(new Set())
-  const [expandedStep, setExpandedStep]   = useState(null)
-  const [showOptByStep, setShowOptByStep] = useState({})
-  const [jobText, setJobText]             = useState('')
-  const [executing, setExecuting]         = useState(false)
-  const [execError, setExecError]         = useState('')
-
-  const formValuesRef = useRef({})
-  const stepsRef      = useRef([])
-  formValuesRef.current = formValues
+  const [loading, setLoading]           = useState(true)
+  const [loadError, setLoadError]       = useState('')
+  const [steps, setSteps]               = useState([])
+  const [preValues, setPreValues]       = useState({})
+  const [expandedStep, setExpandedStep] = useState(null)
+  const [jobText, setJobText]           = useState('')
+  const [executing, setExecuting]       = useState(false)
+  const [execError, setExecError]       = useState('')
 
   const templateLabel = row.JobTemplateText || row.JobTemplateName
 
-  // ── Schedule check ───────────────────────────────────────────────────────────
-  // DynamicProperties devuelve nombres cortos (ej: "P_PROFID"), no los nombres completos con UUID.
-  // El payload también debe usar nombre corto + STEP_NR.
-  async function doScheduleCheck(currentValues, currentSteps) {
-    const values   = currentValues ?? formValuesRef.current
-    const allSteps = currentSteps  ?? stepsRef.current
-    const allParams = allSteps.flatMap(s => s.params)
-    if (!allParams.length) return
-
-    const checkVals = allParams
-      .filter(p => {
-        const fv = values[`${p.stepNr}|${p.name}`]
-        return fv?.low?.trim() || fv?.high?.trim()
-      })
-      .map(p => {
-        const fv = values[`${p.stepNr}|${p.name}`]
-        return {
-          STEP_NR: p.stepNr,
-          NAME:    bn(p.name),
-          T_VALUE: [{ SIGN: fv.sign || 'I', OPTION: fv.option || 'EQ', LOW: fv.low || '', HIGH: fv.high || '' }],
-        }
-      })
-
-    try {
-      const r = await proxyCall({
-        connection, session,
-        path:   `/JobScheduleCheck?JobTemplateName=${enc(row.JobTemplateName)}&JobParameterValues=${enc(JSON.stringify({ VALUES: checkVals }))}`,
-        method: 'POST',
-      })
-      const data = await r.json()
-      const d = data?.d ?? {}
-
-      const dp = JSON.parse(d.DynamicProperties || '[]')
-      const newHidden   = new Set()
-      const newReadOnly = new Set()
-      dp.forEach(p => {
-        if (p.hidden)   newHidden.add(p.jobParameterName)    // nombres cortos
-        if (p.readOnly) newReadOnly.add(p.jobParameterName)  // nombres cortos
-      })
-      setDynHidden(newHidden)
-      setDynReadOnly(newReadOnly)
-
-      if (d.ChangedInd) {
-        const returned = JSON.parse(d.JobParameterValues || '{"VALUES":[]}')
-        setFormValues(prev => {
-          const updated = { ...prev }
-          ;(returned.VALUES ?? []).forEach(v => {
-            const param = allParams.find(p =>
-              bn(p.name) === v.NAME && p.stepNr === (v.STEP_NR ?? p.stepNr)
-            )
-            if (!param) return
-            const key   = `${param.stepNr}|${param.name}`
-            const first = v.T_VALUE?.[0]
-            if (!updated[key]?.low?.trim() && first?.LOW) {
-              updated[key] = { low: first.LOW ?? '', high: first.HIGH ?? '', option: first.OPTION ?? 'EQ', sign: first.SIGN ?? 'I' }
-            }
-          })
-          return updated
-        })
-      }
-    } catch { /* silencioso */ }
-  }
-
-  // ── Initial load ─────────────────────────────────────────────────────────────
+  // ── Carga ────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    setLoading(true); setLoadError(''); setSteps([]); setFormValues({})
-    setDynHidden(new Set()); setDynReadOnly(new Set())
-    setExpandedStep(null); setShowOptByStep({}); setExecError('')
+    setLoading(true); setLoadError(''); setSteps([]); setPreValues({})
+    setExpandedStep(null); setExecError('')
     setJobText(row.JobTemplateText || row.JobTemplateName)
 
     const name = row.JobTemplateName
 
     Promise.all([
       proxyCall({ connection, session, path: `/JobTemplateRead?JobTemplateName=${enc(name)}` }).then(r => r.json()),
-      proxyCall({ connection, session, path: `/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
-      proxyCall({ connection, session, path: `/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
-      // TemplateValuesStructGet devuelve {StepNr, JobParameterName, Sign, Option, Low, High} estructurado
       proxyCall({ connection, session, path: `/TemplateValuesStructGet?JobTemplateName=${enc(name)}` }).then(r => r.json()),
-    ]).then(async ([tplData, pData, gData, tvData]) => {
-      const pParams = pData?.d?.results ?? pData?.value ?? []
-      const groups  = gData?.d?.results ?? gData?.value ?? []
+    ]).then(async ([tplData, tvData]) => {
 
-      const groupText = {}
-      groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
-
-      const groupByParam = {}
-      const mandatorySet = new Set()
-      const readOnlySet  = new Set()
-      const hiddenSetApi = new Set()
-      pParams.forEach(p => {
-        groupByParam[p.JobTemplateParameterName] = p.JobTemplateParamGroupName
-        if (p.JobTempParamMandatoryInd === 'X') mandatorySet.add(p.JobTemplateParameterName)
-        if (p.JobTempParamReadOnlyInd  === 'X') readOnlySet.add(p.JobTemplateParameterName)
-        if (p.JobTempParamHiddenInd    === 'X') hiddenSetApi.add(p.JobTemplateParameterName)
-      })
-
-      // Valores pre-configurados desde TemplateValuesStructGet
-      // Clave: "${StepNr}|${JobParameterName}" (nombre corto, sin UUID de step)
-      const prefilledValues = {}
+      // Valores pre-configurados del template: clave "StepNr|NombreCorto"
+      const pv = {}
       const tvResults = tvData?.d?.results ?? tvData?.value ?? []
       tvResults.forEach(v => {
-        const tvKey = `${v.StepNr ?? 1}|${v.JobParameterName}`
-        prefilledValues[tvKey] = {
+        pv[`${v.StepNr ?? 1}|${v.JobParameterName}`] = {
           low:    v.Low    ?? '',
           high:   v.High   ?? '',
           option: v.Option ?? 'EQ',
@@ -168,12 +73,14 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         }
       })
 
+      // Estructura de steps desde TemplateData
       let sequences = []
       try {
         const td = JSON.parse(tplData?.d?.TemplateData ?? 'null')
         sequences = td?.templates?.[0]?.sequences ?? []
       } catch { /* fall through */ }
 
+      // Texto legible de cada catálogo
       const distinctCatalogs = [...new Set(sequences.map(s => s.basic_jce_name).filter(Boolean))]
       const catalogTexts = {}
       await Promise.all(distinctCatalogs.map(async cat => {
@@ -182,141 +89,48 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           const catTd   = JSON.parse(catData?.d?.TemplateData ?? 'null')
           const text    = catTd?.templates?.[0]?.text
           if (text) catalogTexts[cat] = text
-        } catch { /* fallback al nombre técnico */ }
+        } catch { /* usa nombre técnico */ }
       }))
 
-      let finalSteps = []
-      if (sequences.length > 0) {
-        finalSteps = sequences.map((seq, idx) => {
-          const stepNr    = idx + 1
-          const rawParams = seq.seq_param_val ?? []
-          const labelMap  = {}
-          rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
+      const finalSteps = sequences.map((seq, idx) => {
+        const stepNr    = idx + 1
+        const rawParams = seq.seq_param_val ?? []
+        const labelMap  = {}
+        rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
 
-          const params = rawParams
-            .filter(p => p.hidden !== true && !hiddenSetApi.has(p.name))
-            .map(p => ({
-              stepNr,
-              name:        p.name,
-              label:       labelOf(p.name, labelMap),
-              group:       groupText[groupByParam[p.name]] ?? null,
-              mandatory:   mandatorySet.has(p.name) || p.mandatory === true,
-              readOnly:    readOnlySet.has(p.name) || p.change_able === false,
-              rawDefault:  p.value ?? null,
-              // Metadata de tipo desde seq_param_val
-              isCheckbox:   p.check_box === true,
-              isSelectOpts: p.kind === 'Select-Options',
-              isInt:        (p.tech_data_type === 'INT4' || p.tech_data_type === 'NUMC') && p.check_box !== true,
-              isList:       p.list === true && p.check_box !== true,
-              maxLength:    p.length ?? null,
-            }))
+        const params = rawParams
+          .filter(p => p.hidden !== true)
+          .map(p => ({
+            name:       p.name,
+            label:      labelOf(p.name, labelMap),
+            isCheckbox: p.check_box === true,
+            isInt:      (p.tech_data_type === 'INT4' || p.tech_data_type === 'NUMC') && p.check_box !== true,
+          }))
 
-          return {
-            seqPos:       stepNr,
-            basicJceName: seq.basic_jce_name ?? '',
-            catalogText:  catalogTexts[seq.basic_jce_name] ?? seq.basic_jce_name ?? `Paso ${stepNr}`,
-            params,
-          }
-        })
-      } else if (pParams.length > 0) {
-        finalSteps = [{
-          seqPos:       1,
-          basicJceName: name,
-          catalogText:  row.JobTemplateText || name,
-          params: pParams
-            .filter(p => p.JobTempParamHiddenInd !== 'X')
-            .map(p => ({
-              stepNr:      1,
-              name:        p.JobTemplateParameterName,
-              label:       labelOf(p.JobTemplateParameterName, null),
-              group:       groupText[p.JobTemplateParamGroupName] ?? null,
-              mandatory:   p.JobTempParamMandatoryInd === 'X',
-              readOnly:    p.JobTempParamReadOnlyInd  === 'X',
-              rawDefault:  p.JobTempParamDefaultVal ? [{ sign: 'I', opt: 'EQ', low: p.JobTempParamDefaultVal }] : null,
-              isCheckbox:   false,
-              isSelectOpts: false,
-              isInt:        false,
-              isList:       false,
-              maxLength:    null,
-            })),
-        }]
-      }
-
-      // Inicializar form: TemplateValuesStructGet > seq_param_val.value > vacío
-      const init = {}
-      finalSteps.forEach(step => {
-        step.params.forEach(p => {
-          const key = `${p.stepNr}|${p.name}`
-
-          // TemplateValuesStructGet usa nombre corto (bn) + StepNr como clave
-          const tvVal = prefilledValues[`${p.stepNr}|${bn(p.name)}`]
-
-          const rd      = p.rawDefault
-          const rdFirst = Array.isArray(rd) ? rd[0] : rd
-          const seqDefault = rdFirst != null
-            ? { low: rdFirst.low ?? '', high: '', option: rdFirst.opt ?? 'EQ', sign: rdFirst.sign ?? 'I' }
-            : null
-
-          init[key] = tvVal ?? seqDefault ?? { low: '', high: '', option: 'EQ', sign: 'I' }
-        })
+        return {
+          seqPos:       stepNr,
+          basicJceName: seq.basic_jce_name ?? '',
+          catalogText:  catalogTexts[seq.basic_jce_name] ?? seq.basic_jce_name ?? `Paso ${stepNr}`,
+          params,
+        }
       })
 
-      stepsRef.current = finalSteps
-      setFormValues(init)
+      setPreValues(pv)
       setSteps(finalSteps)
       setLoading(false)
-
       if (finalSteps.length === 1) setExpandedStep(1)
-
-      doScheduleCheck(init, finalSteps)
     }).catch(e => {
       setLoadError(e.message)
       setLoading(false)
     })
   }, [row.JobTemplateName]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Helpers de form ──────────────────────────────────────────────────────────
-  function setField(stepNr, name, field, value) {
-    const key = `${stepNr}|${name}`
-    setFormValues(prev => ({ ...prev, [key]: { ...(prev[key] ?? { low: '', high: '', option: 'EQ', sign: 'I' }), [field]: value } }))
-  }
-
-  function handleBlur() { doScheduleCheck() }
-
-  // Validación de un step — dynHidden usa nombres cortos
-  function stepValidation(step) {
-    const visible   = step.params.filter(p => !dynHidden.has(bn(p.name)))
-    const mandatory = visible.filter(p => p.mandatory)
-    const missing   = mandatory.filter(p => !formValues[`${p.stepNr}|${p.name}`]?.low?.trim())
-    const filled    = visible.filter(p => formValues[`${p.stepNr}|${p.name}`]?.low?.trim())
-    return { total: visible.length, mandatory: mandatory.length, missing: missing.length, filled: filled.length }
-  }
-
-  // ── Ejecutar ─────────────────────────────────────────────────────────────────
+  // ── Ejecutar con los valores configurados en el template ─────────────────────
+  // No se pasan JobParameterValues: SAP IBP usa los valores guardados del template.
   async function handleExecute() {
-    const badStep = steps.find(s => stepValidation(s).missing > 0)
-    if (badStep) {
-      setExpandedStep(badStep.seqPos)
-      setExecError(`Paso ${badStep.seqPos}: hay campos obligatorios sin valor`)
-      return
-    }
-
     setExecuting(true)
     setExecError('')
-
-    const paramValues = steps.flatMap(s => s.params)
-      .filter(p => {
-        const fv = formValues[`${p.stepNr}|${p.name}`]
-        return fv?.low?.trim() || fv?.high?.trim()
-      })
-      .map(p => {
-        const fv = formValues[`${p.stepNr}|${p.name}`] ?? { low: '', high: '', option: 'EQ', sign: 'I' }
-        return { StepNr: p.stepNr, JobParameterName: p.name, Sign: fv.sign || 'I', Option: fv.option || 'EQ', Low: fv.low ?? '', High: fv.high ?? '' }
-      })
-
-    let path = `/JobSchedule?JobTemplateName=${enc(row.JobTemplateName)}&JobText=${enc(jobText || templateLabel)}`
-    if (paramValues.length > 0) path += `&JobParameterValues=${enc(JSON.stringify(paramValues))}`
-
+    const path = `/JobSchedule?JobTemplateName=${enc(row.JobTemplateName)}&JobText=${enc(jobText || templateLabel)}`
     try {
       const r = await proxyCall({ connection, session, path, method: 'POST', injectJobUser: true })
       const data = await r.json()
@@ -329,210 +143,83 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     }
   }
 
-  // ── Render de un parámetro ───────────────────────────────────────────────────
-  function renderParam(p) {
-    const key  = `${p.stepNr}|${p.name}`
-    const fv   = formValues[key] ?? { low: '', high: '', option: 'EQ', sign: 'I' }
-    const isRO = p.readOnly || dynReadOnly.has(bn(p.name))
-    const isMissingMandatory = p.mandatory && !fv.low?.trim()
-    const shortName = bn(p.name)
+  // ── Render de un parámetro (solo lectura) ────────────────────────────────────
+  function renderParam(p, stepNr) {
+    const key      = `${stepNr}|${bn(p.name)}`
+    const val      = preValues[key]
+    const low      = val?.low ?? ''
+    const hasValue = low.trim() !== ''
+    const shortName    = bn(p.name)
     const showTechName = p.label !== shortName
 
-    const labelNode = (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500 }}>
-          {p.label}
-          {p.mandatory && <span style={{ color: '#ff6b6b', marginLeft: 3 }}>*</span>}
-        </span>
-        {showTechName && (
-          <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{shortName}</span>
-        )}
-      </div>
-    )
-
-    // ── Checkbox (FLAG / check_box: true) ──
     if (p.isCheckbox) {
+      const checked = low === 'X'
       return (
-        <div key={key}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: isRO ? 'default' : 'pointer', userSelect: 'none' }}>
-            <input
-              type="checkbox"
-              checked={fv.low === 'X'}
-              disabled={isRO}
-              onChange={e => {
-                setField(p.stepNr, p.name, 'low', e.target.checked ? 'X' : '')
-                setTimeout(() => doScheduleCheck(), 0)
-              }}
-              style={{ width: 14, height: 14, flexShrink: 0, cursor: isRO ? 'default' : 'pointer', accentColor: '#22c55e' }}
-            />
-            <span style={{ fontSize: 11, color: isRO ? 'var(--text3)' : 'var(--text)', fontWeight: 500 }}>
-              {p.label}
-            </span>
-            {showTechName && (
-              <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{shortName}</span>
-            )}
-          </label>
+        <div key={`${stepNr}|${p.name}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            fontSize: 13, flexShrink: 0,
+            color: checked ? '#22c55e' : 'var(--text3)',
+          }}>
+            {checked ? '☑' : '☐'}
+          </span>
+          <span style={{ fontSize: 11, color: checked ? 'var(--text)' : 'var(--text3)', fontWeight: 500 }}>
+            {p.label}
+          </span>
+          {showTechName && (
+            <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{shortName}</span>
+          )}
         </div>
       )
     }
 
-    // ── Número (INT4 / NUMC) ──
-    if (p.isInt) {
-      return (
-        <div key={key}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {labelNode}
-            <input
-              type="number" step="1" value={fv.low} disabled={isRO}
-              placeholder={p.mandatory ? 'requerido' : ''}
-              onChange={e => setField(p.stepNr, p.name, 'low', e.target.value)}
-              onBlur={handleBlur}
-              style={{
-                width: 130, background: 'var(--bg2)',
-                border: `1px solid ${isMissingMandatory ? 'rgba(255,107,107,.5)' : 'var(--border)'}`,
-                borderRadius: 5, color: 'var(--text)', fontSize: 11,
-                padding: '6px 10px', outline: 'none', opacity: isRO ? 0.5 : 1,
-              }}
-            />
-          </label>
-        </div>
-      )
-    }
-
-    // ── Select-Options (con selector de operador + rango) ──
-    if (p.isSelectOpts) {
-      const isRange = fv.option === 'BT'
-      return (
-        <div key={key}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {labelNode}
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <select
-                value={fv.option} disabled={isRO}
-                onChange={e => setField(p.stepNr, p.name, 'option', e.target.value)}
-                onBlur={handleBlur}
-                style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text2)', fontSize: 10, padding: '5px 6px', cursor: isRO ? 'default' : 'pointer', flexShrink: 0, width: 52 }}
-              >
-                <option value="EQ">=</option>
-                <option value="NE">≠</option>
-                <option value="LT">&lt;</option>
-                <option value="LE">≤</option>
-                <option value="GT">&gt;</option>
-                <option value="GE">≥</option>
-                <option value="BT">…</option>
-                <option value="CP">~</option>
-              </select>
-              <input
-                type="text" value={fv.low} disabled={isRO}
-                placeholder={p.mandatory ? 'requerido' : ''}
-                maxLength={p.maxLength ?? undefined}
-                onChange={e => setField(p.stepNr, p.name, 'low', e.target.value)}
-                onBlur={handleBlur}
-                style={{
-                  flex: 1, background: 'var(--bg2)',
-                  border: `1px solid ${isMissingMandatory ? 'rgba(255,107,107,.5)' : 'var(--border)'}`,
-                  borderRadius: 5, color: 'var(--text)', fontSize: 11,
-                  padding: '6px 10px', outline: 'none', opacity: isRO ? 0.5 : 1,
-                }}
-              />
-              {isRange && (
-                <>
-                  <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>→</span>
-                  <input
-                    type="text" value={fv.high} disabled={isRO} placeholder="hasta"
-                    maxLength={p.maxLength ?? undefined}
-                    onChange={e => setField(p.stepNr, p.name, 'high', e.target.value)}
-                    onBlur={handleBlur}
-                    style={{ flex: 1, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text)', fontSize: 11, padding: '6px 10px', outline: 'none' }}
-                  />
-                </>
-              )}
-            </div>
-          </label>
-        </div>
-      )
-    }
-
-    // ── Texto simple (Parameter, list, CHAR) — sin selector de operador ──
     return (
-      <div key={key}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {labelNode}
-          <input
-            type="text" value={fv.low} disabled={isRO}
-            placeholder={p.mandatory ? 'requerido' : ''}
-            maxLength={p.maxLength ?? undefined}
-            onChange={e => setField(p.stepNr, p.name, 'low', e.target.value)}
-            onBlur={handleBlur}
-            style={{
-              background: 'var(--bg2)',
-              border: `1px solid ${isMissingMandatory ? 'rgba(255,107,107,.5)' : 'var(--border)'}`,
-              borderRadius: 5, color: 'var(--text)', fontSize: 11,
-              padding: '6px 10px', outline: 'none', opacity: isRO ? 0.5 : 1,
-            }}
-          />
-        </label>
+      <div key={`${stepNr}|${p.name}`} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, minWidth: 0 }}>
+        <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500, flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {p.label}
+          {showTechName && (
+            <span style={{ fontSize: 9, fontFamily: 'var(--mono)', marginLeft: 4 }}>{shortName}</span>
+          )}
+        </span>
+        <span style={{
+          fontSize: 11,
+          color: hasValue ? 'var(--text)' : 'var(--text3)',
+          fontFamily: hasValue ? 'var(--mono)' : 'inherit',
+          fontStyle: hasValue ? 'normal' : 'italic',
+          textAlign: 'right', wordBreak: 'break-all',
+          background: hasValue ? 'var(--bg2)' : 'transparent',
+          border: hasValue ? '1px solid var(--border)' : 'none',
+          borderRadius: 4, padding: hasValue ? '1px 7px' : '0',
+        }}>
+          {hasValue ? low : 'sin valor'}
+        </span>
       </div>
     )
   }
 
   // ── Contenido expandido de un step ───────────────────────────────────────────
   function renderStepContent(step) {
-    const isShowOpt = !!showOptByStep[step.seqPos]
-    const visible   = step.params.filter(p => !dynHidden.has(bn(p.name)))
-
-    if (visible.length === 0) {
+    if (step.params.length === 0) {
       return (
         <div style={{ padding: '14px', fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>
-          Sin parámetros configurables para este paso.
+          Sin parámetros configurados para este paso.
         </div>
       )
     }
 
-    const primary  = visible.filter(p => p.mandatory || formValues[`${p.stepNr}|${p.name}`]?.low?.trim())
-    const optional = visible.filter(p => !p.mandatory && !formValues[`${p.stepNr}|${p.name}`]?.low?.trim())
-    const forceAll = primary.length === 0
-    const display  = forceAll ? visible : (isShowOpt ? visible : primary)
-
-    const grouped   = {}
-    const ungrouped = []
-    display.forEach(p => {
-      if (p.group) { if (!grouped[p.group]) grouped[p.group] = []; grouped[p.group].push(p) }
-      else ungrouped.push(p)
-    })
-    const ordered = [
-      ...SECTION_ORDER.filter(s => grouped[s]),
-      ...Object.keys(grouped).filter(s => !SECTION_ORDER.includes(s)),
-    ]
-    if (ungrouped.length) ordered.push(null)
+    // Separar checkboxes del resto para agruparlos visualmente
+    const checkboxes = step.params.filter(p => p.isCheckbox)
+    const rest       = step.params.filter(p => !p.isCheckbox)
 
     return (
-      <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {ordered.map(sec => {
-          const list = sec ? grouped[sec] : ungrouped
-          if (!list?.length) return null
-          return (
-            <div key={sec ?? '__ungrouped'}>
-              {sec && (
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10, paddingBottom: 5, borderBottom: '1px solid var(--border)' }}>
-                  {sec}
-                </div>
-              )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {list.map(renderParam)}
-              </div>
-            </div>
-          )
-        })}
-
-        {!forceAll && optional.length > 0 && (
-          <button
-            onClick={() => setShowOptByStep(prev => ({ ...prev, [step.seqPos]: !prev[step.seqPos] }))}
-            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text3)', fontSize: 11, cursor: 'pointer', padding: '7px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <span style={{ fontSize: 10 }}>{isShowOpt ? '▲' : '▼'}</span>
-            {isShowOpt ? `Ocultar opcionales (${optional.length})` : `Mostrar opcionales (${optional.length})`}
-          </button>
+      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rest.map(p => renderParam(p, step.seqPos))}
+        {checkboxes.length > 0 && rest.length > 0 && (
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+        )}
+        {checkboxes.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
+            {checkboxes.map(p => renderParam(p, step.seqPos))}
+          </div>
         )}
       </div>
     )
@@ -549,7 +236,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       <div style={{
         position: 'fixed', top: '50%', left: '50%',
         transform: 'translate(-50%, -50%)',
-        width: 'min(580px, 95vw)', maxHeight: '88vh',
+        width: 'min(560px, 95vw)', maxHeight: '88vh',
         background: 'var(--bg)', border: '1px solid var(--border2)',
         borderRadius: 12, zIndex: 501,
         display: 'flex', flexDirection: 'column',
@@ -561,7 +248,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Configurar y ejecutar job</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Ejecutar job</div>
               <div style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{templateLabel}</div>
               <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 2 }}>{row.JobTemplateName}</div>
             </div>
@@ -574,7 +261,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           {!loading && !loadError && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-                Texto del job
+                Nombre del run
               </div>
               <input
                 type="text" value={jobText}
@@ -586,6 +273,13 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                   padding: '7px 10px', outline: 'none',
                 }}
               />
+            </div>
+          )}
+
+          {!loading && !loadError && (
+            <div style={{ marginTop: 10, fontSize: 10, color: 'var(--text3)', fontStyle: 'italic' }}>
+              Los parámetros se ejecutan con los valores configurados en SAP IBP.
+              Para modificarlos, edita el template directamente en el sistema.
             </div>
           )}
         </div>
@@ -607,18 +301,23 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
           {!loading && !loadError && steps.length === 0 && (
             <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text2)', fontSize: 12 }}>
-              Este template no tiene parámetros configurables.
+              Este template no tiene pasos configurados.
             </div>
           )}
 
           {!loading && !loadError && steps.map(step => {
             const isOpen = expandedStep === step.seqPos
-            const val    = stepValidation(step)
-            const hasErr = val.missing > 0
-            const allOk  = val.mandatory > 0 && val.missing === 0
 
+            // Contar parámetros con valor configurado
+            const configured = step.params.filter(p => {
+              const v = preValues[`${step.seqPos}|${bn(p.name)}`]
+              return v?.low?.trim()
+            })
+            const total = step.params.length
+
+            // Título con P_OPNAME si existe
             const opNameParam = step.params.find(p => p.name.startsWith('P_OPNAME'))
-            const opName      = opNameParam ? formValues[`${step.seqPos}|${opNameParam.name}`]?.low?.trim() : null
+            const opName      = opNameParam ? preValues[`${step.seqPos}|${bn(opNameParam.name)}`]?.low?.trim() : null
             const stepTitle   = opName ? `${step.catalogText}: ${opName}` : step.catalogText
 
             return (
@@ -633,15 +332,15 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                   onClick={() => setExpandedStep(prev => prev === step.seqPos ? null : step.seqPos)}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', cursor: 'pointer', userSelect: 'none' }}
                 >
+                  {/* Círculo numerado */}
                   <span style={{
                     width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 10, fontWeight: 700,
-                    background: hasErr ? 'rgba(255,107,107,.15)' : allOk ? 'rgba(34,197,94,.15)' : 'var(--bg3)',
-                    border:     `1px solid ${hasErr ? 'rgba(255,107,107,.4)' : allOk ? 'rgba(34,197,94,.4)' : 'var(--border)'}`,
-                    color:      hasErr ? '#ff6b6b' : allOk ? '#22c55e' : 'var(--text2)',
+                    background: 'var(--bg3)', border: '1px solid var(--border)', color: 'var(--text2)',
                   }}>{step.seqPos}</span>
 
+                  {/* Título */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {stepTitle}
@@ -653,28 +352,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
-                    {hasErr && (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: '#ff6b6b', background: 'rgba(255,107,107,.12)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 3, padding: '2px 6px', whiteSpace: 'nowrap' }}>
-                        ⚠ {val.missing} obligatorio{val.missing !== 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {allOk && (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.25)', borderRadius: 3, padding: '2px 6px' }}>
-                        ✓
-                      </span>
-                    )}
-                    {val.filled > 0 && (
-                      <span style={{ fontSize: 9, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 3, padding: '2px 6px', whiteSpace: 'nowrap' }}>
-                        {val.filled}/{val.total}
-                      </span>
-                    )}
-                    {val.filled === 0 && val.total > 0 && (
-                      <span style={{ fontSize: 9, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 3, padding: '2px 6px', whiteSpace: 'nowrap' }}>
-                        {val.total} param{val.total !== 1 ? 's' : ''}
-                      </span>
-                    )}
-                  </div>
+                  {/* Badge params configurados */}
+                  {total > 0 && (
+                    <span style={{ fontSize: 9, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 3, padding: '2px 6px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                      {configured.length}/{total}
+                    </span>
+                  )}
 
                   <span style={{ color: 'var(--text3)', fontSize: 10, flexShrink: 0, marginLeft: 2 }}>
                     {isOpen ? '▲' : '▼'}
@@ -699,15 +382,9 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
             </div>
           )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center' }}>
-            {!loading && steps.length > 1 && (
+            {!loading && steps.length > 0 && (
               <span style={{ fontSize: 10, color: 'var(--text3)', marginRight: 'auto' }}>
-                {steps.length} pasos
-                {steps.some(s => stepValidation(s).missing > 0)
-                  ? <span style={{ color: '#ff6b6b', marginLeft: 6 }}>— obligatorios incompletos</span>
-                  : steps.every(s => stepValidation(s).mandatory === 0 || stepValidation(s).missing === 0)
-                    ? <span style={{ color: '#22c55e', marginLeft: 6 }}>— listos</span>
-                    : null
-                }
+                {steps.length} paso{steps.length !== 1 ? 's' : ''}
               </span>
             )}
             <button
