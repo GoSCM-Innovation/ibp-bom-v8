@@ -94,12 +94,14 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         const labelMap  = {}
         rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
 
-        // Valores desde seq_param_val[i].value[0].low (fuente real de IBP)
+        // Valores desde seq_param_val[i].value[] — array para soportar multi-valor
         const values = {}
-        rawParams.forEach(p => { values[bn(p.name)] = p.value?.[0]?.low ?? '' })
+        rawParams.forEach(p => {
+          values[bn(p.name)] = (p.value ?? []).map(v => v.low ?? '').filter(v => v !== '')
+        })
 
         // Cuántas variables custom activas (P_VARNO)
-        const varnoCount = parseInt(values['P_VARNO'] || '0', 10) || 0
+        const varnoCount = parseInt(values['P_VARNO']?.[0] || '0', 10) || 0
 
         const params = rawParams
           .filter(p => p.hidden !== true)
@@ -153,11 +155,11 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
   // ── Render de un parámetro (solo lectura) ────────────────────────────────────
   function renderParam(p, values) {
-    const low      = values[bn(p.name)] ?? ''
-    const hasValue = low.trim() !== ''
+    const lows     = values[bn(p.name)] ?? []
+    const hasValue = lows.length > 0
 
     if (p.isCheckbox) {
-      const checked = low === 'X'
+      const checked = lows.includes('X')
       return (
         <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 13, flexShrink: 0, color: checked ? '#22c55e' : 'var(--text3)' }}>
@@ -175,18 +177,21 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {p.label}
         </span>
-        <span style={{
-          fontSize: 11,
-          color: hasValue ? 'var(--text)' : 'var(--text3)',
-          fontFamily: hasValue ? 'var(--mono)' : 'inherit',
-          fontStyle: hasValue ? 'normal' : 'italic',
-          textAlign: 'right', wordBreak: 'break-all',
-          background: hasValue ? 'var(--bg2)' : 'transparent',
-          border: hasValue ? '1px solid var(--border)' : 'none',
-          borderRadius: 4, padding: hasValue ? '1px 7px' : '0',
-        }}>
-          {hasValue ? low : '—'}
-        </span>
+        {hasValue ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
+            {lows.map((low, i) => (
+              <span key={i} style={{
+                fontSize: 11, color: 'var(--text)', fontFamily: 'var(--mono)',
+                background: 'var(--bg2)', border: '1px solid var(--border)',
+                borderRadius: 4, padding: '1px 7px', wordBreak: 'break-all',
+              }}>
+                {low}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>—</span>
+        )}
       </div>
     )
   }
@@ -304,12 +309,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
             // Params con valor real configurado (excluyendo checkboxes sin marcar)
             const configured = step.params.filter(p =>
-              p.isCheckbox ? (step.values[bn(p.name)] ?? '') === 'X' : (step.values[bn(p.name)] ?? '').trim() !== ''
+              p.isCheckbox ? (step.values[bn(p.name)] ?? []).includes('X') : (step.values[bn(p.name)] ?? []).length > 0
             ).length
             const total = step.params.length
 
             // Título con P_OPNAME si existe
-            const opName = (step.values['P_OPNAME'] ?? '').trim()
+            const opName = ((step.values['P_OPNAME'] ?? [])[0] ?? '').trim()
             const stepTitle = opName ? `${step.catalogText}: ${opName}` : step.catalogText
 
             return (
