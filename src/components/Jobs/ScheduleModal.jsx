@@ -63,15 +63,8 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
     Promise.all([
       proxyCall({ connection, session, path: `/JobTemplateRead?JobTemplateName=${enc(name)}` }).then(r => r.json()),
-      proxyCall({ connection, session, path: `/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
       proxyCall({ connection, session, path: `/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
-    ]).then(async ([tplData, pData, gData]) => {
-
-      // JobTemplateParameterSet → allowlist de params visibles
-      const pParams = pData?.d?.results ?? pData?.value ?? []
-      const allowedSet = new Set(pParams.map(p => p.JobTemplateParameterName))
-      const groupByParam = {}
-      pParams.forEach(p => { groupByParam[p.JobTemplateParameterName] = p.JobTemplateParamGroupName })
+    ]).then(async ([tplData, gData]) => {
 
       const groupText = {}
       const groups = gData?.d?.results ?? gData?.value ?? []
@@ -109,7 +102,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         const varnoCount = parseInt(values['P_VARNO'] || '0', 10) || 0
 
         const params = rawParams
-          .filter(p => allowedSet.has(p.name))
+          .filter(p => p.hidden !== true)
           .filter(p => {
             // Slots P_VARN[N] / P_VARV[N]: mostrar solo N ≤ P_VARNO
             const slot = varSlotNum(bn(p.name))
@@ -119,7 +112,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           .map(p => ({
             name:       p.name,
             label:      labelOf(p.name, labelMap),
-            group:      groupText[groupByParam[p.name]] ?? null,
+            group:      groupText[bn(p.name)] ?? null,
             isCheckbox: p.check_box === true,
           }))
 
