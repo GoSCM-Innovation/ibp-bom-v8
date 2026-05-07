@@ -5,6 +5,11 @@ function enc(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
+// Extrae el nombre corto (8 chars, trimEnd) del nombre completo que incluye UUID del step
+function bn(fullName) {
+  return fullName.slice(0, 8).trimEnd()
+}
+
 const PARAM_LABEL = {
   P_ALGO: 'Planning Algorithm', P_ATD: 'Available-to-Deploy Profile', P_CBP: 'CBP Profile',
   P_DATE: 'Date', P_FLTID: 'Planning Filter', P_OPER: 'Operator Mode',
@@ -23,10 +28,13 @@ const PARAM_LABEL = {
   S_KF_GRP: 'Key Figure Groups', S_MD: 'Master Data', S_RCODE: 'Reason Code',
   P_ATTFCS: 'Target Attribute', P_FM: 'Forecast Model', P_PL: 'Planning Level',
   P_SCMTP: 'S&OP Time Profile Level', S_VERS: 'Version',
+  P_CMD: 'Batch Command', P_PRES: 'Preview', P_SIMU: 'Simulation Mode',
+  P_RULE: 'Rule ID', P_SCNID: 'Scenario', P_PLAREA: 'Planning Area',
 }
 
 function labelOf(name, labelMap) {
-  return labelMap?.[name] ?? PARAM_LABEL[name] ?? name
+  const base = bn(name)
+  return labelMap?.[name] ?? PARAM_LABEL[base] ?? base
 }
 
 const SECTION_ORDER = ['General', 'Control Parameters', 'Planning Start Settings', 'Planning Scope']
@@ -34,7 +42,6 @@ const SECTION_ORDER = ['General', 'Control Parameters', 'Planning Start Settings
 export default function ScheduleModal({ row, connection, session, onClose, onSuccess }) {
   const [loading, setLoading]             = useState(true)
   const [loadError, setLoadError]         = useState('')
-  // steps: [{ seqPos, basicJceName, catalogText, params: [{stepNr, name, label, group, mandatory, readOnly, changeAble}] }]
   const [steps, setSteps]                 = useState([])
   const [formValues, setFormValues]       = useState({})
   const [dynHidden, setDynHidden]         = useState(new Set())
@@ -51,10 +58,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
   const templateLabel = row.JobTemplateText || row.JobTemplateName
 
-  // ── Schedule check ──────────────────────────────────────────────────────────
+  // ── Schedule check ───────────────────────────────────────────────────────────
+  // DynamicProperties devuelve nombres cortos (ej: "P_PROFID"), no los nombres completos con UUID.
+  // El payload también debe usar nombre corto + STEP_NR.
   async function doScheduleCheck(currentValues, currentSteps) {
-    const values   = currentValues  ?? formValuesRef.current
-    const allSteps = currentSteps   ?? stepsRef.current
+    const values   = currentValues ?? formValuesRef.current
+    const allSteps = currentSteps  ?? stepsRef.current
     const allParams = allSteps.flatMap(s => s.params)
     if (!allParams.length) return
 
@@ -66,7 +75,8 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       .map(p => {
         const fv = values[`${p.stepNr}|${p.name}`]
         return {
-          NAME:    p.name,
+          STEP_NR: p.stepNr,
+          NAME:    bn(p.name),
           T_VALUE: [{ SIGN: fv.sign || 'I', OPTION: fv.option || 'EQ', LOW: fv.low || '', HIGH: fv.high || '' }],
         }
       })
@@ -84,8 +94,8 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       const newHidden   = new Set()
       const newReadOnly = new Set()
       dp.forEach(p => {
-        if (p.hidden)   newHidden.add(p.jobParameterName)
-        if (p.readOnly) newReadOnly.add(p.jobParameterName)
+        if (p.hidden)   newHidden.add(p.jobParameterName)    // nombres cortos
+        if (p.readOnly) newReadOnly.add(p.jobParameterName)  // nombres cortos
       })
       setDynHidden(newHidden)
       setDynReadOnly(newReadOnly)
@@ -95,7 +105,9 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         setFormValues(prev => {
           const updated = { ...prev }
           ;(returned.VALUES ?? []).forEach(v => {
-            const param = allParams.find(p => p.name === v.NAME)
+            const param = allParams.find(p =>
+              bn(p.name) === v.NAME && p.stepNr === (v.STEP_NR ?? p.stepNr)
+            )
             if (!param) return
             const key   = `${param.stepNr}|${param.name}`
             const first = v.T_VALUE?.[0]
@@ -122,16 +134,15 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       proxyCall({ connection, session, path: `/JobTemplateRead?JobTemplateName=${enc(name)}` }).then(r => r.json()),
       proxyCall({ connection, session, path: `/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
       proxyCall({ connection, session, path: `/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
-      proxyCall({ connection, session, path: `/TemplateValuesGet?JobTemplateName=${enc(name)}` }).then(r => r.json()),
+      // TemplateValuesStructGet devuelve {StepNr, JobParameterName, Sign, Option, Low, High} estructurado
+      proxyCall({ connection, session, path: `/TemplateValuesStructGet?JobTemplateName=${enc(name)}` }).then(r => r.json()),
     ]).then(async ([tplData, pData, gData, tvData]) => {
       const pParams = pData?.d?.results ?? pData?.value ?? []
       const groups  = gData?.d?.results ?? gData?.value ?? []
 
-      // Grupo → texto legible
       const groupText = {}
       groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
 
-      // Flags por parámetro desde JobTemplateParameterSet
       const groupByParam = {}
       const mandatorySet = new Set()
       const readOnlySet  = new Set()
@@ -143,28 +154,26 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         if (p.JobTempParamHiddenInd    === 'X') hiddenSetApi.add(p.JobTemplateParameterName)
       })
 
-      // Valores pre-configurados desde TemplateValuesGet
-      // Clave: "${STEP_NR}|${NAME}" — NAME es el nombre corto (sin step ID), STEP_NR identifica el paso
+      // Valores pre-configurados desde TemplateValuesStructGet
+      // Clave: "${StepNr}|${JobParameterName}" (nombre corto, sin UUID de step)
       const prefilledValues = {}
-      try {
-        const tvParsed = JSON.parse(tvData?.d?.ParameterValues ?? 'null')
-        ;(tvParsed?.VALUES ?? []).forEach(v => {
-          const first = v.T_VALUE?.[0]
-          if (first != null) {
-            const tvKey = `${v.STEP_NR ?? 1}|${v.NAME}`
-            prefilledValues[tvKey] = { low: first.LOW ?? '', high: first.HIGH ?? '', option: first.OPTION ?? 'EQ', sign: first.SIGN ?? 'I' }
-          }
-        })
-      } catch { /* ignorar */ }
+      const tvResults = tvData?.d?.results ?? tvData?.value ?? []
+      tvResults.forEach(v => {
+        const tvKey = `${v.StepNr ?? 1}|${v.JobParameterName}`
+        prefilledValues[tvKey] = {
+          low:    v.Low    ?? '',
+          high:   v.High   ?? '',
+          option: v.Option ?? 'EQ',
+          sign:   v.Sign   ?? 'I',
+        }
+      })
 
-      // Secuencias desde TemplateData
       let sequences = []
       try {
         const td = JSON.parse(tplData?.d?.TemplateData ?? 'null')
         sequences = td?.templates?.[0]?.sequences ?? []
       } catch { /* fall through */ }
 
-      // Cargar texto legible de cada catálogo de paso en paralelo
       const distinctCatalogs = [...new Set(sequences.map(s => s.basic_jce_name).filter(Boolean))]
       const catalogTexts = {}
       await Promise.all(distinctCatalogs.map(async cat => {
@@ -176,11 +185,10 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         } catch { /* fallback al nombre técnico */ }
       }))
 
-      // Construir steps desde sequences (TemplateData)
       let finalSteps = []
       if (sequences.length > 0) {
         finalSteps = sequences.map((seq, idx) => {
-          const stepNr   = idx + 1
+          const stepNr    = idx + 1
           const rawParams = seq.seq_param_val ?? []
           const labelMap  = {}
           rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
@@ -192,9 +200,15 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
               name:        p.name,
               label:       labelOf(p.name, labelMap),
               group:       groupText[groupByParam[p.name]] ?? null,
-              mandatory:   mandatorySet.has(p.name),
+              mandatory:   mandatorySet.has(p.name) || p.mandatory === true,
               readOnly:    readOnlySet.has(p.name) || p.change_able === false,
               rawDefault:  p.value ?? null,
+              // Metadata de tipo desde seq_param_val
+              isCheckbox:   p.check_box === true,
+              isSelectOpts: p.kind === 'Select-Options',
+              isInt:        (p.tech_data_type === 'INT4' || p.tech_data_type === 'NUMC') && p.check_box !== true,
+              isList:       p.list === true && p.check_box !== true,
+              maxLength:    p.length ?? null,
             }))
 
           return {
@@ -205,7 +219,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           }
         })
       } else if (pParams.length > 0) {
-        // Fallback: sin TemplateData, construir desde JobTemplateParameterSet
         finalSteps = [{
           seqPos:       1,
           basicJceName: name,
@@ -213,28 +226,31 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           params: pParams
             .filter(p => p.JobTempParamHiddenInd !== 'X')
             .map(p => ({
-              stepNr:     1,
-              name:       p.JobTemplateParameterName,
-              label:      labelOf(p.JobTemplateParameterName, null),
-              group:      groupText[p.JobTemplateParamGroupName] ?? null,
-              mandatory:  p.JobTempParamMandatoryInd === 'X',
-              readOnly:   p.JobTempParamReadOnlyInd  === 'X',
-              rawDefault: p.JobTempParamDefaultVal ? { low: p.JobTempParamDefaultVal, high: '', option: 'EQ', sign: 'I' } : null,
+              stepNr:      1,
+              name:        p.JobTemplateParameterName,
+              label:       labelOf(p.JobTemplateParameterName, null),
+              group:       groupText[p.JobTemplateParamGroupName] ?? null,
+              mandatory:   p.JobTempParamMandatoryInd === 'X',
+              readOnly:    p.JobTempParamReadOnlyInd  === 'X',
+              rawDefault:  p.JobTempParamDefaultVal ? [{ sign: 'I', opt: 'EQ', low: p.JobTempParamDefaultVal }] : null,
+              isCheckbox:   false,
+              isSelectOpts: false,
+              isInt:        false,
+              isList:       false,
+              maxLength:    null,
             })),
         }]
       }
 
-      // Inicializar form: TemplateValuesGet > seq_param_val.value > vacío
+      // Inicializar form: TemplateValuesStructGet > seq_param_val.value > vacío
       const init = {}
       finalSteps.forEach(step => {
         step.params.forEach(p => {
           const key = `${p.stepNr}|${p.name}`
 
-          // TemplateValuesGet usa nombre corto (posiciones 1-8, recortado) + STEP_NR
-          const baseName = p.name.slice(0, 8).trimEnd()
-          const tvVal    = prefilledValues[`${p.stepNr}|${baseName}`]
+          // TemplateValuesStructGet usa nombre corto (bn) + StepNr como clave
+          const tvVal = prefilledValues[`${p.stepNr}|${bn(p.name)}`]
 
-          // seq_param_val.value llega como array [{sign,opt,low}] en la API real
           const rd      = p.rawDefault
           const rdFirst = Array.isArray(rd) ? rd[0] : rd
           const seqDefault = rdFirst != null
@@ -250,10 +266,8 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       setSteps(finalSteps)
       setLoading(false)
 
-      // Auto-expandir si hay un solo step
       if (finalSteps.length === 1) setExpandedStep(1)
 
-      // Check inicial
       doScheduleCheck(init, finalSteps)
     }).catch(e => {
       setLoadError(e.message)
@@ -269,23 +283,17 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
   function handleBlur() { doScheduleCheck() }
 
-  // Calcula estado de validación de un step para los badges
+  // Validación de un step — dynHidden usa nombres cortos
   function stepValidation(step) {
-    const visible  = step.params.filter(p => !dynHidden.has(p.name))
+    const visible   = step.params.filter(p => !dynHidden.has(bn(p.name)))
     const mandatory = visible.filter(p => p.mandatory)
     const missing   = mandatory.filter(p => !formValues[`${p.stepNr}|${p.name}`]?.low?.trim())
     const filled    = visible.filter(p => formValues[`${p.stepNr}|${p.name}`]?.low?.trim())
-    return {
-      total:     visible.length,
-      mandatory: mandatory.length,
-      missing:   missing.length,
-      filled:    filled.length,
-    }
+    return { total: visible.length, mandatory: mandatory.length, missing: missing.length, filled: filled.length }
   }
 
   // ── Ejecutar ─────────────────────────────────────────────────────────────────
   async function handleExecute() {
-    // Abrir el primer step con obligatorios faltantes
     const badStep = steps.find(s => stepValidation(s).missing > 0)
     if (badStep) {
       setExpandedStep(badStep.seqPos)
@@ -323,64 +331,146 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
   // ── Render de un parámetro ───────────────────────────────────────────────────
   function renderParam(p) {
-    const key    = `${p.stepNr}|${p.name}`
-    const fv     = formValues[key] ?? { low: '', high: '', option: 'EQ', sign: 'I' }
-    const isRange = fv.option === 'BT'
-    const isRO   = p.readOnly || dynReadOnly.has(p.name)
+    const key  = `${p.stepNr}|${p.name}`
+    const fv   = formValues[key] ?? { low: '', high: '', option: 'EQ', sign: 'I' }
+    const isRO = p.readOnly || dynReadOnly.has(bn(p.name))
     const isMissingMandatory = p.mandatory && !fv.low?.trim()
+    const shortName = bn(p.name)
+    const showTechName = p.label !== shortName
 
-    return (
-      <div key={key}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500 }}>
-              {p.label}
-              {p.mandatory && <span style={{ color: '#ff6b6b', marginLeft: 3 }}>*</span>}
-            </span>
-            {p.label !== p.name && (
-              <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{p.name}</span>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <select
-              value={fv.option} disabled={isRO}
-              onChange={e => setField(p.stepNr, p.name, 'option', e.target.value)}
-              onBlur={handleBlur}
-              style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text2)', fontSize: 10, padding: '5px 6px', cursor: isRO ? 'default' : 'pointer', flexShrink: 0, width: 52 }}
-            >
-              <option value="EQ">=</option>
-              <option value="NE">≠</option>
-              <option value="LT">&lt;</option>
-              <option value="LE">≤</option>
-              <option value="GT">&gt;</option>
-              <option value="GE">≥</option>
-              <option value="BT">…</option>
-              <option value="CP">~</option>
-            </select>
+    const labelNode = (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500 }}>
+          {p.label}
+          {p.mandatory && <span style={{ color: '#ff6b6b', marginLeft: 3 }}>*</span>}
+        </span>
+        {showTechName && (
+          <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{shortName}</span>
+        )}
+      </div>
+    )
+
+    // ── Checkbox (FLAG / check_box: true) ──
+    if (p.isCheckbox) {
+      return (
+        <div key={key}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: isRO ? 'default' : 'pointer', userSelect: 'none' }}>
             <input
-              type="text" value={fv.low} disabled={isRO}
+              type="checkbox"
+              checked={fv.low === 'X'}
+              disabled={isRO}
+              onChange={e => {
+                setField(p.stepNr, p.name, 'low', e.target.checked ? 'X' : '')
+                setTimeout(() => doScheduleCheck(), 0)
+              }}
+              style={{ width: 14, height: 14, flexShrink: 0, cursor: isRO ? 'default' : 'pointer', accentColor: '#22c55e' }}
+            />
+            <span style={{ fontSize: 11, color: isRO ? 'var(--text3)' : 'var(--text)', fontWeight: 500 }}>
+              {p.label}
+            </span>
+            {showTechName && (
+              <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{shortName}</span>
+            )}
+          </label>
+        </div>
+      )
+    }
+
+    // ── Número (INT4 / NUMC) ──
+    if (p.isInt) {
+      return (
+        <div key={key}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {labelNode}
+            <input
+              type="number" step="1" value={fv.low} disabled={isRO}
               placeholder={p.mandatory ? 'requerido' : ''}
               onChange={e => setField(p.stepNr, p.name, 'low', e.target.value)}
               onBlur={handleBlur}
               style={{
-                flex: 1, background: 'var(--bg2)',
+                width: 130, background: 'var(--bg2)',
                 border: `1px solid ${isMissingMandatory ? 'rgba(255,107,107,.5)' : 'var(--border)'}`,
                 borderRadius: 5, color: 'var(--text)', fontSize: 11,
                 padding: '6px 10px', outline: 'none', opacity: isRO ? 0.5 : 1,
               }}
             />
-            {isRange && (
-              <>
-                <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>→</span>
-                <input
-                  type="text" value={fv.high} disabled={isRO} placeholder="hasta"
-                  onChange={e => setField(p.stepNr, p.name, 'high', e.target.value)}
-                  onBlur={handleBlur}
-                  style={{ flex: 1, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text)', fontSize: 11, padding: '6px 10px', outline: 'none' }}
-                />
-              </>
-            )}
-          </div>
+          </label>
+        </div>
+      )
+    }
+
+    // ── Select-Options (con selector de operador + rango) ──
+    if (p.isSelectOpts) {
+      const isRange = fv.option === 'BT'
+      return (
+        <div key={key}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {labelNode}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <select
+                value={fv.option} disabled={isRO}
+                onChange={e => setField(p.stepNr, p.name, 'option', e.target.value)}
+                onBlur={handleBlur}
+                style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text2)', fontSize: 10, padding: '5px 6px', cursor: isRO ? 'default' : 'pointer', flexShrink: 0, width: 52 }}
+              >
+                <option value="EQ">=</option>
+                <option value="NE">≠</option>
+                <option value="LT">&lt;</option>
+                <option value="LE">≤</option>
+                <option value="GT">&gt;</option>
+                <option value="GE">≥</option>
+                <option value="BT">…</option>
+                <option value="CP">~</option>
+              </select>
+              <input
+                type="text" value={fv.low} disabled={isRO}
+                placeholder={p.mandatory ? 'requerido' : ''}
+                maxLength={p.maxLength ?? undefined}
+                onChange={e => setField(p.stepNr, p.name, 'low', e.target.value)}
+                onBlur={handleBlur}
+                style={{
+                  flex: 1, background: 'var(--bg2)',
+                  border: `1px solid ${isMissingMandatory ? 'rgba(255,107,107,.5)' : 'var(--border)'}`,
+                  borderRadius: 5, color: 'var(--text)', fontSize: 11,
+                  padding: '6px 10px', outline: 'none', opacity: isRO ? 0.5 : 1,
+                }}
+              />
+              {isRange && (
+                <>
+                  <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>→</span>
+                  <input
+                    type="text" value={fv.high} disabled={isRO} placeholder="hasta"
+                    maxLength={p.maxLength ?? undefined}
+                    onChange={e => setField(p.stepNr, p.name, 'high', e.target.value)}
+                    onBlur={handleBlur}
+                    style={{ flex: 1, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text)', fontSize: 11, padding: '6px 10px', outline: 'none' }}
+                  />
+                </>
+              )}
+            </div>
+          </label>
+        </div>
+      )
+    }
+
+    // ── Texto simple (Parameter, list, CHAR) — sin selector de operador ──
+    return (
+      <div key={key}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {labelNode}
+          <input
+            type="text" value={fv.low} disabled={isRO}
+            placeholder={p.mandatory ? 'requerido' : ''}
+            maxLength={p.maxLength ?? undefined}
+            onChange={e => setField(p.stepNr, p.name, 'low', e.target.value)}
+            onBlur={handleBlur}
+            style={{
+              background: 'var(--bg2)',
+              border: `1px solid ${isMissingMandatory ? 'rgba(255,107,107,.5)' : 'var(--border)'}`,
+              borderRadius: 5, color: 'var(--text)', fontSize: 11,
+              padding: '6px 10px', outline: 'none', opacity: isRO ? 0.5 : 1,
+            }}
+          />
         </label>
       </div>
     )
@@ -389,7 +479,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
   // ── Contenido expandido de un step ───────────────────────────────────────────
   function renderStepContent(step) {
     const isShowOpt = !!showOptByStep[step.seqPos]
-    const visible   = step.params.filter(p => !dynHidden.has(p.name))
+    const visible   = step.params.filter(p => !dynHidden.has(bn(p.name)))
 
     if (visible.length === 0) {
       return (
@@ -404,7 +494,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     const forceAll = primary.length === 0
     const display  = forceAll ? visible : (isShowOpt ? visible : primary)
 
-    // Agrupar por sección
     const grouped   = {}
     const ungrouped = []
     display.forEach(p => {
@@ -482,7 +571,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
             >✕</button>
           </div>
 
-          {/* JobText editable */}
           {!loading && !loadError && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
@@ -529,7 +617,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
             const hasErr = val.missing > 0
             const allOk  = val.mandatory > 0 && val.missing === 0
 
-            // Título: CatalogText + P_OPNAME si está pre-rellenado
             const opNameParam = step.params.find(p => p.name.startsWith('P_OPNAME'))
             const opName      = opNameParam ? formValues[`${step.seqPos}|${opNameParam.name}`]?.low?.trim() : null
             const stepTitle   = opName ? `${step.catalogText}: ${opName}` : step.catalogText
@@ -542,12 +629,10 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                 transition: 'border-color .15s',
               }}>
 
-                {/* Fila colapsada del step */}
                 <div
                   onClick={() => setExpandedStep(prev => prev === step.seqPos ? null : step.seqPos)}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', cursor: 'pointer', userSelect: 'none' }}
                 >
-                  {/* Círculo numerado con estado */}
                   <span style={{
                     width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -557,7 +642,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                     color:      hasErr ? '#ff6b6b' : allOk ? '#22c55e' : 'var(--text2)',
                   }}>{step.seqPos}</span>
 
-                  {/* Título + nombre técnico */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {stepTitle}
@@ -569,7 +653,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                     )}
                   </div>
 
-                  {/* Badges de validación */}
                   <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
                     {hasErr && (
                       <span style={{ fontSize: 9, fontWeight: 700, color: '#ff6b6b', background: 'rgba(255,107,107,.12)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 3, padding: '2px 6px', whiteSpace: 'nowrap' }}>
@@ -598,7 +681,6 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                   </span>
                 </div>
 
-                {/* Contenido expandido */}
                 {isOpen && (
                   <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg3)' }}>
                     {renderStepContent(step)}
