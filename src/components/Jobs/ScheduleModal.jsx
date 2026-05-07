@@ -149,7 +149,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         const tvParsed = JSON.parse(tvData?.d?.ParameterValues ?? 'null')
         ;(tvParsed?.VALUES ?? []).forEach(v => {
           const first = v.T_VALUE?.[0]
-          if (first?.LOW) prefilledValues[v.NAME] = { low: first.LOW, high: first.HIGH ?? '', option: first.OPTION ?? 'EQ', sign: first.SIGN ?? 'I' }
+          if (first != null) prefilledValues[v.NAME] = { low: first.LOW ?? '', high: first.HIGH ?? '', option: first.OPTION ?? 'EQ', sign: first.SIGN ?? 'I' }
         })
       } catch { /* ignorar */ }
 
@@ -190,6 +190,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
               group:       groupText[groupByParam[p.name]] ?? null,
               mandatory:   mandatorySet.has(p.name),
               readOnly:    readOnlySet.has(p.name) || p.change_able === false,
+              rawDefault:  p.value ?? null,
             }))
 
           return {
@@ -208,12 +209,13 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           params: pParams
             .filter(p => p.JobTempParamHiddenInd !== 'X')
             .map(p => ({
-              stepNr:   1,
-              name:     p.JobTemplateParameterName,
-              label:    labelOf(p.JobTemplateParameterName, null),
-              group:    groupText[p.JobTemplateParamGroupName] ?? null,
-              mandatory: p.JobTempParamMandatoryInd === 'X',
-              readOnly:  p.JobTempParamReadOnlyInd  === 'X',
+              stepNr:     1,
+              name:       p.JobTemplateParameterName,
+              label:      labelOf(p.JobTemplateParameterName, null),
+              group:      groupText[p.JobTemplateParamGroupName] ?? null,
+              mandatory:  p.JobTempParamMandatoryInd === 'X',
+              readOnly:   p.JobTempParamReadOnlyInd  === 'X',
+              rawDefault: p.JobTempParamDefaultVal ? { low: p.JobTempParamDefaultVal, high: '', option: 'EQ', sign: 'I' } : null,
             })),
         }]
       }
@@ -223,7 +225,11 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
       finalSteps.forEach(step => {
         step.params.forEach(p => {
           const key = `${p.stepNr}|${p.name}`
-          init[key] = prefilledValues[p.name] ?? { low: '', high: '', option: 'EQ', sign: 'I' }
+          const rd = p.rawDefault
+          const seqDefault = rd != null
+            ? { low: rd.low ?? '', high: '', option: rd.opt ?? 'EQ', sign: rd.sign ?? 'I' }
+            : null
+          init[key] = prefilledValues[p.name] ?? seqDefault ?? { low: '', high: '', option: 'EQ', sign: 'I' }
         })
       })
 
