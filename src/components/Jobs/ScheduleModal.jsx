@@ -59,7 +59,21 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     Promise.all([
       proxyCall({ connection, session, path: `/JobTemplateRead?JobTemplateName=${enc(name)}` }).then(r => r.json()),
       proxyCall({ connection, session, path: `/TemplateValuesStructGet?JobTemplateName=${enc(name)}` }).then(r => r.json()),
-    ]).then(async ([tplData, tvData]) => {
+      proxyCall({ connection, session, path: `/JobTemplateParameterSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
+      proxyCall({ connection, session, path: `/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
+    ]).then(async ([tplData, tvData, pData, gData]) => {
+
+      // JobTemplateParameterSet = allowlist de params visibles al usuario
+      // (seq_param_val contiene params internos del sistema que no se deben mostrar)
+      const pParams = pData?.d?.results ?? pData?.value ?? []
+      const allowedSet = new Set(pParams.map(p => p.JobTemplateParameterName))
+      const groupByParam = {}
+      pParams.forEach(p => { groupByParam[p.JobTemplateParameterName] = p.JobTemplateParamGroupName })
+
+      // Texto legible de cada grupo → usado como encabezado de sección
+      const groupText = {}
+      const groups = gData?.d?.results ?? gData?.value ?? []
+      groups.forEach(g => { groupText[g.JobTemplateParamGroupName] = g.JobTemplateParamGroupText })
 
       // Valores pre-configurados del template: clave "StepNr|NombreCorto"
       const pv = {}
@@ -99,10 +113,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
 
         const params = rawParams
-          .filter(p => p.hidden !== true)
+          // Mostrar solo params registrados en JobTemplateParameterSet (allowlist de visibilidad de IBP)
+          .filter(p => allowedSet.has(p.name))
           .map(p => ({
             name:       p.name,
             label:      labelOf(p.name, labelMap),
+            group:      groupText[groupByParam[p.name]] ?? null,
             isCheckbox: p.check_box === true,
             isInt:      (p.tech_data_type === 'INT4' || p.tech_data_type === 'NUMC') && p.check_box !== true,
           }))
