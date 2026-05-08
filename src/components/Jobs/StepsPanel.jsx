@@ -61,6 +61,8 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
   // templateMeta: { [catalogEntryName]: { loading, hasData, visibleParams: Set|null, paramOrder: [], groupMap: {} } }
   // Indexado por JobCatalogEntryName de cada paso — determina parámetros visibles, orden y secciones.
   const [templateMeta, setTemplateMeta] = useState({})
+  // seqNames: { [StepNumber]: JobSequenceText } — nombre definido por el usuario en IBP (YY1_* templates)
+  const [seqNames, setSeqNames] = useState({})
 
   const proxy = useCallback(async (path) => {
     const res = await proxyCall({ connection, session, path })
@@ -87,20 +89,30 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
     return () => { cancelled = true }
   }, [job.JobName, job.JobRunCount, proxy])
 
-  // Fase 1: cargar pasos
+  // Fase 1: cargar pasos + nombres de secuencia del template
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError(''); setSteps([]); setExpanded(null); setLogInfos({}); setMessages({}); setTemplateMeta({})
+    setLoading(true); setError(''); setSteps([]); setExpanded(null); setLogInfos({}); setMessages({}); setTemplateMeta({}); setSeqNames({})
     async function load() {
       try {
-        const data = await proxy(
-          `/JobHeaderSet(JobName=${enc(job.JobName)},JobRunCount=${enc(job.JobRunCount)})/JobStepSet`
-        )
+        const [stepsData, seqData] = await Promise.all([
+          proxy(`/JobHeaderSet(JobName=${enc(job.JobName)},JobRunCount=${enc(job.JobRunCount)})/JobStepSet`),
+          job.JobTemplateName
+            ? proxy(`/JobTemplateSequenceSet?$filter=substringof(${enc(job.JobTemplateName)},JobTemplateName)`).catch(() => null)
+            : Promise.resolve(null),
+        ])
         if (cancelled) return
-        if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
-        const results = (data?.d?.results ?? data?.value ?? [])
+        if (stepsData.error) throw new Error(stepsData.error + (stepsData.detail ? ': ' + stepsData.detail : ''))
+        const results = (stepsData?.d?.results ?? stepsData?.value ?? [])
           .sort((a, b) => (Number(a.StepNumber) || 0) - (Number(b.StepNumber) || 0))
         setSteps(results)
+        if (seqData) {
+          const names = {}
+          ;(seqData?.d?.results ?? seqData?.value ?? []).forEach(s => {
+            if (s.JobSequenceText) names[s.JobSequencePosition] = s.JobSequenceText
+          })
+          setSeqNames(names)
+        }
         loadAllLogInfos(results)
         loadAllTemplateMeta(results)
       } catch (e) {
@@ -314,11 +326,12 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
             // Primer registro de log info (generalmente 1 por paso)
             const liRec   = li?.records?.[0]
 
-            // Nombre del paso: "{CatalogText}: {P_OPNAME}" si el paso tiene operador
-            const opName  = params.data.find(p => String(p.StepNr) === String(step.StepNumber) && p.JobParameterName === 'P_OPNAME')?.Low
-            const stepTitle = opName
-              ? `${step.JobCatalogEntryText || step.JobCatalogEntryName}: ${opName}`
-              : (step.JobCatalogEntryText || step.JobCatalogEntryName || `Paso ${n}`)
+            // Nombre del paso: stepName (definido en IBP) > catalogText, con P_OPNAME si aplica
+            const opName    = params.data.find(p => String(p.StepNr) === String(step.StepNumber) && p.JobParameterName === 'P_OPNAME')?.Low
+            const stepName  = seqNames[n] ?? null
+            const titleBase = stepName ?? step.JobCatalogEntryText ?? step.JobCatalogEntryName ?? `Paso ${n}`
+            const stepTitle = opName ? `${titleBase}: ${opName}` : titleBase
+            const showCatalogSubtitle = !!stepName
 
             return (
               <div key={n} style={{
@@ -343,6 +356,11 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {stepTitle}
                     </div>
+                    {showCatalogSubtitle && (
+                      <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {step.JobCatalogEntryText || step.JobCatalogEntryName}
+                      </div>
+                    )}
                     {step.StepStartDateTime && (
                       <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 1 }}>
                         Inicio: {formatSapTs(step.StepStartDateTime, tzMode)}
