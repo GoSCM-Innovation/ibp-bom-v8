@@ -159,15 +159,25 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     }
   }
 
+  // ── ¿El parámetro tiene un valor configurado real? ───────────────────────────
+  // Para checkboxes: marcado con 'X'. Para resto: al menos un valor no vacío y
+  // que no sea un slot inactivo (0 / 00000000).
+  function isConfigured(p, values) {
+    const lows = values[bn(p.name)] ?? []
+    if (p.isCheckbox) return lows.includes('X')
+    return lows.some(v => v !== '' && v !== '0' && v !== '00000000')
+  }
+
   // ── Render de un parámetro (solo lectura) ────────────────────────────────────
-  function renderParam(p, values) {
+  function renderParam(p, values, dim = false) {
     const lows     = values[bn(p.name)] ?? []
     const hasValue = lows.length > 0
+    const baseOpacity = dim ? 0.45 : 1
 
     if (p.isCheckbox) {
       const checked = lows.includes('X')
       return (
-        <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: baseOpacity }}>
           <span style={{ fontSize: 13, flexShrink: 0, color: checked ? '#22c55e' : 'var(--text3)' }}>
             {checked ? '☑' : '☐'}
           </span>
@@ -179,7 +189,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     }
 
     return (
-      <div key={p.name} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, minWidth: 0 }}>
+      <div key={p.name} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, minWidth: 0, opacity: baseOpacity }}>
         <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {p.label}
         </span>
@@ -215,15 +225,23 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     const checkboxes = step.params.filter(p => p.isCheckbox)
     const rest       = step.params.filter(p => !p.isCheckbox)
 
+    // Particionar en configurados / vacíos manteniendo el orden original
+    const restConfigured = rest.filter(p => isConfigured(p, step.values))
+    const restEmpty      = rest.filter(p => !isConfigured(p, step.values))
+    const cbConfigured   = checkboxes.filter(p => isConfigured(p, step.values))
+    const cbEmpty        = checkboxes.filter(p => !isConfigured(p, step.values))
+
     return (
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rest.map(p => renderParam(p, step.values))}
+        {restConfigured.map(p => renderParam(p, step.values, false))}
+        {restEmpty.map(p => renderParam(p, step.values, true))}
         {checkboxes.length > 0 && rest.length > 0 && (
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
         )}
         {checkboxes.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-            {checkboxes.map(p => renderParam(p, step.values))}
+            {cbConfigured.map(p => renderParam(p, step.values, false))}
+            {cbEmpty.map(p => renderParam(p, step.values, true))}
           </div>
         )}
       </div>
@@ -313,10 +331,8 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           {!loading && !loadError && steps.map(step => {
             const isOpen = expandedStep === step.seqPos
 
-            // Params con valor real configurado (excluyendo checkboxes sin marcar)
-            const configured = step.params.filter(p =>
-              p.isCheckbox ? (step.values[bn(p.name)] ?? []).includes('X') : (step.values[bn(p.name)] ?? []).length > 0
-            ).length
+            // Params con valor real configurado (consistente con isConfigured del body)
+            const configured = step.params.filter(p => isConfigured(p, step.values)).length
             const total = step.params.length
 
             // Título: stepName (IBP user-defined) > catalogText, con P_OPNAME si aplica
