@@ -570,7 +570,6 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                                           <tbody>
                                             {list.map((p, i) => {
                                               const label  = meta.labelMap?.[p.JobParameterName] ?? paramLabel(p.JobParameterName)
-                                              const isRaw  = label === p.JobParameterName
                                               const op     = OPTION_LABEL[p.Option] ?? p.Option ?? '='
                                               const isEq   = !p.Option || p.Option === 'EQ'
                                               const value  = p.High && p.High !== p.Low
@@ -579,15 +578,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                                               return (
                                                 <tr key={i} style={{ borderBottom: i < list.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
                                                   <td style={{ padding: '4px 10px 4px 0', verticalAlign: 'top', width: '42%' }}>
-                                                    {isRaw
-                                                      ? <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text3)' }}>{label}</span>
-                                                      : (
-                                                        <>
-                                                          <div style={{ fontSize: 11, color: 'var(--text)' }}>{label}</div>
-                                                          <div style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}>{p.JobParameterName}</div>
-                                                        </>
-                                                      )
-                                                    }
+                                                    <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500 }}>{label}</span>
                                                   </td>
                                                   {!isEq && (
                                                     <td style={{ padding: '4px 8px 4px 0', fontSize: 11, color: 'var(--text3)', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{op}</td>
