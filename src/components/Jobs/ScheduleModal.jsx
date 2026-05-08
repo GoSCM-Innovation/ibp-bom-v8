@@ -64,7 +64,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     Promise.all([
       proxyCall({ connection, session, path: `/JobTemplateRead?JobTemplateName=${enc(name)}` }).then(r => r.json()),
       proxyCall({ connection, session, path: `/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
-    ]).then(async ([tplData, gData]) => {
+      proxyCall({ connection, session, path: `/JobTemplateSequenceSet?$filter=substringof(${enc(name)},JobTemplateName)` }).then(r => r.json()).catch(() => ({ d: { results: [] } })),
+    ]).then(async ([tplData, gData, seqData]) => {
+      const seqTextByPos = {}
+      ;(seqData?.d?.results ?? seqData?.value ?? []).forEach(s => {
+        if (s.JobSequenceText) seqTextByPos[s.JobSequencePosition] = s.JobSequenceText
+      })
 
       const groupText = {}
       const groups = gData?.d?.results ?? gData?.value ?? []
@@ -122,6 +127,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           seqPos:       stepNr,
           basicJceName: seq.basic_jce_name ?? '',
           catalogText:  catalogTexts[seq.basic_jce_name] ?? seq.basic_jce_name ?? `Paso ${stepNr}`,
+          stepName:     seqTextByPos[seq.seq_position] ?? null,
           params,
           values,
         }
@@ -313,9 +319,11 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
             ).length
             const total = step.params.length
 
-            // Título con P_OPNAME si existe
-            const opName = ((step.values['P_OPNAME'] ?? [])[0] ?? '').trim()
-            const stepTitle = opName ? `${step.catalogText}: ${opName}` : step.catalogText
+            // Título: stepName (IBP user-defined) > catalogText, con P_OPNAME si aplica
+            const opName    = ((step.values['P_OPNAME'] ?? [])[0] ?? '').trim()
+            const titleBase = step.stepName ?? step.catalogText
+            const stepTitle = opName ? `${titleBase}: ${opName}` : titleBase
+            const showCatalogSubtitle = !!step.stepName
 
             return (
               <div key={step.seqPos} style={{
@@ -340,7 +348,12 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {stepTitle}
                     </div>
-                    {step.catalogText !== step.basicJceName && step.basicJceName && (
+                    {showCatalogSubtitle && (
+                      <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {step.catalogText}
+                      </div>
+                    )}
+                    {!showCatalogSubtitle && step.catalogText !== step.basicJceName && step.basicJceName && (
                       <div style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}>
                         {step.basicJceName}
                       </div>
