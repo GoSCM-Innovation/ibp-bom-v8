@@ -4,6 +4,7 @@ import JobMonitor from '../Jobs/JobMonitor'
 import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
+import { getSapSystemUrl } from '../../utils/sapUrl'
 
 export default function SystemView({ connection, session, onLogout }) {
   const has0326 = !!(connection.com0326?.url && connection.com0326?.user)
@@ -37,6 +38,18 @@ export default function SystemView({ connection, session, onLogout }) {
           <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
             {session ? (session.com0326?.user || session.com0068?.user || '—') : displayUrl}
           </div>
+          {getSapSystemUrl(connection.com0326?.url) && (
+            <a
+              href={getSapSystemUrl(connection.com0326?.url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 10, color: 'var(--accent)', marginTop: 2, display: 'inline-block', textDecoration: 'none' }}
+              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+            >
+              Abrir en SAP IBP ↗
+            </a>
+          )}
         </div>
         {session && onLogout && (
           <button onClick={onLogout} title="Cerrar sesión" style={{

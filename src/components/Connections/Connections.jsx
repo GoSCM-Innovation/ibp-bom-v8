@@ -2,6 +2,7 @@ import { useState } from 'react'
 import ConnectionForm from './ConnectionForm'
 import ConnectionAvatar from './ConnectionAvatar'
 import { remove } from '../../services/connectionStorage'
+import { getSapSystemUrl } from '../../utils/sapUrl'
 
 export default function Connections({ connections, onSaved, onDeleted, onSelect }) {
   const [showForm, setShowForm] = useState(false)
@@ -97,6 +98,18 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
                 <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
                   {conn.com0326.user}
                 </div>
+              )}
+              {getSapSystemUrl(conn.com0326?.url) && (
+                <a
+                  href={getSapSystemUrl(conn.com0326?.url)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4, display: 'inline-block', textDecoration: 'none' }}
+                  onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                  onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                >
+                  Abrir en SAP IBP ↗
+                </a>
               )}
             </div>
 
