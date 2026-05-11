@@ -791,9 +791,7 @@ export default function Metering({ connection }) {
     if (creds) loadData()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!creds) return <MeteringLogin connection={connection} onLogin={handleLogin} />
-
-  // Build lookup maps
+  // Build lookup maps — siempre llamados (antes de cualquier return condicional)
   const userMap = useMemo(() => {
     if (!data) return {}
     return Object.fromEntries(
@@ -811,7 +809,7 @@ export default function Metering({ connection }) {
     )
   }, [data])
 
-  // Apply client-side filters
+  // Filtros client-side — siempre llamados
   const filteredOverview = useMemo(() => {
     if (!data) return []
     return data.overview.filter(r =>
@@ -827,6 +825,9 @@ export default function Metering({ connection }) {
       (!paFilter   || (r.PlanningAreaID || '').toLowerCase().includes(paFilter.toLowerCase()))
     )
   }, [data, userFilter, paFilter])
+
+  // Conditional return DESPUÉS de todos los hooks
+  if (!creds) return <MeteringLogin connection={connection} onLogin={handleLogin} />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
