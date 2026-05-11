@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, Line,
+  ResponsiveContainer, ComposedChart, Line,
 } from 'recharts'
 import { proxyCall } from '../../services/proxyCall'
 import { buildDateFilter, buildPath, parseV4 } from '../../services/metering'
@@ -10,16 +10,16 @@ import { toInputDate, inputDateToDate, getTzMode } from '../../utils/dateUtils'
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PRESETS = [
-  { id: 'today', label: 'Hoy'    },
-  { id: '7d',    label: '7 días' },
-  { id: '30d',   label: '30 días'},
-  { id: '90d',   label: '90 días'},
+  { id: 'today', label: 'Hoy'     },
+  { id: '7d',    label: '7 días'  },
+  { id: '30d',   label: '30 días' },
+  { id: '90d',   label: '90 días' },
 ]
 
 const TABS = [
   { id: 'adopcion', label: 'Adopción'     },
   { id: 'excel',    label: 'Excel Add-In' },
-  { id: 'apps',     label: 'Apps & Alertas' },
+  { id: 'apps',     label: 'Herramientas' },
 ]
 
 const COLORS = [
@@ -27,18 +27,9 @@ const COLORS = [
   '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#8b5cf6',
 ]
 
-const ALERT_ACTIONS = [
-  { key: 'AlertDetails',   label: 'Ver detalle',          group: 'engaged' },
-  { key: 'GotoExcel',      label: 'Ir a Excel',            group: 'engaged' },
-  { key: 'GotoAna',        label: 'Ir a Analytics',        group: 'engaged' },
-  { key: 'NavToExtSys',    label: 'Nav. sistema externo',  group: 'engaged' },
-  { key: 'PlanningNotes',  label: 'Notas de planificación',group: 'engaged' },
-  { key: 'AddToCase',      label: 'Agregar a caso',        group: 'engaged' },
-  { key: 'GotoClick',      label: 'Goto click',            group: 'neutral' },
-  { key: 'RefreshButton',  label: 'Refresh',               group: 'neutral' },
-  { key: 'SnoozeMe',       label: 'Posponer (yo)',         group: 'snooze'  },
-  { key: 'SnoozeAll',      label: 'Posponer (todos)',      group: 'snooze'  },
-]
+// FioriProjectID del Excel Add-In — filtrado de MtrgGenericUIActionUsage
+// porque esas filas son duplicados de MtrgActyExcelAddInPlanningView (mismo ActivityID)
+const EXCEL_ADDIN_PROJECT_ID = 'tl.ibp.excel.addin.planningview'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -71,7 +62,7 @@ function avgField(arr, key) {
 function toSecs(val, unit = '') {
   const n = Number(val) || 0
   const u = (unit || '').toLowerCase()
-  return u.includes('ms') || u.includes('milli') ? n / 1000 : n
+  return u.includes('ms') ? n / 1000 : n
 }
 
 function formatDuration(val, unit = '') {
@@ -80,6 +71,10 @@ function formatDuration(val, unit = '') {
   if (s < 60) return `${s.toFixed(1)}s`
   const m = Math.floor(s / 60), r = Math.round(s % 60)
   return `${m}m ${r}s`
+}
+
+function uniqueUsers(arr) {
+  return new Set(arr.map(r => r.UserID).filter(Boolean)).size
 }
 
 function presetDates(id) {
@@ -128,6 +123,14 @@ function BlockTitle({ text, count }) {
   return (
     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 10 }}>
       {text}{count !== undefined ? ` (${Number(count).toLocaleString()})` : ''}
+    </div>
+  )
+}
+
+function Note({ text }) {
+  return (
+    <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10, fontStyle: 'italic' }}>
+      {text}
     </div>
   )
 }
@@ -201,7 +204,7 @@ function TxtField({ label, value, onChange, placeholder }) {
   )
 }
 
-// ─── Filter bar (sin botón) ────────────────────────────────────────────────────
+// ─── Filter bar ────────────────────────────────────────────────────────────────
 
 function FilterBar({ preset, onPreset, from, setFrom, to, setTo, loading, hasData }) {
   return (
@@ -261,18 +264,17 @@ function DtField({ label, value, onChange }) {
 
 // ─── Tab 1: Adopción ───────────────────────────────────────────────────────────
 
-function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, alerts, users, userMap }) {
+function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, alerts, plannerWS, users, userMap }) {
   const [search, setSearch] = useState('')
 
   const activeUserIds = useMemo(() => new Set(overview.map(r => r.UserID).filter(Boolean)), [overview])
-
   const totalLicensed = users.length
   const totalActive   = activeUserIds.size
   const adoptionRate  = totalLicensed > 0 ? Math.round(totalActive / totalLicensed * 100) : 0
   const uniquePAs     = new Set(overview.map(r => r.PlanningAreaID).filter(Boolean)).size
   const inactiveCount = totalLicensed - totalActive
 
-  // DAU: unique users per day
+  // DAU chart
   const dauData = useMemo(() => {
     const byDay = {}
     overview.forEach(row => {
@@ -285,21 +287,38 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
       .sort((a, b) => a.day.localeCompare(b.day))
   }, [overview])
 
-  // Feature adoption bars
-  const excelUserIds = useMemo(() => new Set(planningViews.map(r => r.UserID).filter(Boolean)), [planningViews])
-  const fioriTotal   = sumField(fiori, 'ActivityCount') || fiori.length
-  const alertTotal   = ALERT_ACTIONS.reduce((a, { key }) => a + sumField(alerts, key), 0)
+  // Feature adoption table — fuente: cada entidad provee UserID y total de registros
+  // MtrgGenericUIActionUsage con FioriProjectID = EXCEL_ADDIN_PROJECT_ID se excluye
+  // porque son duplicados de MtrgActyExcelAddInPlanningView (mismo ActivityID)
+  const featureRows = useMemo(() => {
+    const fioriOtros = fiori.filter(r => r.FioriProjectID !== EXCEL_ADDIN_PROJECT_ID)
+    const fioriByApp = groupBy(fioriOtros, r => r.FioriProjectTitle || r.FioriProjectID)
 
-  const featureRows = [
-    { name: 'Excel Add-In',   value: excelUserIds.size, pctOfActive: totalActive > 0 ? Math.round(excelUserIds.size / totalActive * 100) : 0, unit: 'usuarios' },
-    ...(fioriTotal   > 0 ? [{ name: 'Fiori Apps',    value: fioriTotal,   pctOfActive: null, unit: 'acciones'  }] : []),
-    ...(dashboards.length > 0 ? [{ name: 'Dashboards',   value: dashboards.length, pctOfActive: null, unit: 'registros' }] : []),
-    ...(stories.length > 0    ? [{ name: 'Stories',       value: stories.length,    pctOfActive: null, unit: 'registros' }] : []),
-    ...(alertTotal   > 0 ? [{ name: 'Alert Monitor', value: alertTotal,   pctOfActive: null, unit: 'acciones'  }] : []),
-  ]
-  const maxFeatureVal = Math.max(...featureRows.map(f => f.value), 1)
+    const rows = []
 
-  // Top active users
+    if (planningViews.length > 0)
+      rows.push({ name: 'Excel Add-In', users: uniqueUsers(planningViews), sessions: planningViews.length })
+
+    if (plannerWS.length > 0)
+      rows.push({ name: 'Planner Workspace', users: uniqueUsers(plannerWS), sessions: plannerWS.length })
+
+    Object.entries(fioriByApp).forEach(([name, appRows]) => {
+      rows.push({ name, users: uniqueUsers(appRows), sessions: appRows.length })
+    })
+
+    if (dashboards.length > 0)
+      rows.push({ name: 'Dashboards', users: uniqueUsers(dashboards), sessions: dashboards.length })
+
+    if (stories.length > 0)
+      rows.push({ name: 'Analytics Stories', users: uniqueUsers(stories), sessions: stories.length })
+
+    if (alerts.length > 0)
+      rows.push({ name: 'Alert Monitor', users: uniqueUsers(alerts), sessions: alerts.length })
+
+    return rows.sort((a, b) => b.users - a.users)
+  }, [planningViews, fiori, plannerWS, dashboards, stories, alerts])
+
+  // Top usuarios activos
   const topActiveUsers = useMemo(() => {
     const byUser = groupBy(overview, 'UserID')
     return Object.entries(byUser)
@@ -313,15 +332,12 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
       .slice(0, 15)
   }, [overview, userMap])
 
-  // Inactive users (licensed but no activity in period)
+  // Usuarios sin actividad en el período
   const inactiveUsers = useMemo(() => {
     const q = search.toLowerCase()
     return users
       .filter(u => u.UserID && !activeUserIds.has(u.UserID))
-      .map(u => ({
-        uid:  u.UserID,
-        name: userMap[u.UserID] || [u.FirstName, u.LastName].filter(Boolean).join(' ') || u.UserID,
-      }))
+      .map(u => ({ uid: u.UserID, name: userMap[u.UserID] || [u.FirstName, u.LastName].filter(Boolean).join(' ') || u.UserID }))
       .filter(u => !q || u.uid.toLowerCase().includes(q) || u.name.toLowerCase().includes(q))
       .sort((a, b) => a.uid.localeCompare(b.uid))
   }, [users, activeUserIds, userMap, search])
@@ -330,18 +346,16 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
 
   return (
     <div style={{ padding: '24px 24px 32px' }}>
-
       {/* KPIs */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
         <KpiCard
           label="Tasa de adopción"
           value={`${adoptionRate}%`}
           sub={`${totalActive} activos de ${totalLicensed} licenciados`}
-          color={rateColor}
-          warning={adoptionRate < 40}
+          color={rateColor} warning={adoptionRate < 40}
         />
-        <KpiCard label="Usuarios activos"   value={totalActive}   color="var(--accent)" />
-        <KpiCard label="Total licenciados"  value={totalLicensed} />
+        <KpiCard label="Usuarios activos"     value={totalActive}   color="var(--accent)" />
+        <KpiCard label="Total licenciados"    value={totalLicensed} />
         <KpiCard
           label="Sin actividad"
           value={inactiveCount}
@@ -352,9 +366,9 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
         <KpiCard label="Planning Areas activas" value={uniquePAs} />
       </div>
 
-      {/* DAU chart */}
+      {/* DAU */}
       {dauData.length > 1 && (
-        <ChartCard title="Usuarios únicos por día" style={{ marginBottom: 16 }}>
+        <ChartCard title="Usuarios únicos por día" style={{ marginBottom: 24 }}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={dauData} margin={{ left: 0, right: 8, top: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -367,44 +381,41 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
         </ChartCard>
       )}
 
-      {/* Feature adoption */}
+      {/* Feature adoption table */}
       {featureRows.length > 0 && (
-        <ChartCard title="Adopción por funcionalidad" style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 0' }}>
-            {featureRows.map((f, i) => {
-              const barPct = Math.round(f.value / maxFeatureVal * 100)
-              return (
-                <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 110, fontSize: 12, color: 'var(--text2)', flexShrink: 0 }}>{f.name}</div>
-                  <div style={{ flex: 1, background: 'var(--border)', borderRadius: 4, height: 14, overflow: 'hidden' }}>
-                    <div style={{
-                      width: `${barPct}%`, height: '100%',
-                      background: COLORS[i % COLORS.length], borderRadius: 4, transition: 'width .4s',
-                    }} />
-                  </div>
-                  <div style={{ width: 110, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)', flexShrink: 0, textAlign: 'right' }}>
-                    {f.pctOfActive !== null
-                      ? `${f.pctOfActive}% activos · ${f.value}u`
-                      : `${f.value.toLocaleString()} ${f.unit}`}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </ChartCard>
+        <div style={{ marginBottom: 24 }}>
+          <BlockTitle text="Adopción por herramienta" />
+          <DataTable
+            columns={[
+              { key: 'name',     label: 'Herramienta' },
+              { key: 'users',    label: 'Usuarios únicos', align: 'right', mono: true,
+                render: r => r.users.toLocaleString() },
+              { key: 'pct',      label: '% de usuarios activos', align: 'right',
+                render: r => totalActive > 0 ? `${Math.round(r.users / totalActive * 100)}%` : '—',
+                color: r => {
+                  if (!totalActive) return 'var(--text2)'
+                  const p = Math.round(r.users / totalActive * 100)
+                  return p >= 50 ? '#10b981' : p >= 20 ? '#f59e0b' : 'var(--text2)'
+                },
+              },
+              { key: 'sessions', label: 'Sesiones / Acciones', align: 'right', mono: true,
+                render: r => r.sessions.toLocaleString() },
+            ]}
+            rows={featureRows}
+          />
+        </div>
       )}
 
-      {/* Active / Inactive tables */}
+      {/* Activos / Inactivos */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-
         {topActiveUsers.length > 0 && (
           <div>
-            <BlockTitle text="Usuarios más activos" count={topActiveUsers.length} />
+            <BlockTitle text="Usuarios más activos" />
             <DataTable
               columns={[
                 { key: 'name', label: 'Usuario' },
-                { key: 'acts', label: 'Actividades', align: 'right', mono: true },
-                { key: 'last', label: 'Último',       mono: true, nowrap: true },
+                { key: 'acts', label: 'Ventanas',    align: 'right', mono: true },
+                { key: 'last', label: 'Último',      mono: true, nowrap: true },
                 { key: 'pas',  label: 'Planning Areas', color: () => 'var(--text2)' },
               ]}
               rows={topActiveUsers}
@@ -412,7 +423,6 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
             />
           </div>
         )}
-
         <div>
           <BlockTitle text="Sin actividad en el período" count={inactiveUsers.length} />
           {inactiveUsers.length === 0 ? (
@@ -434,7 +444,7 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
               />
               <DataTable
                 columns={[
-                  { key: 'uid',  label: 'ID usuario', mono: true },
+                  { key: 'uid',  label: 'Usuario',   mono: true },
                   { key: 'name', label: 'Nombre', color: () => 'var(--text2)' },
                 ]}
                 rows={inactiveUsers}
@@ -450,7 +460,7 @@ function TabAdopcion({ overview, planningViews, fiori, dashboards, stories, aler
 
 // ─── Tab 2: Excel Add-In ───────────────────────────────────────────────────────
 
-function TabExcel({ planningViews, logons, userMap }) {
+function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
   const [subtab,     setSubtab]     = useState('slow')
   const [userFilter, setUserFilter] = useState('')
   const [paFilter,   setPaFilter]   = useState('')
@@ -467,68 +477,81 @@ function TabExcel({ planningViews, logons, userMap }) {
   const unit    = planningViews[0]?.DurationUnit || 's'
   const avgDur  = avgField(filtered, 'TotalDuration')
   const cells   = sumField(filtered, 'PlanningViewCells')
-
   const logonUnit   = logons[0]?.DurationUnit || 's'
   const avgLogonDur = avgField(logons, 'TotalDuration')
+  const rateColor   = rate >= 90 ? '#10b981' : rate >= 70 ? '#f59e0b' : '#ef4444'
+  const durColor    = toSecs(avgDur, unit) > 120 ? '#ef4444' : toSecs(avgDur, unit) > 60 ? '#f59e0b' : '#10b981'
 
-  const rateColor = rate >= 90 ? '#10b981' : rate >= 70 ? '#f59e0b' : '#ef4444'
-  const durColor  = toSecs(avgDur, unit) > 120 ? '#ef4444' : toSecs(avgDur, unit) > 60 ? '#f59e0b' : '#10b981'
+  // Tipo de operación: remover prefijo XLS_ y reemplazar _ con espacio
+  const actTypeData = useMemo(() => {
+    if (!total) return []
+    const byType = groupBy(filtered, 'ActivityType')
+    return Object.entries(byType)
+      .map(([type, rows]) => ({
+        tipo: type.replace(/^XLS_/, '').replace(/_/g, ' '),
+        count: rows.length,
+        pct: Math.round(rows.length / total * 100),
+      }))
+      .sort((a, b) => b.count - a.count)
+  }, [filtered, total])
 
-  // Daily trend: success rate % + avg duration
+  // Tendencia diaria
   const trendData = useMemo(() => {
     const byDay = groupBy(filtered, r => dayKey(r.Timestamp || r.TimestampStart))
     return Object.entries(byDay)
       .map(([day, rows]) => {
         const ok  = rows.filter(r => r.SuccessfullyCompleted).length
         const avg = toSecs(avgField(rows, 'TotalDuration'), unit)
-        return {
-          day,
-          'Éxito %':       Math.round(ok / rows.length * 100),
-          'Duración (s)':  parseFloat(avg.toFixed(1)),
-        }
+        return { day, 'Éxito %': Math.round(ok / rows.length * 100), 'Duración (s)': parseFloat(avg.toFixed(1)) }
       })
       .sort((a, b) => a.day.localeCompare(b.day))
   }, [filtered, unit])
 
-  // PA performance summary
+  // Rendimiento por PA
   const paPerf = useMemo(() => {
     const byPA = groupBy(filtered.filter(r => r.PlanningAreaID), 'PlanningAreaID')
     return Object.entries(byPA)
       .map(([pa, rows]) => {
         const ok = rows.filter(r => r.SuccessfullyCompleted).length
-        return {
-          pa,
-          total:  rows.length,
-          rate:   Math.round(ok / rows.length * 100),
-          avgDur: parseFloat(toSecs(avgField(rows, 'TotalDuration'), unit).toFixed(1)),
-        }
+        return { pa, total: rows.length, rate: Math.round(ok / rows.length * 100), avgDur: parseFloat(toSecs(avgField(rows, 'TotalDuration'), unit).toFixed(1)) }
       })
       .sort((a, b) => b.total - a.total)
       .slice(0, 10)
   }, [filtered, unit])
 
-  const slowRows  = useMemo(() =>
+  // Top key figures modificados
+  const topChgKF = useMemo(() => {
+    if (!chgKeyFig.length) return []
+    const byKF = groupBy(chgKeyFig, 'KeyFigureID')
+    return Object.entries(byKF)
+      .map(([kf, rows]) => ({
+        kf,
+        cambios: sumField(rows, 'KeyFigureCount') || rows.length,
+        usuarios: uniqueUsers(rows),
+      }))
+      .sort((a, b) => b.cambios - a.cambios)
+      .slice(0, 15)
+  }, [chgKeyFig])
+
+  const slowRows = useMemo(() =>
     [...filtered].sort((a, b) => Number(b.TotalDuration) - Number(a.TotalDuration)).slice(0, 20),
     [filtered])
 
-  const failRows  = useMemo(() =>
+  const failRows = useMemo(() =>
     filtered.filter(r => !r.SuccessfullyCompleted).slice(0, 20),
     [filtered])
 
   const pvCols = [
-    { key: 'user',     label: 'Usuario',       render: r => userMap[r.UserID] || r.UserID || '—' },
-    { key: 'pa',       label: 'PA',             render: r => r.PlanningAreaID || '—', mono: true },
-    { key: 'template', label: 'Template',       render: r => r.FavoriteName || r.TemplateName || r.WorksheetName || '—', color: () => 'var(--text2)' },
-    { key: 'dur',      label: 'Duración',       nowrap: true, mono: true,
+    { key: 'user',     label: 'Usuario',      render: r => userMap[r.UserID] || r.UserID || '—' },
+    { key: 'pa',       label: 'PA',            render: r => r.PlanningAreaID || '—', mono: true },
+    { key: 'template', label: 'Template',      render: r => r.TemplateName || r.FavoriteName || r.WorksheetName || '—', color: () => 'var(--text2)' },
+    { key: 'hoja',     label: 'Hoja',          render: r => r.WorksheetName || '—', color: () => 'var(--text3)' },
+    { key: 'dur',      label: 'Duración',      nowrap: true, mono: true,
       render: r => formatDuration(r.TotalDuration, r.DurationUnit),
-      color: r => {
-        const s = toSecs(r.TotalDuration, r.DurationUnit)
-        return s > 120 ? '#ef4444' : s > 60 ? '#f59e0b' : '#10b981'
-      }},
+      color: r => { const s = toSecs(r.TotalDuration, r.DurationUnit); return s > 120 ? '#ef4444' : s > 60 ? '#f59e0b' : '#10b981' } },
     { key: 'noui',     label: 'Sin interacc.', nowrap: true, mono: true,
-      render: r => formatDuration(r.DurationWithoutUserInteraction, r.DurationUnit),
-      color: () => 'var(--text3)' },
-    { key: 'cells',    label: 'Celdas',         align: 'right', mono: true,
+      render: r => formatDuration(r.DurationWithoutUserInteraction, r.DurationUnit), color: () => 'var(--text3)' },
+    { key: 'cells',    label: 'Celdas',        align: 'right', mono: true,
       render: r => Number(r.PlanningViewCells).toLocaleString() },
   ]
 
@@ -536,8 +559,9 @@ function TabExcel({ planningViews, logons, userMap }) {
     <div style={{ padding: '24px 24px 32px' }}>
       {total === 0 ? <EmptyState /> : (
         <>
+          {/* KPIs */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-            <KpiCard label="Planning views"    value={total.toLocaleString()} />
+            <KpiCard label="Operaciones"       value={total.toLocaleString()} />
             <KpiCard label="Tasa de éxito"     value={`${rate}%`}            color={rateColor} warning={rate < 70} />
             <KpiCard label="Errores"           value={failed}                color={failed > 0 ? '#ef4444' : 'var(--text)'} warning={failed > 0} />
             <KpiCard label="Duración promedio" value={formatDuration(avgDur, unit)} color={durColor} />
@@ -547,29 +571,50 @@ function TabExcel({ planningViews, logons, userMap }) {
             )}
           </div>
 
-          {/* Trend chart */}
+          {/* Tipos de operación */}
+          {actTypeData.length > 1 && (
+            <div style={{ marginBottom: 24 }}>
+              <BlockTitle text="Distribución por tipo de operación" />
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {actTypeData.map((t, i) => (
+                  <div key={t.tipo} style={{
+                    background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+                    padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 140,
+                  }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: COLORS[i % COLORS.length], fontVariantNumeric: 'tabular-nums' }}>
+                      {t.pct}%
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t.tipo}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
+                      {t.count.toLocaleString()} ops
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tendencia diaria */}
           {trendData.length > 1 && (
             <ChartCard title="Tendencia diaria — éxito y duración" style={{ marginBottom: 16 }}>
               <ResponsiveContainer width="100%" height={200}>
                 <ComposedChart data={trendData} margin={{ left: 0, right: 32, top: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="day" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                  <YAxis yAxisId="pct" domain={[0, 100]} tickFormatter={v => `${v}%`}
-                    tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                  <YAxis yAxisId="dur" orientation="right" tickFormatter={v => `${v}s`}
-                    tick={{ fill: 'var(--text2)', fontSize: 10 }} />
+                  <YAxis yAxisId="pct" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
+                  <YAxis yAxisId="dur" orientation="right" tickFormatter={v => `${v}s`} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
                   <Tooltip formatter={(v, n) => n === 'Éxito %' ? `${v}%` : `${v}s`} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar    yAxisId="dur" dataKey="Duración (s)" fill={COLORS[2]} opacity={0.65} radius={[3, 3, 0, 0]} />
-                  <Line  yAxisId="pct" dataKey="Éxito %"      stroke={COLORS[1]} strokeWidth={2} dot={false} />
+                  <Bar  yAxisId="dur" dataKey="Duración (s)" fill={COLORS[2]} opacity={0.65} radius={[3, 3, 0, 0]} />
+                  <Line yAxisId="pct" dataKey="Éxito %"      stroke={COLORS[1]} strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartCard>
           )}
 
-          {/* PA performance */}
+          {/* Rendimiento por PA */}
           {paPerf.length > 0 && (
-            <ChartCard title="Rendimiento por Planning Area (top 10)" style={{ marginBottom: 16 }}>
+            <ChartCard title="Rendimiento por Planning Area (top 10)" style={{ marginBottom: 24 }}>
               <ResponsiveContainer width="100%" height={Math.max(160, paPerf.length * 30)}>
                 <BarChart data={paPerf} layout="vertical" margin={{ left: 4, right: 56, top: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
@@ -577,14 +622,29 @@ function TabExcel({ planningViews, logons, userMap }) {
                   <YAxis type="category" dataKey="pa" width={90} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
                   <Tooltip formatter={(v, n) => n === 'Éxito %' ? `${v}%` : n === 'Dur. prom (s)' ? `${v}s` : v} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="total"  fill={COLORS[0]} name="Ejecuciones"   radius={[0, 3, 3, 0]} />
-                  <Bar dataKey="avgDur" fill={COLORS[2]} name="Dur. prom (s)" radius={[0, 3, 3, 0]} />
+                  <Bar dataKey="total"  fill={COLORS[0]} name="Operaciones"    radius={[0, 3, 3, 0]} />
+                  <Bar dataKey="avgDur" fill={COLORS[2]} name="Dur. prom (s)"  radius={[0, 3, 3, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
           )}
 
-          {/* Filters + subtabs */}
+          {/* Key figures modificados */}
+          {topChgKF.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <BlockTitle text="Key figures más modificados" count={topChgKF.length} />
+              <DataTable
+                columns={[
+                  { key: 'kf',       label: 'Key Figure',       mono: true },
+                  { key: 'cambios',  label: 'Cambios totales',  align: 'right', mono: true, render: r => r.cambios.toLocaleString() },
+                  { key: 'usuarios', label: 'Usuarios',         align: 'right', mono: true },
+                ]}
+                rows={topChgKF}
+              />
+            </div>
+          )}
+
+          {/* Filtros + subtabs */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <TxtField label="Filtrar usuario" value={userFilter} onChange={setUserFilter} placeholder="Usuario…" />
             <TxtField label="Filtrar PA"      value={paFilter}   onChange={setPaFilter}   placeholder="Planning Area…" />
@@ -612,151 +672,150 @@ function TabExcel({ planningViews, logons, userMap }) {
   )
 }
 
-// ─── Tab 3: Apps & Alertas ─────────────────────────────────────────────────────
+// ─── Tab 3: Herramientas ───────────────────────────────────────────────────────
 
-function TabApps({ fiori, dashboards, stories, alerts }) {
-  const noData = !fiori.length && !dashboards.length && !stories.length && !alerts.length
+function TabApps({ fiori, dashboards, stories, alerts, plannerWS, userMap }) {
+  // Excluir entradas de Excel Add-In: son duplicados de MtrgActyExcelAddInPlanningView
+  const fioriOtros = useMemo(() =>
+    fiori.filter(r => r.FioriProjectID !== EXCEL_ADDIN_PROJECT_ID),
+    [fiori])
 
-  const totalSnooze  = sumField(alerts, 'SnoozeMe')      + sumField(alerts, 'SnoozeAll')
-  const totalEngaged = sumField(alerts, 'AlertDetails')  + sumField(alerts, 'GotoExcel') +
-                       sumField(alerts, 'GotoAna')       + sumField(alerts, 'NavToExtSys') +
-                       sumField(alerts, 'PlanningNotes') + sumField(alerts, 'AddToCase')
-  const totalRefresh = sumField(alerts, 'RefreshButton')
-  const totalActions = totalSnooze + totalEngaged + totalRefresh + sumField(alerts, 'GotoClick')
+  // Apps Fiori agrupadas por título (provisto por la API)
+  const fioriApps = useMemo(() => {
+    const byApp = groupBy(fioriOtros, r => r.FioriProjectTitle || r.FioriProjectID)
+    return Object.entries(byApp)
+      .map(([name, rows]) => ({ name, usuarios: uniqueUsers(rows), usos: rows.length }))
+      .sort((a, b) => b.usos - a.usos)
+  }, [fioriOtros])
 
-  const snoozeRatio  = totalActions > 0 ? Math.round(totalSnooze  / totalActions * 100) : 0
-  const engagedRatio = totalActions > 0 ? Math.round(totalEngaged / totalActions * 100) : 0
+  // Planner Workspace: top libros de trabajo
+  const wsLibros = useMemo(() => {
+    const byLibro = groupBy(plannerWS.filter(r => r.WorkbookName), r => r.WorkbookName)
+    return Object.entries(byLibro)
+      .map(([name, rows]) => ({ name, usuarios: uniqueUsers(rows), aperturas: rows.length }))
+      .sort((a, b) => b.aperturas - a.aperturas)
+      .slice(0, 10)
+  }, [plannerWS])
 
-  const alertPie = [
-    { name: 'Accionada', value: totalEngaged, fill: '#10b981' },
-    { name: 'Pospuesta', value: totalSnooze,  fill: '#ef4444' },
-    { name: 'Refresh',   value: totalRefresh, fill: '#6366f1' },
-    { name: 'Otro',      value: sumField(alerts, 'GotoClick'), fill: 'var(--text3)' },
-  ].filter(d => d.value > 0)
+  // Dashboards: sesiones por usuario (DashboardName no disponible en la API)
+  const dashPorUsuario = useMemo(() => {
+    const byUser = groupBy(dashboards, 'UserID')
+    return Object.entries(byUser)
+      .map(([uid, rows]) => {
+        const pas = [...new Set(rows.map(r => r.PlanningAreaID).filter(Boolean))]
+        return { usuario: userMap[uid] || uid, pa: pas.slice(0, 3).join(', ') || '—', sesiones: rows.length }
+      })
+      .sort((a, b) => b.sesiones - a.sesiones)
+      .slice(0, 15)
+  }, [dashboards, userMap])
 
-  const alertDetail = ALERT_ACTIONS
-    .map(({ key, label, group }) => ({ label, group, value: sumField(alerts, key) }))
-    .filter(a => a.value > 0)
-    .sort((a, b) => b.value - a.value)
+  // Alert Monitor: aperturas por usuario (la API registra ALTMON_APP_LOAD;
+  // los contadores de acciones —snooze, goto, etc.— no tienen datos en este tenant)
+  const alertPorUsuario = useMemo(() => {
+    const byUser = groupBy(alerts, 'UserID')
+    return Object.entries(byUser)
+      .map(([uid, rows]) => {
+        const last = rows.map(r => r.Timestamp).filter(Boolean).sort().reverse()[0]
+        return { usuario: userMap[uid] || uid, aperturas: rows.length, ultima: last ? last.slice(0, 10) : '—' }
+      })
+      .sort((a, b) => b.aperturas - a.aperturas)
+      .slice(0, 15)
+  }, [alerts, userMap])
 
-  const fioriData = Object.entries(groupBy(fiori, r => r.FioriProjectTitle || r.FioriProjectID || '?'))
-    .map(([name, rows]) => ({ name, value: sumField(rows, 'ActivityCount') || rows.length }))
-    .sort((a, b) => b.value - a.value).slice(0, 12)
+  // Analytics Stories
+  const storyRows = useMemo(() => {
+    const byStory = groupBy(stories, r => r.StoryName || r.StoryID || '?')
+    return Object.entries(byStory)
+      .map(([name, rows]) => ({ name, usuarios: uniqueUsers(rows), vistas: rows.length }))
+      .sort((a, b) => b.vistas - a.vistas)
+      .slice(0, 10)
+  }, [stories])
 
-  const dashData = Object.entries(groupBy(dashboards, r => r.DashboardName || '?'))
-    .map(([name, rows]) => ({ name, count: rows.length }))
-    .sort((a, b) => b.count - a.count).slice(0, 10)
-
-  const storyData = Object.entries(groupBy(stories, r => r.StoryName || '?'))
-    .map(([name, rows]) => ({ name, count: rows.length }))
-    .sort((a, b) => b.count - a.count).slice(0, 10)
+  const noData = !fioriOtros.length && !dashboards.length && !alerts.length && !plannerWS.length && !stories.length
 
   return (
     <div style={{ padding: '24px 24px 32px' }}>
       {noData ? <EmptyState /> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
 
+          {/* Apps Fiori */}
+          {fioriApps.length > 0 && (
+            <div>
+              <BlockTitle text="Apps Fiori" />
+              <DataTable
+                columns={[
+                  { key: 'name',     label: 'Aplicación' },
+                  { key: 'usuarios', label: 'Usuarios únicos', align: 'right', mono: true },
+                  { key: 'usos',     label: 'Usos',            align: 'right', mono: true, render: r => r.usos.toLocaleString() },
+                ]}
+                rows={fioriApps}
+              />
+            </div>
+          )}
+
+          {/* Planner Workspace */}
+          {plannerWS.length > 0 && (
+            <div>
+              <BlockTitle text="Planner Workspace" count={plannerWS.length} />
+              {wsLibros.length > 0 ? (
+                <DataTable
+                  columns={[
+                    { key: 'name',      label: 'Libro de trabajo' },
+                    { key: 'usuarios',  label: 'Usuarios únicos', align: 'right', mono: true },
+                    { key: 'aperturas', label: 'Aperturas',       align: 'right', mono: true },
+                  ]}
+                  rows={wsLibros}
+                />
+              ) : (
+                <Note text="Sin nombre de libro disponible en los registros del período." />
+              )}
+            </div>
+          )}
+
+          {/* Dashboards */}
+          {dashPorUsuario.length > 0 && (
+            <div>
+              <BlockTitle text={`Sesiones de Dashboard (${dashboards.length} total)`} />
+              <Note text="La API no incluye el nombre del dashboard en los registros de actividad." />
+              <DataTable
+                columns={[
+                  { key: 'usuario',  label: 'Usuario' },
+                  { key: 'pa',       label: 'Planning Area(s)', color: () => 'var(--text2)' },
+                  { key: 'sesiones', label: 'Sesiones', align: 'right', mono: true },
+                ]}
+                rows={dashPorUsuario}
+              />
+            </div>
+          )}
+
           {/* Alert Monitor */}
-          {alerts.length > 0 && (
+          {alertPorUsuario.length > 0 && (
             <div>
-              <BlockTitle text="Alert Monitor" />
-              <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-                <KpiCard label="Acciones totales" value={totalActions.toLocaleString()} />
-                <KpiCard
-                  label="Tasa de respuesta"
-                  value={`${engagedRatio}%`}
-                  sub="Alertas que generaron una acción"
-                  color={engagedRatio >= 50 ? '#10b981' : '#f59e0b'}
-                />
-                <KpiCard
-                  label="Tasa de snoozeo"
-                  value={`${snoozeRatio}%`}
-                  sub={snoozeRatio > 40 ? 'Alto — revisar configuración de alertas' : 'Normal'}
-                  color={snoozeRatio > 40 ? '#ef4444' : 'var(--text)'}
-                  warning={snoozeRatio > 40}
-                />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 16 }}>
-                {alertPie.length > 0 && (
-                  <ChartCard title="Distribución">
-                    <ResponsiveContainer width="100%" height={170}>
-                      <PieChart>
-                        <Pie data={alertPie} cx="50%" cy="50%" innerRadius={42} outerRadius={66}
-                          dataKey="value" nameKey="name">
-                          {alertPie.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                        </Pie>
-                        <Tooltip formatter={(v, n) => [v.toLocaleString(), n]} />
-                        <Legend iconSize={9} wrapperStyle={{ fontSize: 10 }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </ChartCard>
-                )}
-                {alertDetail.length > 0 && (
-                  <ChartCard title="Detalle de acciones">
-                    <ResponsiveContainer width="100%" height={Math.max(130, alertDetail.length * 28)}>
-                      <BarChart data={alertDetail} layout="vertical" margin={{ left: 4, right: 16 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                        <XAxis type="number" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                        <YAxis type="category" dataKey="label" width={150} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                        <Tooltip />
-                        <Bar dataKey="value" name="Veces" radius={[0, 3, 3, 0]}>
-                          {alertDetail.map((d, i) => (
-                            <Cell key={i} fill={d.group === 'snooze' ? '#ef4444' : d.group === 'engaged' ? '#10b981' : '#6366f1'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </ChartCard>
-                )}
-              </div>
+              <BlockTitle text="Alert Monitor — aperturas de la app" />
+              <Note text="La API registra apertura de la app (ALTMON_APP_LOAD). Las acciones dentro de alertas no tienen datos en este tenant." />
+              <DataTable
+                columns={[
+                  { key: 'usuario',   label: 'Usuario' },
+                  { key: 'aperturas', label: 'Aperturas', align: 'right', mono: true },
+                  { key: 'ultima',    label: 'Última',    mono: true, nowrap: true },
+                ]}
+                rows={alertPorUsuario}
+              />
             </div>
           )}
 
-          {/* Fiori apps */}
-          {fioriData.length > 0 && (
+          {/* Analytics Stories */}
+          {storyRows.length > 0 && (
             <div>
-              <BlockTitle text={`Apps Fiori — top ${fioriData.length}`} />
-              <ChartCard title="">
-                <ResponsiveContainer width="100%" height={Math.max(160, fioriData.length * 28)}>
-                  <BarChart data={fioriData} layout="vertical" margin={{ left: 4, right: 16 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                    <XAxis type="number" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                    <YAxis type="category" dataKey="name" width={150} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                    <Tooltip />
-                    <Bar dataKey="value" fill={COLORS[2]} name="Usos" radius={[0, 3, 3, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            </div>
-          )}
-
-          {/* Dashboards + Stories */}
-          {(dashData.length > 0 || storyData.length > 0) && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              {dashData.length > 0 && (
-                <div>
-                  <BlockTitle text="Dashboards más vistos" />
-                  <DataTable
-                    columns={[
-                      { key: 'name',  label: 'Dashboard' },
-                      { key: 'count', label: 'Registros', align: 'right', mono: true },
-                    ]}
-                    rows={dashData}
-                  />
-                </div>
-              )}
-              {storyData.length > 0 && (
-                <div>
-                  <BlockTitle text="Stories más usadas" />
-                  <DataTable
-                    columns={[
-                      { key: 'name',  label: 'Story' },
-                      { key: 'count', label: 'Registros', align: 'right', mono: true },
-                    ]}
-                    rows={storyData}
-                  />
-                </div>
-              )}
+              <BlockTitle text="Analytics Stories" />
+              <DataTable
+                columns={[
+                  { key: 'name',     label: 'Story' },
+                  { key: 'usuarios', label: 'Usuarios únicos', align: 'right', mono: true },
+                  { key: 'vistas',   label: 'Vistas',          align: 'right', mono: true },
+                ]}
+                rows={storyRows}
+              />
             </div>
           )}
 
@@ -806,18 +865,20 @@ export default function Metering({ connection, session }) {
     const groupFilter = buildDateFilter(fromDate, toDate, 'TimestampStart')
 
     try {
-      const [overview, planningViews, logons, fiori, dashboards, stories, alerts, users] =
+      const [overview, planningViews, logons, fiori, dashboards, stories, alerts, users, plannerWS, chgKeyFig] =
         await Promise.all([
           call(buildPath('MtrgActyGroupOverview',          { filter: groupFilter, top: 2000 })),
           call(buildPath('MtrgActyExcelAddInPlanningView', { filter: dateFilter,  top: 2000, orderby: 'TotalDuration desc' })),
           call(buildPath('MtrgActyExcelAddInLogon',        { filter: dateFilter,  top: 2000 })),
-          call(buildPath('MtrgGenericUIActionUsage',       { filter: dateFilter,  top: 500  })),
+          call(buildPath('MtrgGenericUIActionUsage',       { filter: dateFilter,  top: 1000 })),
           call(buildPath('MtrgDashboard',                  { filter: dateFilter,  top: 500  })),
           call(buildPath('MtrgMngAnalyticStory',           { filter: dateFilter,  top: 500  })),
           call(buildPath('MtrgActyAlertMonitor',           { filter: dateFilter,  top: 500  })),
           call('/MtrgActyBusinessUser?$top=1000'),
+          call(buildPath('MtrgPlannerWorkspaceUI',         { filter: dateFilter,  top: 1000 })),
+          call(buildPath('MtrgActyExcelAddInChgKeyFig',    { filter: dateFilter,  top: 2000 })),
         ])
-      setData({ overview, planningViews, logons, fiori, dashboards, stories, alerts, users })
+      setData({ overview, planningViews, logons, fiori, dashboards, stories, alerts, users, plannerWS, chgKeyFig })
     } catch (e) {
       setError(e.message === '401'
         ? 'Credenciales incorrectas. Cierra sesión y vuelve a ingresar.'
@@ -826,7 +887,7 @@ export default function Metering({ connection, session }) {
     setLoading(false)
   }
 
-  // Mount: immediate; preset: immediate via handlePreset; datetime: debounce 900ms
+  // Mount: carga inmediata; preset: carga inmediata via handlePreset; datetime: debounce 900ms
   useEffect(() => {
     if (!mountedRef.current) {
       mountedRef.current = true
@@ -849,8 +910,8 @@ export default function Metering({ connection, session }) {
       const tz     = getTzMode()
       const nf     = toInputDate(s, tz)
       const nt     = toInputDate(e, tz)
-      fromRef.current = nf
-      toRef.current   = nt
+      fromRef.current         = nf
+      toRef.current           = nt
       skipDebounceRef.current = true
       setFrom(nf)
       setTo(nt)
@@ -862,10 +923,7 @@ export default function Metering({ connection, session }) {
   const userMap = useMemo(() => {
     if (!data) return {}
     return Object.fromEntries(
-      data.users.map(u => [
-        u.UserID,
-        u.FullName || [u.FirstName, u.LastName].filter(Boolean).join(' ') || u.UserID,
-      ])
+      data.users.map(u => [u.UserID, u.FullName || [u.FirstName, u.LastName].filter(Boolean).join(' ') || u.UserID])
     )
   }, [data])
 
@@ -878,7 +936,7 @@ export default function Metering({ connection, session }) {
         loading={loading} hasData={!!data}
       />
 
-      {/* Inner tabs */}
+      {/* Sub-tabs */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg2)', padding: '0 24px', flexShrink: 0 }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
@@ -911,21 +969,25 @@ export default function Metering({ connection, session }) {
           <>
             {activeTab === 'adopcion' && (
               <TabAdopcion
-                overview={data.overview}
-                planningViews={data.planningViews}
-                fiori={data.fiori}
-                dashboards={data.dashboards}
-                stories={data.stories}
-                alerts={data.alerts}
-                users={data.users}
+                overview={data.overview}     planningViews={data.planningViews}
+                fiori={data.fiori}           dashboards={data.dashboards}
+                stories={data.stories}       alerts={data.alerts}
+                plannerWS={data.plannerWS}   users={data.users}
                 userMap={userMap}
               />
             )}
             {activeTab === 'excel' && (
-              <TabExcel planningViews={data.planningViews} logons={data.logons} userMap={userMap} />
+              <TabExcel
+                planningViews={data.planningViews} logons={data.logons}
+                chgKeyFig={data.chgKeyFig}         userMap={userMap}
+              />
             )}
             {activeTab === 'apps' && (
-              <TabApps fiori={data.fiori} dashboards={data.dashboards} stories={data.stories} alerts={data.alerts} />
+              <TabApps
+                fiori={data.fiori}         dashboards={data.dashboards}
+                stories={data.stories}     alerts={data.alerts}
+                plannerWS={data.plannerWS} userMap={userMap}
+              />
             )}
           </>
         )}
