@@ -21,9 +21,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       url:  initial?.com0068?.url  || '',
       user: initial?.com0068?.user || '',
     },
-    comMetering: {
-      url:  initial?.comMetering?.url  || '',
-      user: initial?.comMetering?.user || '',
+    com0924: {
+      url:  initial?.com0924?.url  || '',
+      user: initial?.com0924?.user || '',
     },
   })
   const [error, setError] = useState('')
@@ -45,7 +45,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
 
     const err326      = validateAgreement(form.com0326,     'SAP_COM_0326')
     const err068      = validateAgreement(form.com0068,     'SAP_COM_0068')
-    const errMetering = validateAgreement(form.comMetering, 'Metering Activity')
+    const errMetering = validateAgreement(form.com0924, 'SAP_COM_0924')
     if (err326)      { setError(err326);      return }
     if (err068)      { setError(err068);      return }
     if (errMetering) { setError(errMetering); return }
@@ -60,7 +60,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
 
     const has326      = form.com0326.url     || form.com0326.user
     const has068      = form.com0068.url     || form.com0068.user
-    const hasMetering = form.comMetering.url || form.comMetering.user
+    const hasMetering = form.com0924.url || form.com0924.user
 
     if (has326) {
       conn.com0326 = { url: form.com0326.url.replace(/\/$/, ''), user: form.com0326.user }
@@ -75,9 +75,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     }
 
     if (hasMetering) {
-      conn.comMetering = { url: form.comMetering.url.replace(/\/$/, ''), user: form.comMetering.user }
+      conn.com0924 = { url: form.com0924.url.replace(/\/$/, ''), user: form.com0924.user }
     } else {
-      delete conn.comMetering
+      delete conn.com0924
     }
 
     upsert(conn)
@@ -114,12 +114,12 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         onChange={(k, v) => setAgreement('com0068', k, v)}
       />
 
-      {/* Metering Activity */}
+      {/* SAP_COM_0924 */}
       <AgreementSection
-        title="Metering Activity — Telemetría de uso"
-        subtitle="Adopción · Excel Add-In · Dashboards · Fiori (opcional)"
-        values={form.comMetering}
-        onChange={(k, v) => setAgreement('comMetering', k, v)}
+        title="SAP_COM_0924 — Metering Activity"
+        subtitle="Telemetría · Adopción · Excel Add-In · Dashboards (opcional)"
+        values={form.com0924}
+        onChange={(k, v) => setAgreement('com0924', k, v)}
         urlPlaceholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata4/ibp/api_meteringactivity/srvd_a2x/ibp/api_meteringactivity/0001"
       />
 

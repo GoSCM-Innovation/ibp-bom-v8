@@ -10,7 +10,7 @@ import { getSapSystemUrl } from '../../utils/sapUrl'
 export default function SystemView({ connection, session, onLogout }) {
   const has0326    = !!(connection.com0326?.url    && connection.com0326?.user)
   const has0068    = !!(connection.com0068?.url    && connection.com0068?.user)
-  const hasMetering = !!(connection.comMetering?.url && connection.comMetering?.user)
+  const hasMetering = !!(connection.com0924?.url && connection.com0924?.user)
 
   const APPS = [
     ...(has0326 ? [

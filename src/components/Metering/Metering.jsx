@@ -197,7 +197,7 @@ function Empty() {
 // ─── Login inline ──────────────────────────────────────────────────────────────
 
 function MeteringLogin({ connection, onLogin }) {
-  const [user,     setUser]     = useState(connection.comMetering?.user || '')
+  const [user,     setUser]     = useState(connection.com0924?.user || '')
   const [password, setPassword] = useState('')
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState('')
@@ -209,9 +209,9 @@ function MeteringLogin({ connection, onLogin }) {
     setError('')
     try {
       const creds   = { user, password }
-      const fakeSess = { comMetering: creds }
+      const fakeSess = { com0924: creds }
       const res = await proxyCall({
-        connection, session: fakeSess, com: 'Metering',
+        connection, session: fakeSess, com: '0924',
         path: '/MtrgComponent?$top=1',
       })
       if (res.ok) {
@@ -747,10 +747,10 @@ export default function Metering({ connection }) {
     const tz       = getTzMode()
     const fromDate = inputDateToDate(fromRef.current, tz)
     const toDate   = inputDateToDate(toRef.current,   tz)
-    const fakeSess = { comMetering: creds }
+    const fakeSess = { com0924: creds }
 
     const call = async (path) => {
-      const res = await proxyCall({ connection, session: fakeSess, com: 'Metering', path })
+      const res = await proxyCall({ connection, session: fakeSess, com: '0924', path })
       if (!res.ok) {
         if (res.status === 401) throw new Error('401')
         throw new Error(`HTTP ${res.status}`)
