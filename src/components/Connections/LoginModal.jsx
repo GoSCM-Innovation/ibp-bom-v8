@@ -13,7 +13,7 @@ async function verifyCredentials(conn, comKey, userCred) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      url: serviceRoot + '/JobTemplateSet?$top=1&$format=json',
+      url: serviceRoot + '/$metadata',
       serviceRoot,
       user: userCred.user,
       password: userCred.password,
