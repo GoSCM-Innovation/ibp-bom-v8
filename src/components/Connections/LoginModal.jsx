@@ -6,6 +6,23 @@ const COM_META = {
   com0068: { name: 'SAP_COM_0068', desc: 'Resource Stats' },
 }
 
+async function verifyCredentials(conn, comKey, userCred) {
+  const comNum = comKey.replace('com', '')
+  const serviceRoot = conn[comKey]?.url || ''
+  const resp = await fetch('/api/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      url: serviceRoot + '/JobTemplateSet?$top=1&$format=json',
+      serviceRoot,
+      user: userCred.user,
+      password: userCred.password,
+      method: 'GET',
+    }),
+  })
+  return resp
+}
+
 export default function LoginModal({ conn, existingSession, onLogin, onCancel }) {
   // All configured agreements, split by whether they already have credentials
   const allKeys    = ['com0326', 'com0068'].filter(k => conn[k]?.url)
@@ -16,6 +33,7 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
     Object.fromEntries(pendingKeys.map(k => [k, { user: conn[k]?.user || '', password: '' }]))
   )
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const firstPasswordRef = useRef(null)
 
   useEffect(() => { firstPasswordRef.current?.focus() }, [])
@@ -24,12 +42,38 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
     setCreds(p => ({ ...p, [key]: { ...p[key], [field]: value } }))
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     for (const k of pendingKeys) {
       if (!creds[k].user)     { setError(`Usuario requerido para ${COM_META[k].name}`); return }
       if (!creds[k].password) { setError(`Contraseña requerida para ${COM_META[k].name}`); return }
     }
+
+    setError('')
+    setLoading(true)
+    try {
+      for (const k of pendingKeys) {
+        const resp = await verifyCredentials(conn, k, creds[k])
+        if (!resp.ok) {
+          if (resp.status === 401) {
+            const label = multi ? ` (${COM_META[k].name})` : ''
+            setError(`Usuario o contraseña incorrectos${label}. Verifica tus credenciales e inténtalo de nuevo.`)
+          } else {
+            let detail = ''
+            try { const j = await resp.json(); detail = j?.detail || j?.error || '' } catch { /* noop */ }
+            setError(detail || `Error al conectar con SAP IBP (${resp.status}). Verifica la URL y vuelve a intentarlo.`)
+          }
+          setLoading(false)
+          return
+        }
+      }
+    } catch {
+      setError('No se pudo contactar el servidor. Verifica tu conexión e inténtalo de nuevo.')
+      setLoading(false)
+      return
+    }
+
+    setLoading(false)
     onLogin(creds)
   }
 
@@ -123,10 +167,11 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
               background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
               color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 16px', cursor: 'pointer',
             }}>Cancelar</button>
-            <button type="submit" style={{
-              background: 'var(--accent)', border: 'none', borderRadius: 6,
-              color: '#000', fontSize: 12, fontWeight: 700, padding: '7px 20px', cursor: 'pointer',
-            }}>Ingresar</button>
+            <button type="submit" disabled={loading} style={{
+              background: loading ? 'var(--border2)' : 'var(--accent)', border: 'none', borderRadius: 6,
+              color: loading ? 'var(--text3)' : '#000', fontSize: 12, fontWeight: 700, padding: '7px 20px',
+              cursor: loading ? 'not-allowed' : 'pointer', transition: 'background .15s',
+            }}>{loading ? 'Verificando…' : 'Ingresar'}</button>
           </div>
         </form>
       </div>
