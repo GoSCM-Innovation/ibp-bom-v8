@@ -21,6 +21,10 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       url:  initial?.com0068?.url  || '',
       user: initial?.com0068?.user || '',
     },
+    comMetering: {
+      url:  initial?.comMetering?.url  || '',
+      user: initial?.comMetering?.user || '',
+    },
   })
   const [error, setError] = useState('')
 
@@ -39,10 +43,12 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     if (!form.name)    { setError('El nombre es obligatorio'); return }
     if (!form.ambiente) { setError('Selecciona un ambiente'); return }
 
-    const err326 = validateAgreement(form.com0326, 'SAP_COM_0326')
-    const err068 = validateAgreement(form.com0068, 'SAP_COM_0068')
-    if (err326) { setError(err326); return }
-    if (err068) { setError(err068); return }
+    const err326      = validateAgreement(form.com0326,     'SAP_COM_0326')
+    const err068      = validateAgreement(form.com0068,     'SAP_COM_0068')
+    const errMetering = validateAgreement(form.comMetering, 'Metering Activity')
+    if (err326)      { setError(err326);      return }
+    if (err068)      { setError(err068);      return }
+    if (errMetering) { setError(errMetering); return }
 
     const conn = {
       ...(initial ? { ...initial } : {}),
@@ -52,8 +58,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       logoUrl:  form.logoUrl,
     }
 
-    const has326 = form.com0326.url || form.com0326.user
-    const has068 = form.com0068.url || form.com0068.user
+    const has326      = form.com0326.url     || form.com0326.user
+    const has068      = form.com0068.url     || form.com0068.user
+    const hasMetering = form.comMetering.url || form.comMetering.user
 
     if (has326) {
       conn.com0326 = { url: form.com0326.url.replace(/\/$/, ''), user: form.com0326.user }
@@ -65,6 +72,12 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       conn.com0068 = { url: form.com0068.url.replace(/\/$/, ''), user: form.com0068.user }
     } else {
       delete conn.com0068
+    }
+
+    if (hasMetering) {
+      conn.comMetering = { url: form.comMetering.url.replace(/\/$/, ''), user: form.comMetering.user }
+    } else {
+      delete conn.comMetering
     }
 
     upsert(conn)
@@ -101,6 +114,18 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         onChange={(k, v) => setAgreement('com0068', k, v)}
       />
 
+      {/* Metering Activity — opcional */}
+      <div style={{ height: 1, background: 'var(--border)', margin: '4px 0 20px' }} />
+      <AgreementSection
+        title="Metering Activity — Telemetría de uso (opcional)"
+        subtitle="Adopción · Excel Add-In · Dashboards · Fiori"
+        accentColor="var(--text2)"
+        values={form.comMetering}
+        onChange={(k, v) => setAgreement('comMetering', k, v)}
+        urlPlaceholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata4/ibp/api_meteringactivity/srvd_a2x/ibp/api_meteringactivity/0001"
+        optional
+      />
+
       <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text2)' }}>
         La contraseña se pedirá al iniciar sesión en cada conexión — no se guarda aquí.
       </div>
@@ -126,17 +151,33 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
   )
 }
 
-function AgreementSection({ title, subtitle, values, onChange }) {
+function AgreementSection({ title, subtitle, values, onChange, accentColor, urlPlaceholder, optional }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+      <div style={{ marginBottom: 10, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase',
+          color: accentColor || 'var(--accent)',
+        }}>
           {title}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{subtitle}</div>
+        {optional && (
+          <span style={{
+            fontSize: 9, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase',
+            letterSpacing: '.08em', border: '1px solid var(--border)', borderRadius: 4,
+            padding: '1px 5px',
+          }}>opcional</span>
+        )}
       </div>
+      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: -6, marginBottom: 10 }}>{subtitle}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Field label="URL API" value={values.url} onChange={v => onChange('url', v)} placeholder="https://tenant-api.scmibp.ondemand.com/..." mono />
+        <Field
+          label="URL API"
+          value={values.url}
+          onChange={v => onChange('url', v)}
+          placeholder={urlPlaceholder || 'https://tenant-api.scmibp.ondemand.com/...'}
+          mono
+        />
         <Field label="Usuario de comunicación" value={values.user} onChange={v => onChange('user', v)} placeholder="COM_USER" mono />
       </div>
     </div>

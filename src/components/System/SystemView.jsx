@@ -3,12 +3,14 @@ import Jobs from '../Jobs/Jobs'
 import JobMonitor from '../Jobs/JobMonitor'
 import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
+import Metering from '../Metering/Metering'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getSapSystemUrl } from '../../utils/sapUrl'
 
 export default function SystemView({ connection, session, onLogout }) {
-  const has0326 = !!(connection.com0326?.url && connection.com0326?.user)
-  const has0068 = !!(connection.com0068?.url && connection.com0068?.user)
+  const has0326    = !!(connection.com0326?.url    && connection.com0326?.user)
+  const has0068    = !!(connection.com0068?.url    && connection.com0068?.user)
+  const hasMetering = !!(connection.comMetering?.url && connection.comMetering?.user)
 
   const APPS = [
     ...(has0326 ? [
@@ -18,6 +20,9 @@ export default function SystemView({ connection, session, onLogout }) {
     ] : []),
     ...(has0068 ? [
       { id: 'stats', label: 'Resource Stats' },
+    ] : []),
+    ...(hasMetering ? [
+      { id: 'metering', label: 'Telemetría' },
     ] : []),
   ]
 
@@ -95,6 +100,7 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'jobs'     && <Jobs          connection={connection} session={session} />}
         {activeApp === 'monitor'  && <JobMonitor    connection={connection} session={session} />}
         {activeApp === 'stats'    && <ResourceStats connection={connection} session={session} />}
+        {activeApp === 'metering' && <Metering      connection={connection} />}
       </div>
     </div>
   )
