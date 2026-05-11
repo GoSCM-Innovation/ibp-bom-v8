@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import ConnectionAvatar from './ConnectionAvatar'
 
+const ALL_AGREEMENTS = ['com0326', 'com0068', 'com0924']
+
 const COM_META = {
   com0326: { name: 'SAP_COM_0326', desc: 'Application Jobs' },
   com0068: { name: 'SAP_COM_0068', desc: 'Resource Stats' },
+  com0924: { name: 'SAP_COM_0924', desc: 'Metering Activity' },
 }
 
 async function verifyCredentials(conn, comKey, userCred) {
@@ -25,9 +28,9 @@ async function verifyCredentials(conn, comKey, userCred) {
 
 export default function LoginModal({ conn, existingSession, onLogin, onCancel }) {
   // All configured agreements, split by whether they already have credentials
-  const allKeys    = ['com0326', 'com0068'].filter(k => conn[k]?.url)
+  const allKeys     = ALL_AGREEMENTS.filter(k => conn[k]?.url)
   const pendingKeys = allKeys.filter(k => !existingSession?.[k]?.password)
-  const multi      = allKeys.length > 1
+  const multi       = allKeys.length > 1
 
   const [creds, setCreds] = useState(() =>
     Object.fromEntries(pendingKeys.map(k => [k, { user: conn[k]?.user || '', password: '' }]))

@@ -9,8 +9,6 @@ import { toInputDate, inputDateToDate, getTzMode } from '../../utils/dateUtils'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = id => `ibp_metering_session_${id}`
-
 const PRESETS = [
   { id: 'today', label: 'Hoy' },
   { id: '7d',   label: '7 días' },
@@ -75,19 +73,6 @@ function formatDuration(val, unit = '') {
   const m = Math.floor(secs / 60)
   const s = Math.round(secs % 60)
   return `${m}m ${s}s`
-}
-
-// ─── Session helpers ───────────────────────────────────────────────────────────
-
-function loadCreds(connId) {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY(connId))) || null }
-  catch { return null }
-}
-function saveCreds(connId, creds) {
-  localStorage.setItem(STORAGE_KEY(connId), JSON.stringify(creds))
-}
-function clearCreds(connId) {
-  localStorage.removeItem(STORAGE_KEY(connId))
 }
 
 // ─── Preset dates ──────────────────────────────────────────────────────────────
@@ -190,100 +175,6 @@ function Empty() {
   return (
     <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>
       Sin datos para el período seleccionado
-    </div>
-  )
-}
-
-// ─── Login inline ──────────────────────────────────────────────────────────────
-
-function MeteringLogin({ connection, onLogin }) {
-  const [user,     setUser]     = useState(connection.com0924?.user || '')
-  const [password, setPassword] = useState('')
-  const [loading,  setLoading]  = useState(false)
-  const [error,    setError]    = useState('')
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (!user || !password) { setError('Usuario y contraseña requeridos'); return }
-    setLoading(true)
-    setError('')
-    try {
-      const creds   = { user, password }
-      const fakeSess = { com0924: creds }
-      const res = await proxyCall({
-        connection, session: fakeSess, com: '0924',
-        path: '/MtrgComponent?$top=1',
-      })
-      if (res.ok) {
-        onLogin(creds)
-      } else if (res.status === 401) {
-        setError('Usuario o contraseña incorrectos.')
-      } else {
-        setError(`Error al conectar (${res.status}). Verifica la URL configurada.`)
-      }
-    } catch {
-      setError('No se pudo contactar el servidor.')
-    }
-    setLoading(false)
-  }
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      height: '100%', padding: 40,
-    }}>
-      <div style={{
-        background: 'var(--bg2)', border: '1px solid var(--border2)',
-        borderRadius: 14, padding: 36, width: 360,
-        boxShadow: '0 12px 32px rgba(0,0,0,.35)',
-      }}>
-        <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
-          Telemetría de uso
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 28, lineHeight: 1.5 }}>
-          Ingresa las credenciales del acuerdo de comunicación de Metering Activity para acceder a los datos de uso del sistema.
-        </div>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <LoginField label="Usuario" value={user} onChange={setUser} autoComplete="username" mono />
-          <LoginField label="Contraseña" value={password} onChange={setPassword} type="password" autoComplete="current-password" />
-          {error && (
-            <div style={{ fontSize: 12, color: 'var(--red)', padding: '8px 12px', background: 'rgba(239,68,68,.08)', borderRadius: 6 }}>
-              ✕ {error}
-            </div>
-          )}
-          <button type="submit" disabled={loading} style={{
-            marginTop: 4, background: loading ? 'var(--border2)' : 'var(--accent)',
-            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700,
-            color: loading ? 'var(--text3)' : '#000', padding: '11px 0',
-            cursor: loading ? 'not-allowed' : 'pointer', transition: 'background .15s',
-          }}>
-            {loading ? 'Verificando…' : 'Conectar →'}
-          </button>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-function LoginField({ label, value, onChange, type = 'text', mono, autoComplete }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      <label style={{
-        fontSize: 10, fontWeight: 700, color: 'var(--text2)',
-        textTransform: 'uppercase', letterSpacing: '.07em',
-      }}>{label}</label>
-      <input
-        type={type} value={value} autoComplete={autoComplete}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
-          color: 'var(--text)', fontFamily: mono ? 'var(--mono)' : 'var(--font)',
-          fontSize: 12, padding: '9px 12px', outline: 'none',
-        }}
-        onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-        onBlur={e  => e.target.style.borderColor = 'var(--border)'}
-      />
     </div>
   )
 }
@@ -688,9 +579,7 @@ function SectionAdopcion({ fiori, dashboards, stories, alerts }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function Metering({ connection }) {
-  const [creds, setCreds] = useState(() => loadCreds(connection.id))
-
+export default function Metering({ connection, session }) {
   // Date filter state — default 7 días
   const [preset, setPreset] = useState('7d')
   const [from, setFrom] = useState(() => {
@@ -710,24 +599,11 @@ export default function Metering({ connection }) {
   const [error,   setError]   = useState('')
   const [loaded,  setLoaded]  = useState(false)
 
-  // Keep mutable refs to current from/to so the load function always reads latest
+  // Refs para leer from/to actualizado dentro de loadData sin stale closure
   const fromRef = useRef(from)
   const toRef   = useRef(to)
   fromRef.current = from
   toRef.current   = to
-
-  function handleLogin(newCreds) {
-    saveCreds(connection.id, newCreds)
-    setCreds(newCreds)
-  }
-
-  function handleLogout() {
-    clearCreds(connection.id)
-    setCreds(null)
-    setData(null)
-    setLoaded(false)
-    setError('')
-  }
 
   function handlePreset(id) {
     setPreset(id)
@@ -740,17 +616,15 @@ export default function Metering({ connection }) {
   }
 
   async function loadData() {
-    if (!creds) return
     setLoading(true)
     setError('')
 
     const tz       = getTzMode()
     const fromDate = inputDateToDate(fromRef.current, tz)
     const toDate   = inputDateToDate(toRef.current,   tz)
-    const fakeSess = { com0924: creds }
 
     const call = async (path) => {
-      const res = await proxyCall({ connection, session: fakeSess, com: '0924', path })
+      const res = await proxyCall({ connection, session, com: '0924', path })
       if (!res.ok) {
         if (res.status === 401) throw new Error('401')
         throw new Error(`HTTP ${res.status}`)
@@ -777,21 +651,17 @@ export default function Metering({ connection }) {
       setData({ overview, planningViews, logons, fiori, dashboards, stories, alerts, users, components })
       setLoaded(true)
     } catch (e) {
-      if (e.message === '401') {
-        setError('Sesión expirada o credenciales incorrectas.')
-      } else {
-        setError(`Error al cargar datos: ${e.message}`)
-      }
+      setError(e.message === '401'
+        ? 'Credenciales incorrectas. Cierra sesión y vuelve a ingresar.'
+        : `Error al cargar datos: ${e.message}`)
     }
     setLoading(false)
   }
 
-  // Auto-load on mount when creds are available
-  useEffect(() => {
-    if (creds) loadData()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Auto-load al montar
+  useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Build lookup maps — siempre llamados (antes de cualquier return condicional)
+  // Todos los useMemo antes de cualquier return condicional
   const userMap = useMemo(() => {
     if (!data) return {}
     return Object.fromEntries(
@@ -809,7 +679,6 @@ export default function Metering({ connection }) {
     )
   }, [data])
 
-  // Filtros client-side — siempre llamados
   const filteredOverview = useMemo(() => {
     if (!data) return []
     return data.overview.filter(r =>
@@ -826,18 +695,15 @@ export default function Metering({ connection }) {
     )
   }, [data, userFilter, paFilter])
 
-  // Conditional return DESPUÉS de todos los hooks
-  if (!creds) return <MeteringLogin connection={connection} onLogin={handleLogin} />
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <DateFilterBar
-        preset={preset}       onPreset={handlePreset}
-        from={from}           setFrom={setFrom}
-        to={to}               setTo={setTo}
+        preset={preset}         onPreset={handlePreset}
+        from={from}             setFrom={setFrom}
+        to={to}                 setTo={setTo}
         userFilter={userFilter} setUserFilter={setUserFilter}
-        paFilter={paFilter}   setPaFilter={setPaFilter}
-        onLoad={loadData}     loading={loading}
+        paFilter={paFilter}     setPaFilter={setPaFilter}
+        onLoad={loadData}       loading={loading}
       />
 
       {error && (
@@ -847,27 +713,19 @@ export default function Metering({ connection }) {
           display: 'flex', alignItems: 'center', gap: 12,
         }}>
           <span style={{ fontSize: 12, color: 'var(--red)' }}>✕ {error}</span>
-          {error.includes('Sesión') && (
-            <button onClick={handleLogout} style={{
-              fontSize: 11, color: 'var(--accent)', background: 'none',
-              border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0,
-            }}>
-              Cerrar sesión →
-            </button>
-          )}
         </div>
       )}
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {!loaded && !loading && !error && (
-          <div style={{ padding: 56, textAlign: 'center', color: 'var(--text2)', fontSize: 13, lineHeight: 1.6 }}>
-            Selecciona un período y haz clic en <strong style={{ color: 'var(--text)' }}>Cargar datos →</strong> para ver la telemetría de uso.
-          </div>
-        )}
-
         {loading && !loaded && (
           <div style={{ padding: 56, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
             Cargando datos de telemetría…
+          </div>
+        )}
+
+        {!loading && !loaded && !error && (
+          <div style={{ padding: 56, textAlign: 'center', color: 'var(--text2)', fontSize: 13, lineHeight: 1.6 }}>
+            Selecciona un período y haz clic en <strong style={{ color: 'var(--text)' }}>Cargar datos →</strong> para ver la telemetría de uso.
           </div>
         )}
 
@@ -891,14 +749,6 @@ export default function Metering({ connection }) {
               stories={data.stories}
               alerts={data.alerts}
             />
-            <div style={{ padding: '16px 24px 32px', textAlign: 'right' }}>
-              <button onClick={handleLogout} style={{
-                background: 'none', border: '1px solid var(--border)', borderRadius: 6,
-                color: 'var(--text3)', fontSize: 11, padding: '5px 14px', cursor: 'pointer',
-              }}>
-                Cerrar sesión de Telemetría
-              </button>
-            </div>
           </>
         )}
       </div>

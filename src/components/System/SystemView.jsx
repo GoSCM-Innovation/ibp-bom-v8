@@ -100,7 +100,7 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'jobs'     && <Jobs          connection={connection} session={session} />}
         {activeApp === 'monitor'  && <JobMonitor    connection={connection} session={session} />}
         {activeApp === 'stats'    && <ResourceStats connection={connection} session={session} />}
-        {activeApp === 'metering' && <Metering      connection={connection} />}
+        {activeApp === 'metering' && <Metering      connection={connection} session={session} />}
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 const key = id => `ibp_session_${id}`
 
 function isValidSession(s) {
-  return s && (s.com0326 || s.com0068)
+  return s && (s.com0326 || s.com0068 || s.com0924)
 }
 
 export function getSession(connId) {

@@ -44,8 +44,8 @@ export default function App() {
   }
 
   function sessionIsComplete(conn, session) {
-    const needed = ['com0326', 'com0068'].filter(k => conn[k]?.url)
-    if (needed.length === 0) return true  // solo com0924 u otros opcionales → acceso libre
+    const needed = ['com0326', 'com0068', 'com0924'].filter(k => conn[k]?.url)
+    if (needed.length === 0) return true
     return needed.every(k => session?.[k]?.password)
   }
 
