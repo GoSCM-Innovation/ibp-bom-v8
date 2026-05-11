@@ -119,9 +119,6 @@ export default function OrchBuilder({
         {/* ── Palette: desktop left panel / mobile bottom drawer ── */}
         <div style={{
           width: 220, flexShrink: 0,
-          display: paletteOpen ? 'flex' : undefined,
-          // Desktop: always visible
-          '@media (max-width: 640px)': { display: 'none' },
         }}
           className="orch-palette-desktop"
         >
