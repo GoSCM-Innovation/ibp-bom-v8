@@ -4,6 +4,7 @@ import JobMonitor from '../Jobs/JobMonitor'
 import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
 import Metering from '../Metering/Metering'
+import Orchestrations from '../Orchestrations/Orchestrations'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getSapSystemUrl } from '../../utils/sapUrl'
 
@@ -14,9 +15,10 @@ export default function SystemView({ connection, session, onLogout }) {
 
   const APPS = [
     ...(has0326 ? [
-      { id: 'resumen',  label: 'Resumen'        },
-      { id: 'jobs',     label: 'Job Templates'  },
-      { id: 'monitor',  label: 'Job Monitor'    },
+      { id: 'resumen',      label: 'Resumen'        },
+      { id: 'jobs',         label: 'Job Templates'  },
+      { id: 'monitor',      label: 'Job Monitor'    },
+      { id: 'orquestador',  label: 'Orquestador'    },
     ] : []),
     ...(has0068 ? [
       { id: 'stats', label: 'Resource Stats' },
@@ -96,11 +98,12 @@ export default function SystemView({ connection, session, onLogout }) {
             Ve a Conexiones para agregar SAP_COM_0326 o SAP_COM_0068.
           </div>
         )}
-        {activeApp === 'resumen'  && <Resumen       connection={connection} session={session} />}
-        {activeApp === 'jobs'     && <Jobs          connection={connection} session={session} />}
-        {activeApp === 'monitor'  && <JobMonitor    connection={connection} session={session} />}
-        {activeApp === 'stats'    && <ResourceStats connection={connection} session={session} />}
-        {activeApp === 'metering' && <Metering      connection={connection} session={session} />}
+        {activeApp === 'resumen'      && <Resumen        connection={connection} session={session} />}
+        {activeApp === 'jobs'         && <Jobs           connection={connection} session={session} />}
+        {activeApp === 'monitor'      && <JobMonitor     connection={connection} session={session} />}
+        {activeApp === 'orquestador'  && <Orchestrations connection={connection} session={session} />}
+        {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
+        {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
       </div>
     </div>
   )
