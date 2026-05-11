@@ -114,16 +114,13 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         onChange={(k, v) => setAgreement('com0068', k, v)}
       />
 
-      {/* Metering Activity — opcional */}
-      <div style={{ height: 1, background: 'var(--border)', margin: '4px 0 20px' }} />
+      {/* Metering Activity */}
       <AgreementSection
-        title="Metering Activity — Telemetría de uso (opcional)"
-        subtitle="Adopción · Excel Add-In · Dashboards · Fiori"
-        accentColor="var(--text2)"
+        title="Metering Activity — Telemetría de uso"
+        subtitle="Adopción · Excel Add-In · Dashboards · Fiori (opcional)"
         values={form.comMetering}
         onChange={(k, v) => setAgreement('comMetering', k, v)}
         urlPlaceholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata4/ibp/api_meteringactivity/srvd_a2x/ibp/api_meteringactivity/0001"
-        optional
       />
 
       <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text2)' }}>
@@ -151,33 +148,17 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
   )
 }
 
-function AgreementSection({ title, subtitle, values, onChange, accentColor, urlPlaceholder, optional }) {
+function AgreementSection({ title, subtitle, values, onChange, urlPlaceholder }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ marginBottom: 10, display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <div style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase',
-          color: accentColor || 'var(--accent)',
-        }}>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
           {title}
         </div>
-        {optional && (
-          <span style={{
-            fontSize: 9, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase',
-            letterSpacing: '.08em', border: '1px solid var(--border)', borderRadius: 4,
-            padding: '1px 5px',
-          }}>opcional</span>
-        )}
+        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{subtitle}</div>
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: -6, marginBottom: 10 }}>{subtitle}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Field
-          label="URL API"
-          value={values.url}
-          onChange={v => onChange('url', v)}
-          placeholder={urlPlaceholder || 'https://tenant-api.scmibp.ondemand.com/...'}
-          mono
-        />
+        <Field label="URL API" value={values.url} onChange={v => onChange('url', v)} placeholder={urlPlaceholder || 'https://tenant-api.scmibp.ondemand.com/...'} mono />
         <Field label="Usuario de comunicación" value={values.user} onChange={v => onChange('user', v)} placeholder="COM_USER" mono />
       </div>
     </div>
