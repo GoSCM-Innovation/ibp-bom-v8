@@ -62,8 +62,16 @@ export default function StepCard({
   onAddChild, onDeleteChild, onChangeChild,
   onMoveChildUp, onMoveChildDown,
   disabled,
+  // DnD props from OrchBuilder
+  isDragOver,
+  dragOverPos,   // 'top' | 'bottom'
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }) {
   const [groupExpanded, setGroupExpanded] = useState(true)
+  const [dragging, setDragging] = useState(false)
 
   const isGroup = step.type === 'group'
   const children = step.children || []
@@ -75,15 +83,58 @@ export default function StepCard({
     transition: 'color .12s, border-color .12s',
   }
 
-  return (
+  // Drop indicator line
+  const dropLine = isDragOver ? (
     <div style={{
-      border: `1px solid ${isGroup ? 'rgba(99,102,241,.35)' : 'var(--border)'}`,
-      borderRadius: 10,
-      background: isGroup ? 'rgba(99,102,241,.04)' : 'var(--bg2)',
-      marginBottom: 8,
-    }}>
+      position: 'absolute', left: 0, right: 0,
+      top: dragOverPos === 'top' ? -2 : undefined,
+      bottom: dragOverPos === 'bottom' ? -2 : undefined,
+      height: 3, borderRadius: 2,
+      background: 'rgba(34,197,94,.8)',
+      pointerEvents: 'none',
+    }} />
+  ) : null
+
+  return (
+    <div
+      draggable={!disabled}
+      onDragStart={e => {
+        if (disabled) return
+        setDragging(true)
+        onDragStart(e, step.id)
+      }}
+      onDragEnd={() => setDragging(false)}
+      onDragOver={e => { e.preventDefault(); onDragOver(e, step.id) }}
+      onDragLeave={onDragLeave}
+      onDrop={e => { e.preventDefault(); onDrop(e, step.id) }}
+      style={{
+        position: 'relative',
+        border: `1px solid ${isGroup ? 'rgba(99,102,241,.35)' : 'var(--border)'}`,
+        borderRadius: 10,
+        background: isGroup ? 'rgba(99,102,241,.04)' : 'var(--bg2)',
+        marginBottom: 8,
+        opacity: dragging ? 0.35 : 1,
+        transition: 'opacity .15s',
+        cursor: disabled ? 'default' : 'grab',
+      }}
+    >
+      {dropLine}
+
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px' }}>
+        {/* Drag handle */}
+        <div
+          title={disabled ? undefined : 'Arrastrar para reordenar'}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 18, flexShrink: 0, alignSelf: 'stretch',
+            color: 'var(--text3)', opacity: disabled ? 0.2 : 0.45,
+            fontSize: 14, userSelect: 'none',
+          }}
+        >
+          ⠿
+        </div>
+
         {/* Index badge */}
         <div style={{
           width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
@@ -108,7 +159,8 @@ export default function StepCard({
                   {children.length} tarea{children.length !== 1 ? 's' : ''}
                 </span>
                 <button
-                  onClick={() => setGroupExpanded(v => !v)}
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={e => { e.stopPropagation(); setGroupExpanded(v => !v) }}
                   style={{ ...btnBase, border: 'none', fontSize: 10, padding: '2px 4px' }}
                 >
                   {groupExpanded ? '▲' : '▼'}
@@ -119,6 +171,7 @@ export default function StepCard({
                 onChange={e => !disabled && onChange({ label: e.target.value })}
                 placeholder="Descripción opcional…"
                 disabled={disabled}
+                onMouseDown={e => e.stopPropagation()}
                 style={{ ...inputStyle, marginTop: 6, fontSize: 11 }}
               />
               <StrategyRow step={step} onChange={p => !disabled && onChange(p)} />
@@ -143,7 +196,10 @@ export default function StepCard({
         </div>
 
         {/* Action buttons */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}
+        >
           <button
             disabled={disabled || index === 0}
             onClick={onMoveUp}
@@ -181,7 +237,6 @@ export default function StepCard({
                 border: '1px solid var(--border)',
                 borderRadius: 8,
               }}>
-                {/* Parallel icon */}
                 <div style={{
                   width: 20, height: 20, flexShrink: 0, borderRadius: 4, marginTop: 2,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -210,6 +265,7 @@ export default function StepCard({
 
           {!disabled && (
             <button
+              onMouseDown={e => e.stopPropagation()}
               onClick={onAddChild}
               style={{
                 marginTop: 4, width: '100%', padding: '6px 0', borderRadius: 6,

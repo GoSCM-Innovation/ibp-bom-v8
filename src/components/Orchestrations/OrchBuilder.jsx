@@ -1,17 +1,18 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import StepCard from './StepCard'
 import TemplatePalette from './TemplatePalette'
-
-// Pending group: when user clicks "+ al grupo" on a specific group step
-// targetGroupId = id of the group to add the next template to
 
 export default function OrchBuilder({
   orch, connection, session,
   onUpdate, onRun, disabled,
 }) {
-  const [name, setName]               = useState(orch.name)
-  const [pendingGroup, setPendingGroup] = useState(null) // group stepId awaiting a template pick
-  const [paletteOpen, setPaletteOpen]  = useState(false) // mobile drawer
+  const [name, setName]                = useState(orch.name)
+  const [pendingGroup, setPendingGroup] = useState(null)
+  const [paletteOpen, setPaletteOpen]  = useState(false)
+
+  // DnD state
+  const dragId  = useRef(null)   // id of the card being dragged
+  const [dragOver, setDragOver]  = useState(null)   // { id, pos: 'top'|'bottom' }
 
   const steps = orch.steps || []
 
@@ -28,7 +29,6 @@ export default function OrchBuilder({
   // ── step mutations ───────────────────────────────────────────────────────────
   function addTask(step) {
     if (pendingGroup) {
-      // add to group
       const newSteps = steps.map(s =>
         s.id === pendingGroup
           ? { ...s, children: [...(s.children || []), step] }
@@ -103,6 +103,50 @@ export default function OrchBuilder({
     }))
   }
 
+  // ── DnD handlers ─────────────────────────────────────────────────────────────
+  function handleDragStart(e, id) {
+    dragId.current = id
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  function handleDragOver(e, overId) {
+    e.preventDefault()
+    if (!dragId.current || dragId.current === overId) {
+      setDragOver(null)
+      return
+    }
+    // Determine top/bottom half from mouse position
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pos = (e.clientY - rect.top) < rect.height / 2 ? 'top' : 'bottom'
+    setDragOver({ id: overId, pos })
+  }
+
+  function handleDragLeave() {
+    setDragOver(null)
+  }
+
+  function handleDrop(e, overId) {
+    e.preventDefault()
+    const fromId = dragId.current
+    dragId.current = null
+    setDragOver(null)
+    if (!fromId || fromId === overId) return
+
+    const fromIdx = steps.findIndex(s => s.id === fromId)
+    const toIdx   = steps.findIndex(s => s.id === overId)
+    if (fromIdx < 0 || toIdx < 0) return
+
+    const pos = dragOver?.pos ?? 'bottom'
+    const insertIdx = pos === 'top'
+      ? (fromIdx < toIdx ? toIdx - 1 : toIdx)
+      : (fromIdx < toIdx ? toIdx : toIdx + 1)
+
+    const newSteps = [...steps]
+    const [moved] = newSteps.splice(fromIdx, 1)
+    newSteps.splice(insertIdx, 0, moved)
+    save(newSteps)
+  }
+
   const isEmpty = steps.length === 0
 
   return (
@@ -116,12 +160,8 @@ export default function OrchBuilder({
       )}
 
       <div style={{ display: 'flex', height: '100%', position: 'relative' }}>
-        {/* ── Palette: desktop left panel / mobile bottom drawer ── */}
-        <div style={{
-          width: 220, flexShrink: 0,
-        }}
-          className="orch-palette-desktop"
-        >
+        {/* ── Palette: desktop left panel ── */}
+        <div style={{ width: 220, flexShrink: 0 }} className="orch-palette-desktop">
           <TemplatePalette
             connection={connection}
             session={session}
@@ -232,6 +272,12 @@ export default function OrchBuilder({
                 onChangeChild={(childId, patch) => changeChild(step.id, childId, patch)}
                 onMoveChildUp={childId => moveChild(step.id, childId, -1)}
                 onMoveChildDown={childId => moveChild(step.id, childId, 1)}
+                isDragOver={dragOver?.id === step.id}
+                dragOverPos={dragOver?.id === step.id ? dragOver.pos : null}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
               />
             ))}
           </div>
