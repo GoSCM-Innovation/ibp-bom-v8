@@ -119,7 +119,12 @@ export default function Jobs({ connection, session }) {
         <div style={{ fontSize: 13, color: 'var(--text2)' }}>Sin resultados</div>
       ) : (
         <div style={{ overflowX: 'auto', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
-          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12 }}>
+          <table style={{
+            borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12,
+            // Suma de columnas + acción: fuerza que tableLayout:fixed respete los anchos
+            width: VISIBLE_COLS.reduce((s, c) => s + (colWidths[c] || DEFAULT_COL_WIDTHS[c] || 240), 110),
+            minWidth: '100%',
+          }}>
             <thead>
               <tr style={{ background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1 }}>
                 {VISIBLE_COLS.map(col => {
