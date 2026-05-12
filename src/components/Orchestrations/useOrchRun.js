@@ -21,7 +21,7 @@ function mapSapStatus(code) {
 
 function makeNode(type = 'task', children = null) {
   return {
-    status: 'pending', jobName: null, sapStatus: null,
+    status: 'pending', jobName: null, jobRunCount: null, sapStatus: null,
     startedAt: null, finishedAt: null,
     error: null, retryCount: 0,
     ...(type === 'group' ? { children: children || {} } : {}),
@@ -102,7 +102,9 @@ export function useOrchRun(connection, session) {
       try {
         const r = await proxyCall({ connection, session, path: `/JobHeaderSet?$filter=JobName+eq+${enc(currentJob)}&$top=1` })
         const d = await r.json()
-        sapStatus = (d?.d?.results ?? d?.value ?? [])[0]?.JobStatus ?? null
+        const jobHeader = (d?.d?.results ?? d?.value ?? [])[0]
+        sapStatus = jobHeader?.JobStatus ?? null
+        if (jobHeader?.JobRunCount != null) patch(stepId, { jobRunCount: jobHeader.JobRunCount }, childId)
       } catch { continue }
 
       if (!sapStatus) continue

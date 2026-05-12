@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { proxyCall } from '../../services/proxyCall'
 
 const STRATEGIES = [
   { value: 'stop',     label: 'Detener si falla'    },
@@ -56,6 +57,61 @@ function StrategyRow({ step, onChange }) {
   )
 }
 
+function TemplateSteps({ jobTemplateName, connection, session }) {
+  const [expanded, setExpanded] = useState(false)
+  const [steps, setSteps]       = useState(null)
+  const [loading, setLoading]   = useState(false)
+
+  useEffect(() => {
+    if (!expanded || steps !== null || !connection) return
+    setLoading(true)
+    proxyCall({
+      connection, session,
+      path: `/JobTemplateSequenceSet?$filter=substringof(${encodeURIComponent("'" + jobTemplateName + "'")},JobTemplateName)&$orderby=JobSequencePosition`,
+    })
+      .then(r => r.json())
+      .then(d => setSteps(d?.d?.results ?? d?.value ?? []))
+      .catch(() => setSteps([]))
+      .finally(() => setLoading(false))
+  }, [expanded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const count = steps?.length ?? 0
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onMouseDown={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: 'var(--text3)', fontSize: 10, padding: 0, display: 'flex', alignItems: 'center', gap: 4,
+        }}
+      >
+        {expanded ? '▲' : '▼'} {steps !== null ? `${count} paso${count !== 1 ? 's' : ''} del template` : 'Ver pasos del template'}
+      </button>
+
+      {expanded && (
+        <div style={{ marginTop: 4, paddingLeft: 8, borderLeft: '2px solid var(--border)' }}>
+          {loading && <div style={{ fontSize: 10, color: 'var(--text3)', padding: '4px 0' }}>Cargando…</div>}
+          {!loading && steps?.length === 0 && (
+            <div style={{ fontSize: 10, color: 'var(--text3)', fontStyle: 'italic', padding: '4px 0' }}>Sin pasos disponibles</div>
+          )}
+          {!loading && steps?.map((s, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline', padding: '2px 0' }}>
+              <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', flexShrink: 0, minWidth: 18, textAlign: 'right' }}>
+                {s.JobSequencePosition ?? i + 1}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text2)' }}>
+                {s.JobSequenceText || s.JobCatalogEntryText || s.JobCatalogEntryName || `Paso ${i + 1}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function StepCard({
   step, index, total,
   onDelete, onMoveUp, onMoveDown, onChange,
@@ -63,6 +119,7 @@ export default function StepCard({
   onMoveChildUp, onMoveChildDown,
   disabled,
   isPendingGroup,
+  connection, session,
   // DnD props from OrchBuilder
   isDragOver,
   dragOverPos,   // 'top' | 'bottom'
@@ -199,6 +256,13 @@ export default function StepCard({
                 {step.jobTemplateName}
               </div>
               <StrategyRow step={step} onChange={p => !disabled && onChange(p)} />
+              {connection && (
+                <TemplateSteps
+                  jobTemplateName={step.jobTemplateName}
+                  connection={connection}
+                  session={session}
+                />
+              )}
             </>
           )}
         </div>

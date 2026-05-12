@@ -313,6 +313,8 @@ export default function OrchBuilder({
                 index={i}
                 total={steps.length}
                 disabled={disabled}
+                connection={connection}
+                session={session}
                 onDelete={() => deleteStep(step.id)}
                 onMoveUp={() => moveStep(step.id, -1)}
                 onMoveDown={() => moveStep(step.id, 1)}

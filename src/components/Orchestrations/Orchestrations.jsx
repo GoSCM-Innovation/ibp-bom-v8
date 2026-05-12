@@ -376,6 +376,8 @@ export default function Orchestrations({ connection, session }) {
               orch={selected}
               onCancel={handleCancelRun}
               onClose={isRunning ? undefined : handleCloseRun}
+              connection={connection}
+              session={session}
             />
           )}
         </div>
