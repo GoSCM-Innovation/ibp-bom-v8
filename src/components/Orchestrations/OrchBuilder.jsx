@@ -175,6 +175,7 @@ export default function OrchBuilder({
       {/* ── Mobile palette drawer backdrop ── */}
       {paletteOpen && (
         <div
+          className="orch-palette-backdrop"
           onClick={() => { setPaletteOpen(false); setPendingGroup(null) }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 200 }}
         />
@@ -359,6 +360,9 @@ export default function OrchBuilder({
           .orch-palette-desktop { display: none !important; }
           .orch-palette-mobile  { display: flex !important; flex-direction: column; }
           .orch-fab             { display: block !important; }
+        }
+        @media (min-width: 641px) {
+          .orch-palette-backdrop { display: none !important; }
         }
       `}</style>
     </>
