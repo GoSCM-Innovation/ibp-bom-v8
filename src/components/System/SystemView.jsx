@@ -91,7 +91,7 @@ export default function SystemView({ connection, session, onLogout }) {
       )}
 
       {/* App content */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {APPS.length === 0 && (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
             Esta conexión no tiene acuerdos de comunicación configurados.<br />

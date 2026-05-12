@@ -5,6 +5,7 @@ import TemplatePalette from './TemplatePalette'
 export default function OrchBuilder({
   orch, connection, session,
   onUpdate, onRun, disabled,
+  fullscreen, onToggleFullscreen,
 }) {
   const [name, setName]                = useState(orch.name)
   const [pendingGroup, setPendingGroup] = useState(null)
@@ -161,7 +162,7 @@ export default function OrchBuilder({
 
       <div style={{ display: 'flex', height: '100%', position: 'relative' }}>
         {/* ── Palette: desktop left panel ── */}
-        <div style={{ width: 220, flexShrink: 0 }} className="orch-palette-desktop">
+        <div style={{ width: fullscreen ? 380 : 220, flexShrink: 0, transition: 'width .2s ease' }} className="orch-palette-desktop">
           <TemplatePalette
             connection={connection}
             session={session}
@@ -213,6 +214,23 @@ export default function OrchBuilder({
                 padding: '6px 10px', outline: 'none',
               }}
             />
+            {onToggleFullscreen && (
+              <button
+                onClick={onToggleFullscreen}
+                title={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                style={{
+                  padding: '7px 10px', borderRadius: 6, flexShrink: 0,
+                  border: '1px solid var(--border)', background: 'transparent',
+                  color: fullscreen ? 'var(--accent)' : 'var(--text3)',
+                  fontSize: 13, cursor: 'pointer',
+                  transition: 'color .12s, border-color .12s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.borderColor = 'var(--text2)' }}
+                onMouseLeave={e => { e.currentTarget.style.color = fullscreen ? 'var(--accent)' : 'var(--text3)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+              >
+                {fullscreen ? '✕ Salir' : '⤢'}
+              </button>
+            )}
             <button
               onClick={() => {
                 if ('Notification' in window && Notification.permission === 'default') {

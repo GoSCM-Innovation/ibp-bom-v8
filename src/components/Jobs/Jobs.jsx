@@ -6,6 +6,7 @@ import ScheduleModal from './ScheduleModal'
 
 const JOB_PATH    = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
+const DEFAULT_COL_WIDTHS = { JobTemplateName: 240, JobTemplateText: 480 }
 
 const TD = { padding: '6px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
 
@@ -58,7 +59,7 @@ export default function Jobs({ connection, session }) {
 
   function onResizeStart(col, e) {
     e.preventDefault(); e.stopPropagation()
-    const startX = e.clientX, startW = colWidths[col] || 260
+    const startX = e.clientX, startW = colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240
     resizing.current = { col, startX, startW }
     function onMove(e) {
       if (!resizing.current) return
@@ -92,7 +93,7 @@ export default function Jobs({ connection, session }) {
   )
 
   return (
-    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
+    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', boxSizing: 'border-box' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
@@ -117,12 +118,12 @@ export default function Jobs({ connection, session }) {
       {rows.length === 0 ? (
         <div style={{ fontSize: 13, color: 'var(--text2)' }}>Sin resultados</div>
       ) : (
-        <div style={{ overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
-          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%', fontSize: 12 }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
+          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12 }}>
             <thead>
               <tr style={{ background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1 }}>
                 {VISIBLE_COLS.map(col => {
-                  const w = colWidths[col] || 260
+                  const w = colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240
                   return (
                     <th
                       key={col}
@@ -171,7 +172,7 @@ export default function Jobs({ connection, session }) {
                         padding: '7px 12px', color: 'var(--text)',
                         borderBottom: '1px solid var(--border)',
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        maxWidth: colWidths[col] || 260,
+                        maxWidth: colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240,
                       }}
                       title={String(row[col] ?? '')}
                     >
