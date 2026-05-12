@@ -50,17 +50,15 @@ export default function OrchBuilder({
   // ── step mutations ───────────────────────────────────────────────────────────
   function addTask(step) {
     if (pendingGroup) {
-      const newSteps = steps.map(s =>
+      save(steps.map(s =>
         s.id === pendingGroup
           ? { ...s, children: [...(s.children || []), step] }
           : s
-      )
-      save(newSteps)
-      setPendingGroup(null)
+      ))
     } else {
       save([...steps, step])
+      setPaletteOpen(false)
     }
-    setPaletteOpen(false)
   }
 
   function addGroup() {
@@ -224,7 +222,7 @@ export default function OrchBuilder({
           <TemplatePalette
             connection={connection}
             session={session}
-            onAddTask={step => { addTask(step); setPaletteOpen(false) }}
+            onAddTask={addTask}
             onAddGroup={() => { addGroup(); setPaletteOpen(false) }}
             targetGroupId={pendingGroup}
             onCancelGroup={() => { setPendingGroup(null); setPaletteOpen(false) }}
