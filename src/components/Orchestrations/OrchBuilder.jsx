@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import StepCard from './StepCard'
 import TemplatePalette from './TemplatePalette'
 
@@ -10,10 +10,30 @@ export default function OrchBuilder({
   const [name, setName]                = useState(orch.name)
   const [pendingGroup, setPendingGroup] = useState(null)
   const [paletteOpen, setPaletteOpen]  = useState(false)
+  const [paletteWidth, setPaletteWidth] = useState(fullscreen ? 380 : 220)
+  const resizingPalette = useRef(false)
 
   // DnD state
   const dragId  = useRef(null)   // id of the card being dragged
   const [dragOver, setDragOver]  = useState(null)   // { id, pos: 'top'|'bottom' }
+
+  const onPaletteResizeStart = useCallback(e => {
+    e.preventDefault()
+    resizingPalette.current = true
+    const startX = e.clientX
+    const startW = paletteWidth
+    function onMove(ev) {
+      if (!resizingPalette.current) return
+      setPaletteWidth(Math.max(160, Math.min(600, startW + ev.clientX - startX)))
+    }
+    function onUp() {
+      resizingPalette.current = false
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [paletteWidth])
 
   const steps = orch.steps || []
 
@@ -162,14 +182,28 @@ export default function OrchBuilder({
 
       <div style={{ display: 'flex', height: '100%', position: 'relative' }}>
         {/* ── Palette: desktop left panel ── */}
-        <div style={{ width: fullscreen ? 380 : 220, flexShrink: 0, transition: 'width .2s ease' }} className="orch-palette-desktop">
-          <TemplatePalette
-            connection={connection}
-            session={session}
-            onAddTask={addTask}
-            onAddGroup={addGroup}
-            targetGroupId={pendingGroup}
-            disabled={disabled}
+        <div style={{ width: paletteWidth, flexShrink: 0, display: 'flex' }} className="orch-palette-desktop">
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <TemplatePalette
+              connection={connection}
+              session={session}
+              onAddTask={addTask}
+              onAddGroup={addGroup}
+              targetGroupId={pendingGroup}
+              disabled={disabled}
+            />
+          </div>
+          {/* Resize handle */}
+          <div
+            onMouseDown={onPaletteResizeStart}
+            title="Arrastrar para cambiar ancho"
+            style={{
+              width: 5, flexShrink: 0, cursor: 'col-resize',
+              background: 'var(--border)',
+              transition: 'background .12s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--border)' }}
           />
         </div>
 
