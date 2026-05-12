@@ -190,11 +190,16 @@ export default function Orchestrations({ connection, session }) {
             <>
               <div style={{ padding: '10px 12px 6px', flexShrink: 0 }}>
                 <button
+                  disabled={isRunning}
                   onClick={handleCreate}
+                  title={isRunning ? 'No se puede crear durante una ejecución activa' : undefined}
                   style={{
                     width: '100%', padding: '7px 0', borderRadius: 6,
                     border: '1px solid rgba(34,197,94,.35)', background: 'rgba(34,197,94,.07)',
-                    color: '#22c55e', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    color: isRunning ? 'var(--text3)' : '#22c55e',
+                    fontSize: 11, fontWeight: 700,
+                    cursor: isRunning ? 'default' : 'pointer',
+                    opacity: isRunning ? 0.45 : 1,
                   }}
                 >
                   + Nueva orquestación
@@ -214,7 +219,7 @@ export default function Orchestrations({ connection, session }) {
                     <div
                       key={orch.id}
                       onClick={() => {
-                        if (isRunning && selectedId !== orch.id) return
+                        if (isRunning) return
                         setSelectedId(orch.id)
                         setMode('build')
                         if (selectedId !== orch.id) reset()
@@ -224,35 +229,44 @@ export default function Orchestrations({ connection, session }) {
                         borderBottom: '1px solid var(--border)',
                         background: isActive ? 'rgba(59,130,246,.08)' : 'transparent',
                         borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                        cursor: 'pointer',
+                        cursor: isRunning ? 'default' : 'pointer',
                         display: 'flex', alignItems: 'flex-start', gap: 6,
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{
-                          fontSize: 12, fontWeight: isActive ? 700 : 500,
-                          color: isActive ? '#fff' : 'var(--text)',
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          display: 'flex', alignItems: 'center', gap: 6,
                         }}>
-                          {orch.name}
+                          {isRunning && isActive && (
+                            <span style={{ flexShrink: 0, fontSize: 8, color: '#22c55e', animation: 'orchRunPulse 1.2s ease-in-out infinite' }}>●</span>
+                          )}
+                          <span style={{
+                            fontSize: 12, fontWeight: isActive ? 700 : 500,
+                            color: isActive ? '#fff' : 'var(--text)',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {orch.name}
+                          </span>
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>
                           {(orch.steps || []).length} paso{(orch.steps || []).length !== 1 ? 's' : ''}
                           {' · '}{formatDate(orch.createdAt)}
                         </div>
                       </div>
-                      <button
-                        onClick={e => { e.stopPropagation(); handleDelete(orch.id) }}
-                        title="Eliminar"
-                        style={{
-                          background: 'none', border: 'none', color: 'var(--text3)',
-                          fontSize: 11, cursor: 'pointer', padding: '2px 4px', lineHeight: 1,
-                          flexShrink: 0, opacity: 0.5,
-                          transition: 'opacity .12s, color .12s',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.opacity = 1; e.currentTarget.style.color = 'var(--red)' }}
-                        onMouseLeave={e => { e.currentTarget.style.opacity = 0.5; e.currentTarget.style.color = 'var(--text3)' }}
-                      >✕</button>
+                      {!isRunning && (
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDelete(orch.id) }}
+                          title="Eliminar"
+                          style={{
+                            background: 'none', border: 'none', color: 'var(--text3)',
+                            fontSize: 11, cursor: 'pointer', padding: '2px 4px', lineHeight: 1,
+                            flexShrink: 0, opacity: 0.5,
+                            transition: 'opacity .12s, color .12s',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.opacity = 1; e.currentTarget.style.color = 'var(--red)' }}
+                          onMouseLeave={e => { e.currentTarget.style.opacity = 0.5; e.currentTarget.style.color = 'var(--text3)' }}
+                        >✕</button>
+                      )}
                     </div>
                   )
                 })}
@@ -321,14 +335,15 @@ export default function Orchestrations({ connection, session }) {
                   <div
                     key={orch.id}
                     onClick={() => {
-                      if (isRunning && selectedId !== orch.id) return
+                      if (isRunning) return
                       setSelectedId(orch.id)
                       setMode('build')
                       if (selectedId !== orch.id) reset()
                     }}
                     title={orch.name}
                     style={{
-                      width: 26, height: 26, borderRadius: 5, cursor: 'pointer',
+                      position: 'relative',
+                      width: 26, height: 26, borderRadius: 5, cursor: isRunning ? 'default' : 'pointer',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, fontWeight: 700,
                       background: isActive ? 'rgba(59,130,246,.2)' : 'rgba(255,255,255,.05)',
@@ -337,6 +352,14 @@ export default function Orchestrations({ connection, session }) {
                     }}
                   >
                     {orch.name.slice(0, 1).toUpperCase()}
+                    {isRunning && isActive && (
+                      <span style={{
+                        position: 'absolute', top: -3, right: -3,
+                        width: 7, height: 7, borderRadius: '50%',
+                        background: '#22c55e',
+                        animation: 'orchRunPulse 1.2s ease-in-out infinite',
+                      }} />
+                    )}
                   </div>
                 )
               })}
@@ -458,6 +481,10 @@ export default function Orchestrations({ connection, session }) {
       <style>{`
         @media (max-width: 640px) {
           .orch-sidebar { width: 100% !important; max-width: 100%; border-right: none !important; }
+        }
+        @keyframes orchRunPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%       { opacity: 0.45; transform: scale(0.75); }
         }
       `}</style>
     </>

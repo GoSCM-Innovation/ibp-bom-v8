@@ -142,6 +142,7 @@ function NodeRow({ ns, label, techName, indent = 0, isChild = false, connection,
             statuses={null}
             tzMode="local"
             onClose={null}
+            inline
           />
         </div>
       )}
