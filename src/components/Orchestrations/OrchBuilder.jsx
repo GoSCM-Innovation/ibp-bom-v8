@@ -190,6 +190,7 @@ export default function OrchBuilder({
               onAddTask={addTask}
               onAddGroup={addGroup}
               targetGroupId={pendingGroup}
+              onCancelGroup={() => setPendingGroup(null)}
               disabled={disabled}
             />
           </div>
@@ -225,6 +226,7 @@ export default function OrchBuilder({
             onAddTask={step => { addTask(step); setPaletteOpen(false) }}
             onAddGroup={() => { addGroup(); setPaletteOpen(false) }}
             targetGroupId={pendingGroup}
+            onCancelGroup={() => { setPendingGroup(null); setPaletteOpen(false) }}
             disabled={disabled}
           />
         </div>
@@ -316,6 +318,7 @@ export default function OrchBuilder({
                 onMoveUp={() => moveStep(step.id, -1)}
                 onMoveDown={() => moveStep(step.id, 1)}
                 onChange={patch => changeStep(step.id, patch)}
+                isPendingGroup={pendingGroup === step.id}
                 onAddChild={() => {
                   setPendingGroup(step.id)
                   setPaletteOpen(true)

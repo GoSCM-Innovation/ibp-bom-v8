@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
 import ProgressBar from '../ui/ProgressBar'
 
-export default function TemplatePalette({ connection, session, onAddTask, onAddGroup, targetGroupId, disabled }) {
+export default function TemplatePalette({ connection, session, onAddTask, onAddGroup, targetGroupId, onCancelGroup, disabled }) {
   const [templates, setTemplates]   = useState([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState('')
@@ -61,6 +61,28 @@ export default function TemplatePalette({ connection, session, onAddTask, onAddG
         />
       </div>
 
+      {targetGroupId && (
+        <div style={{
+          padding: '8px 12px', borderBottom: '1px solid rgba(99,102,241,.4)',
+          background: 'rgba(99,102,241,.12)',
+          display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 10, color: 'rgba(165,180,252,1)', flex: 1, lineHeight: 1.4 }}>
+            🎯 <strong>Modo grupo activo</strong><br />
+            <span style={{ fontWeight: 400 }}>Haz clic en «+» para añadir al grupo</span>
+          </span>
+          <button
+            onClick={() => onCancelGroup?.()}
+            title="Cancelar selección de grupo"
+            style={{
+              background: 'none', border: '1px solid rgba(99,102,241,.4)', borderRadius: 5,
+              color: 'rgba(165,180,252,.8)', fontSize: 10, cursor: 'pointer',
+              padding: '3px 7px', flexShrink: 0,
+            }}
+          >✕ Cancelar</button>
+        </div>
+      )}
+
       <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
         {loading && (
           <div style={{ padding: '16px 12px', color: 'var(--text2)', fontSize: 11 }}>
@@ -102,11 +124,11 @@ export default function TemplatePalette({ connection, session, onAddTask, onAddG
               title={targetGroupId ? 'Agregar al grupo seleccionado' : 'Agregar a la secuencia'}
               style={{
                 padding: '4px 8px', borderRadius: 5, flexShrink: 0,
-                border: '1px solid rgba(34,197,94,.3)',
-                background: 'rgba(34,197,94,.07)',
-                color: disabled ? 'var(--text3)' : '#22c55e',
+                border: targetGroupId ? '1px solid rgba(99,102,241,.6)' : '1px solid rgba(34,197,94,.3)',
+                background: targetGroupId ? 'rgba(99,102,241,.18)' : 'rgba(34,197,94,.07)',
+                color: disabled ? 'var(--text3)' : (targetGroupId ? 'rgba(165,180,252,1)' : '#22c55e'),
                 fontSize: 11, fontWeight: 700, cursor: disabled ? 'default' : 'pointer',
-                lineHeight: 1,
+                lineHeight: 1, transition: 'background .15s, border-color .15s, color .15s',
               }}
             >+</button>
           </div>

@@ -62,6 +62,7 @@ export default function StepCard({
   onAddChild, onDeleteChild, onChangeChild,
   onMoveChildUp, onMoveChildDown,
   disabled,
+  isPendingGroup,
   // DnD props from OrchBuilder
   isDragOver,
   dragOverPos,   // 'top' | 'bottom'
@@ -96,6 +97,10 @@ export default function StepCard({
   ) : null
 
   return (
+    <>
+    {isPendingGroup && (
+      <style>{`@keyframes stepcard-pulse { 0%,100% { box-shadow: 0 0 0 2px rgba(251,191,36,.55); } 50% { box-shadow: 0 0 0 4px rgba(251,191,36,.9); } }`}</style>
+    )}
     <div
       draggable={!disabled}
       onDragStart={e => {
@@ -109,13 +114,16 @@ export default function StepCard({
       onDrop={e => { e.preventDefault(); onDrop(e, step.id) }}
       style={{
         position: 'relative',
-        border: `1px solid ${isGroup ? 'rgba(99,102,241,.35)' : 'var(--border)'}`,
+        border: isPendingGroup
+          ? '1px solid rgba(251,191,36,.8)'
+          : `1px solid ${isGroup ? 'rgba(99,102,241,.35)' : 'var(--border)'}`,
         borderRadius: 10,
         background: isGroup ? 'rgba(99,102,241,.04)' : 'var(--bg2)',
         marginBottom: 8,
         opacity: dragging ? 0.35 : 1,
-        transition: 'opacity .15s',
+        transition: 'opacity .15s, border-color .15s, box-shadow .15s',
         cursor: disabled ? 'default' : 'grab',
+        animation: isPendingGroup ? 'stepcard-pulse 1.4s ease-in-out infinite' : 'none',
       }}
     >
       {dropLine}
@@ -279,5 +287,6 @@ export default function StepCard({
         </div>
       )}
     </div>
+    </>
   )
 }
