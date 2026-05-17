@@ -7,17 +7,8 @@ import GlobalResumen from './components/Resumen/GlobalResumen'
 import LoginModal from './components/Connections/LoginModal'
 import { getAll } from './services/connectionStorage'
 import { loadAllSessions, setSession, clearSession } from './services/sessionStorage'
+import { useIsMobile } from './hooks/useIsMobile'
 import './App.css'
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 640)
-  useEffect(() => {
-    const fn = () => setIsMobile(window.innerWidth <= 640)
-    window.addEventListener('resize', fn)
-    return () => window.removeEventListener('resize', fn)
-  }, [])
-  return isMobile
-}
 
 export default function App() {
   const [connections, setConnections] = useState(() => getAll())

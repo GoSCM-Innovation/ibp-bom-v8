@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import StepsPanel from './StepsPanel'
@@ -53,7 +54,10 @@ function encodeODataString(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
+const MOBILE_COL_KEYS = ['JobStatus', 'JobText', 'JobPlannedStartDateTime']
+
 export default function JobMonitor({ connection, session }) {
+  const isMobile = useIsMobile()
   const [statuses, setStatuses]       = useState([])
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
@@ -224,7 +228,8 @@ export default function JobMonitor({ connection, session }) {
     { key: 'Periodic',                 label: 'Periódico',                     w: 90,  render: v => v ? '✓' : '—' },
   ], [statuses, tzMode, tzSuffix])
 
-  const COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
+  const ALL_COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
+  const COLS = isMobile ? ALL_COLS.filter(c => MOBILE_COL_KEYS.includes(c.key)) : ALL_COLS
 
   function onResizeStart(col, e) {
     e.preventDefault(); e.stopPropagation()
@@ -248,34 +253,45 @@ export default function JobMonitor({ connection, session }) {
   const isRestartable = selectedRow && RESTARTABLE_STATUSES.includes(selectedRow.JobStatus)
 
   return (
-    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
+    <div style={{ padding: isMobile ? 14 : 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
       <ProgressBar loading={loading || cancelling || restarting} />
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexShrink: 0, gap: 12, flexWrap: 'wrap' }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        justifyContent: 'space-between',
+        marginBottom: 16, flexShrink: 0, gap: 12, flexWrap: 'wrap',
+      }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Job Monitor</div>
           <div style={{ fontSize: 11, color: 'var(--text2)' }}>
             {loading ? 'Cargando…' : `${filtered.length} de ${rows.length} registros`}
             {lastRefresh && !loading && (
-              <span style={{ marginLeft: 8, opacity: .6 }}>· Actualizado {lastRefresh.toLocaleTimeString()}</span>
+              <span style={{ marginLeft: 8, opacity: .6 }}>· {lastRefresh.toLocaleTimeString()}</span>
             )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <TzToggle mode={tzMode} onToggle={handleTzToggle} />
-          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
-          <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
-          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
-          <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, width: 180 }} />
+          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
+          {!isMobile && <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>}
+          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
+          <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)}
+            style={{ ...inputStyle, width: isMobile ? '100%' : 180, ...(isMobile && { flexBasis: '100%' }) }} />
           <button onClick={loadJobs} disabled={loading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
           }}>↺ Refresh</button>
-          <span style={{
-            fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
-            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-          }}>🔄 Auto-refresh cada {REFRESH_MS / 1000}s</span>
+          {!isMobile && (
+            <span style={{
+              fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
+              padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
+            }}>🔄 Auto-refresh cada {REFRESH_MS / 1000}s</span>
+          )}
         </div>
       </div>
 
@@ -364,7 +380,7 @@ export default function JobMonitor({ connection, session }) {
       {/* Action bar — aparece al seleccionar una fila */}
       {selectedRow && (
         <div style={{
-          marginTop: 12, padding: '12px 16px', flexShrink: 0,
+          marginTop: 12, padding: isMobile ? '10px 12px' : '12px 16px', flexShrink: 0,
           background: 'var(--bg2)', border: '1px solid var(--border2)',
           borderRadius: 8, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
         }}>
@@ -372,9 +388,11 @@ export default function JobMonitor({ connection, session }) {
             <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>Job seleccionado</div>
             <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {selectedRow.JobText || selectedRow.JobName}
-              <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
-                {selectedRow.JobName} · {selectedRow.JobRunCount}
-              </span>
+              {!isMobile && (
+                <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
+                  {selectedRow.JobName} · {selectedRow.JobRunCount}
+                </span>
+              )}
             </div>
           </div>
 
@@ -383,7 +401,7 @@ export default function JobMonitor({ connection, session }) {
           {restartMsg === 'ok' && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job reiniciado</span>}
           {restartMsg && restartMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {restartMsg}</span>}
 
-          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', ...(isMobile && { width: '100%' }) }}>
             <button
               onClick={() => setStepsJob(selectedRow)}
               title="Ver los pasos de ejecución de este job"

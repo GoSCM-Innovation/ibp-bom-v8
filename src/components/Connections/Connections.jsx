@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import ConnectionForm from './ConnectionForm'
 import ConnectionAvatar from './ConnectionAvatar'
 import { remove } from '../../services/connectionStorage'
 import { getSapSystemUrl } from '../../utils/sapUrl'
 
 export default function Connections({ connections, onSaved, onDeleted, onSelect }) {
+  const isMobile = useIsMobile()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
 
@@ -31,9 +33,9 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
   }
 
   return (
-    <div style={{ padding: 28, maxWidth: 900 }}>
+    <div style={{ padding: isMobile ? 14 : 28, maxWidth: 900 }}>
       {/* Title */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 12 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Conexiones</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 3 }}>
@@ -86,8 +88,8 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
         {connections.map((conn) => (
           <div key={conn.id} style={{
             background: 'var(--bg2)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '16px 20px',
-            display: 'flex', alignItems: 'center', gap: 16,
+            borderRadius: 10, padding: isMobile ? '12px 14px' : '16px 20px',
+            display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
           }}>
 
             <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={40} />
@@ -113,14 +115,17 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect 
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <button onClick={() => onSelect(conn.id)} style={btnStyle('var(--cyan)')}>
+            <div style={{
+              display: 'flex', gap: 8, flexWrap: 'wrap',
+              ...(isMobile && { width: '100%' }),
+            }}>
+              <button onClick={() => onSelect(conn.id)} style={{ ...btnStyle('var(--cyan)'), ...(isMobile && { flex: 1 }) }}>
                 Abrir
               </button>
-              <button onClick={() => handleEdit(conn)} style={btnStyle('var(--text2)')}>
+              <button onClick={() => handleEdit(conn)} style={{ ...btnStyle('var(--text2)'), ...(isMobile && { flex: 1 }) }}>
                 Editar
               </button>
-              <button onClick={() => handleDelete(conn.id, conn.name)} style={btnStyle('var(--red)')}>
+              <button onClick={() => handleDelete(conn.id, conn.name)} style={{ ...btnStyle('var(--red)'), ...(isMobile && { flex: 1 }) }}>
                 Eliminar
               </button>
             </div>
