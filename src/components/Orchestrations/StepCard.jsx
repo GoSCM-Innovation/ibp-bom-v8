@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 const STRATEGIES = [
   { value: 'stop',     label: 'Detener si falla'    },
@@ -130,6 +131,7 @@ export default function StepCard({
 }) {
   const [groupExpanded, setGroupExpanded] = useState(true)
   const [dragging, setDragging] = useState(false)
+  const isMobile = useIsMobile()
 
   const isGroup = step.type === 'group'
   const children = step.children || []
@@ -159,9 +161,9 @@ export default function StepCard({
       <style>{`@keyframes stepcard-pulse { 0%,100% { box-shadow: 0 0 0 2px rgba(251,191,36,.55); } 50% { box-shadow: 0 0 0 4px rgba(251,191,36,.9); } }`}</style>
     )}
     <div
-      draggable={!disabled}
+      draggable={!disabled && !isMobile}
       onDragStart={e => {
-        if (disabled) return
+        if (disabled || isMobile) return
         setDragging(true)
         onDragStart(e, step.id)
       }}
@@ -179,7 +181,7 @@ export default function StepCard({
         marginBottom: 8,
         opacity: dragging ? 0.35 : 1,
         transition: 'opacity .15s, border-color .15s, box-shadow .15s',
-        cursor: disabled ? 'default' : 'grab',
+        cursor: (disabled || isMobile) ? 'default' : 'grab',
         animation: isPendingGroup ? 'stepcard-pulse 1.4s ease-in-out infinite' : 'none',
       }}
     >
@@ -187,18 +189,20 @@ export default function StepCard({
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px' }}>
-        {/* Drag handle */}
-        <div
-          title={disabled ? undefined : 'Arrastrar para reordenar'}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            width: 18, flexShrink: 0, alignSelf: 'stretch',
-            color: 'var(--text3)', opacity: disabled ? 0.2 : 0.45,
-            fontSize: 14, userSelect: 'none',
-          }}
-        >
-          ⠿
-        </div>
+        {/* Drag handle — desktop only */}
+        {!isMobile && (
+          <div
+            title={disabled ? undefined : 'Arrastrar para reordenar'}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 18, flexShrink: 0, alignSelf: 'stretch',
+              color: 'var(--text3)', opacity: disabled ? 0.2 : 0.45,
+              fontSize: 14, userSelect: 'none',
+            }}
+          >
+            ⠿
+          </div>
+        )}
 
         {/* Index badge */}
         <div style={{
