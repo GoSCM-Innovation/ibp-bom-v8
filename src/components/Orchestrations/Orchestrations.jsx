@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { loadOrchs, saveOrchs, createOrch, updateOrch, deleteOrch, exportOrchs, importOrchs } from './useOrchStorage'
 import { useOrchRun } from './useOrchRun'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import OrchBuilder from './OrchBuilder'
 import RunView from './RunView'
 
@@ -23,7 +24,12 @@ export default function Orchestrations({ connection, session }) {
   const [replaceMode, setReplaceMode]   = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [fullscreen, setFullscreen]     = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newOrchName, setNewOrchName]         = useState('')
+  const [deleteTargetId, setDeleteTargetId]   = useState(null)
+  const [mobileView, setMobileView]           = useState('list') // 'list' | 'builder'
   const fileRef = useRef(null)
+  const isMobile = useIsMobile()
 
   const { run, isRunning, start, cancel, reset } = useOrchRun(connection, session)
 
@@ -33,13 +39,17 @@ export default function Orchestrations({ connection, session }) {
     setOrchs(loadOrchs(connId))
     setSelectedId(null)
     setMode('build')
+    setMobileView('list')
     setFullscreen(false)
     reset()
   }, [connId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Exit fullscreen if selection cleared
+  // Exit fullscreen + go back to list if selection cleared
   useEffect(() => {
-    if (!selectedId) setFullscreen(false)
+    if (!selectedId) {
+      setFullscreen(false)
+      setMobileView('list')
+    }
   }, [selectedId])
 
   function persistAndUpdate(newOrch) {
@@ -48,20 +58,33 @@ export default function Orchestrations({ connection, session }) {
   }
 
   function handleCreate() {
-    const name = prompt('Nombre de la nueva orquestación:')?.trim()
+    setNewOrchName('')
+    setShowCreateModal(true)
+  }
+
+  function confirmCreate() {
+    const name = newOrchName.trim()
     if (!name) return
     const orch = createOrch(connId, name)
     setOrchs(loadOrchs(connId))
     setSelectedId(orch.id)
     setMode('build')
+    setMobileView('builder')
     reset()
+    setShowCreateModal(false)
+    setNewOrchName('')
   }
 
   function handleDelete(id) {
-    if (!confirm('¿Eliminar esta orquestación? Esta acción no se puede deshacer.')) return
+    setDeleteTargetId(id)
+  }
+
+  function confirmDelete() {
+    const id = deleteTargetId
+    setDeleteTargetId(null)
     deleteOrch(connId, id)
     setOrchs(loadOrchs(connId))
-    if (selectedId === id) { setSelectedId(null); setMode('build'); reset() }
+    if (selectedId === id) { setSelectedId(null); setMode('build'); setMobileView('list'); reset() }
   }
 
   function handleRun() {
@@ -143,10 +166,10 @@ export default function Orchestrations({ connection, session }) {
         {/* ── Left sidebar ── */}
         <div
           style={{
-            width: sidebarCollapsed ? 36 : 240,
+            width: isMobile ? '100%' : (sidebarCollapsed ? 36 : 240),
             flexShrink: 0,
-            borderRight: '1px solid var(--border)',
-            display: 'flex',
+            borderRight: isMobile ? 'none' : '1px solid var(--border)',
+            display: isMobile && mobileView === 'builder' ? 'none' : 'flex',
             flexDirection: 'column',
             background: 'var(--bg2)',
             transition: 'width .2s ease',
@@ -222,6 +245,7 @@ export default function Orchestrations({ connection, session }) {
                         if (isRunning) return
                         setSelectedId(orch.id)
                         setMode('build')
+                        setMobileView('builder')
                         if (selectedId !== orch.id) reset()
                       }}
                       style={{
@@ -338,6 +362,7 @@ export default function Orchestrations({ connection, session }) {
                       if (isRunning) return
                       setSelectedId(orch.id)
                       setMode('build')
+                      setMobileView('builder')
                       if (selectedId !== orch.id) reset()
                     }}
                     title={orch.name}
@@ -368,7 +393,34 @@ export default function Orchestrations({ connection, session }) {
         </div>
 
         {/* ── Right panel ── */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{
+          flex: 1, overflow: 'hidden',
+          display: isMobile && mobileView === 'list' ? 'none' : 'flex',
+          flexDirection: 'column',
+        }}>
+          {/* Mobile back bar */}
+          {isMobile && (
+            <div style={{
+              padding: '8px 12px', background: 'var(--bg2)',
+              borderBottom: '1px solid var(--border)', flexShrink: 0,
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <button
+                onClick={() => setMobileView('list')}
+                style={{
+                  background: 'none', border: '1px solid var(--border)',
+                  borderRadius: 6, color: 'var(--text2)', fontSize: 12,
+                  padding: '5px 12px', cursor: 'pointer',
+                }}
+              >← Volver</button>
+              {selected && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selected.name}
+                </span>
+              )}
+            </div>
+          )}
+
           {!selectedId && (
             <div style={{
               flex: 1, display: 'flex', flexDirection: 'column',
@@ -478,10 +530,107 @@ export default function Orchestrations({ connection, session }) {
 
       <input ref={fileRef} type="file" accept=".json" onChange={handleFileChange} style={{ display: 'none' }} />
 
+      {/* ── Create modal ── */}
+      {showCreateModal && (
+        <>
+          <div
+            onClick={() => setShowCreateModal(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 500, backdropFilter: 'blur(2px)' }}
+          />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: 'min(400px, 92vw)',
+            background: 'var(--bg2)', border: '1px solid var(--border2)',
+            borderRadius: 12, zIndex: 501, padding: 24,
+            boxShadow: '0 24px 64px rgba(0,0,0,.5)',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 16 }}>
+              Nueva orquestación
+            </div>
+            <input
+              autoFocus
+              value={newOrchName}
+              onChange={e => setNewOrchName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') confirmCreate(); if (e.key === 'Escape') setShowCreateModal(false) }}
+              placeholder="Nombre de la orquestación…"
+              style={{
+                width: '100%', background: 'var(--bg)', border: '1px solid var(--border2)',
+                borderRadius: 7, color: '#fff', fontSize: 13, fontWeight: 500,
+                padding: '9px 12px', outline: 'none', marginBottom: 18,
+              }}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border2)'}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                style={{
+                  padding: '7px 16px', borderRadius: 6,
+                  border: '1px solid var(--border)', background: 'transparent',
+                  color: 'var(--text2)', fontSize: 12, cursor: 'pointer',
+                }}
+              >Cancelar</button>
+              <button
+                onClick={confirmCreate}
+                disabled={!newOrchName.trim()}
+                style={{
+                  padding: '7px 18px', borderRadius: 6,
+                  border: '1px solid rgba(34,197,94,.4)',
+                  background: newOrchName.trim() ? 'rgba(34,197,94,.12)' : 'transparent',
+                  color: newOrchName.trim() ? '#22c55e' : 'var(--text3)',
+                  fontSize: 12, fontWeight: 700,
+                  cursor: newOrchName.trim() ? 'pointer' : 'default',
+                }}
+              >Crear</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Delete confirm modal ── */}
+      {deleteTargetId && (
+        <>
+          <div
+            onClick={() => setDeleteTargetId(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 500, backdropFilter: 'blur(2px)' }}
+          />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: 'min(380px, 92vw)',
+            background: 'var(--bg2)', border: '1px solid var(--border2)',
+            borderRadius: 12, zIndex: 501, padding: 24,
+            boxShadow: '0 24px 64px rgba(0,0,0,.5)',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Eliminar orquestación</div>
+            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 20 }}>
+              Esta acción no se puede deshacer. ¿Confirmas?
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setDeleteTargetId(null)}
+                style={{
+                  padding: '7px 16px', borderRadius: 6,
+                  border: '1px solid var(--border)', background: 'transparent',
+                  color: 'var(--text2)', fontSize: 12, cursor: 'pointer',
+                }}
+              >Cancelar</button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  padding: '7px 18px', borderRadius: 6,
+                  border: '1px solid rgba(255,107,107,.4)',
+                  background: 'rgba(255,107,107,.12)',
+                  color: 'var(--red)', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                }}
+              >Eliminar</button>
+            </div>
+          </div>
+        </>
+      )}
+
       <style>{`
-        @media (max-width: 640px) {
-          .orch-sidebar { width: 100% !important; max-width: 100%; border-right: none !important; }
-        }
         @keyframes orchRunPulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50%       { opacity: 0.45; transform: scale(0.75); }
