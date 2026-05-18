@@ -36,6 +36,8 @@ const CANCELABLE_STATUSES = ['P', 'R', 'S', 'Y']
 
 // A=Failed, U=User Error, C=Canceled, W=Finished w/Warning, F=Finished
 const RESTARTABLE_STATUSES = ['A', 'U', 'C', 'W', 'F']
+const ERROR_STATUSES        = ['A', 'U', 'C']   // detuvo en paso fallido
+const FINISHED_STATUSES     = ['F', 'W']        // completó todos los pasos
 
 const RESTART_MODES = [
   {
@@ -482,51 +484,100 @@ export default function JobMonitor({ connection, session }) {
         />
       )}
 
-      {restartModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500,
-        }}>
+      {restartModal && selectedRow && (() => {
+        const isError    = ERROR_STATUSES.includes(selectedRow.JobStatus)
+        const isFinished = FINISHED_STATUSES.includes(selectedRow.JobStatus)
+        const jobLabel   = selectedRow.JobText || selectedRow.JobName
+        return (
           <div style={{
-            background: 'var(--bg2)', border: '1px solid var(--border2)',
-            borderRadius: 12, padding: 28, width: 'min(440px, 92vw)', boxShadow: '0 16px 48px rgba(0,0,0,.6)',
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500,
           }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>↺ Reiniciar job</div>
-            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 20 }}>
-              Selecciona el modo de reinicio para <strong style={{ color: 'var(--text)' }}>{selectedRow.JobText || selectedRow.JobName}</strong>
-            </div>
+            <div style={{
+              background: 'var(--bg2)', border: '1px solid var(--border2)',
+              borderRadius: 12, padding: 28, width: 'min(440px, 92vw)', boxShadow: '0 16px 48px rgba(0,0,0,.6)',
+            }}>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-              {RESTART_MODES.map(m => (
-                <button
-                  key={m.value}
-                  onClick={() => handleRestart(m.value)}
-                  style={{
-                    textAlign: 'left', padding: '12px 16px', borderRadius: 8,
-                    border: '1px solid var(--border2)', background: 'var(--bg3)',
-                    color: 'var(--text)', cursor: 'pointer', transition: 'all .15s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--cyan)'; e.currentTarget.style.background = 'rgba(6,182,212,.08)' }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.background = 'var(--bg3)' }}
-                >
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>
-                    Modo {m.value} — {m.label}
+              {/* ── Job fallido / cancelado → selector de modo ── */}
+              {isError && (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                    ↺ Reiniciar job con error
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>{m.desc}</div>
-                </button>
-              ))}
-            </div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 20 }}>
+                    Selecciona desde qué punto reanudar{' '}
+                    <strong style={{ color: 'var(--text)' }}>{jobLabel}</strong>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+                    {RESTART_MODES.map(m => (
+                      <button
+                        key={m.value}
+                        onClick={() => handleRestart(m.value)}
+                        style={{
+                          textAlign: 'left', padding: '12px 16px', borderRadius: 8,
+                          border: '1px solid var(--border2)', background: 'var(--bg3)',
+                          color: 'var(--text)', cursor: 'pointer', transition: 'all .15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--cyan)'; e.currentTarget.style.background = 'rgba(6,182,212,.08)' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.background = 'var(--bg3)' }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>
+                          Modo {m.value} — {m.label}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>{m.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
 
-            <button
-              onClick={() => setRestartModal(false)}
-              style={{
-                width: '100%', padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
-              }}
-            >Cancelar</button>
+              {/* ── Job finalizado correctamente → re-ejecución directa ── */}
+              {isFinished && (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                    ↺ Volver a ejecutar
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>
+                    <strong style={{ color: 'var(--text)' }}>{jobLabel}</strong>
+                  </div>
+                  <div style={{
+                    background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.25)',
+                    borderRadius: 8, padding: '10px 14px', marginBottom: 20,
+                  }}>
+                    <div style={{ fontSize: 11, color: '#86efac', lineHeight: 1.6 }}>
+                      Este job <strong>finalizó correctamente</strong>
+                      {selectedRow.JobStatus === 'W' ? ' (con advertencias)' : ''}
+                      {'. '}
+                      No hay pasos fallidos — se ejecutará nuevamente desde el inicio.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRestart('A')}
+                    style={{
+                      width: '100%', padding: '10px', borderRadius: 8, marginBottom: 10,
+                      border: '1px solid rgba(6,182,212,.4)', background: 'rgba(6,182,212,.1)',
+                      color: 'var(--cyan)', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                      transition: 'all .15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(6,182,212,.18)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(6,182,212,.1)' }}
+                  >
+                    ↺ Ejecutar nuevamente
+                  </button>
+                </>
+              )}
+
+              <button
+                onClick={() => setRestartModal(false)}
+                style={{
+                  width: '100%', padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
+                }}
+              >Cancelar</button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
