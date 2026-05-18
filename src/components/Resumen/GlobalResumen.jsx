@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
 import {
@@ -30,6 +31,7 @@ const STATUS_LABELS = {
 const CONN_COLORS = ['#3b82f6', '#34d399', '#f97316', '#8b5cf6', '#06b6d4', '#ff6b6b', '#fbbf24', '#a78bfa']
 
 export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
+  const isMobile = useIsMobile()
   const [connData, setConnData] = useState({}) // { connId: { rows, error, loading } }
   const [lastRefresh, setLastRefresh] = useState(null)
   const [tzMode, setTzModeState]      = useState(() => getTzMode())
@@ -176,33 +178,43 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
   }
 
   return (
-    <div style={{ padding: 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
+    <div style={{ padding: isMobile ? 14 : 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
       <ProgressBar loading={anyLoading || globalLoading} />
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        justifyContent: 'space-between',
+        marginBottom: 24, flexWrap: 'wrap', gap: 12,
+      }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Resumen Global</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-            {connections.length} conexion{connections.length !== 1 ? 'es' : ''} · {gTotal} jobs totales
+            {connections.length} conexion{connections.length !== 1 ? 'es' : ''} · {gTotal} jobs
             {lastRefresh && (
-              <span style={{ marginLeft: 8, opacity: .6 }}>· Actualizado {lastRefresh.toLocaleTimeString()}</span>
+              <span style={{ marginLeft: 8, opacity: .6 }}>· {lastRefresh.toLocaleTimeString()}</span>
             )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <TzToggle mode={tzMode} onToggle={handleTzToggle} />
-          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
-          <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
-          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
+          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
+          {!isMobile && <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>}
+          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
           <button onClick={loadAll} disabled={anyLoading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
           }}>↺ Refresh</button>
-          <span style={{
-            fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
-            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-          }}>Auto-refresh cada 5 min</span>
+          {!isMobile && (
+            <span style={{
+              fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
+              padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
+            }}>Auto-refresh cada 5 min</span>
+          )}
         </div>
       </div>
 

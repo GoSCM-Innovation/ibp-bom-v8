@@ -7,17 +7,8 @@ import GlobalResumen from './components/Resumen/GlobalResumen'
 import LoginModal from './components/Connections/LoginModal'
 import { getAll } from './services/connectionStorage'
 import { loadAllSessions, setSession, clearSession } from './services/sessionStorage'
+import { useIsMobile } from './hooks/useIsMobile'
 import './App.css'
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 640)
-  useEffect(() => {
-    const fn = () => setIsMobile(window.innerWidth <= 640)
-    window.addEventListener('resize', fn)
-    return () => window.removeEventListener('resize', fn)
-  }, [])
-  return isMobile
-}
 
 export default function App() {
   const [connections, setConnections] = useState(() => getAll())
@@ -44,8 +35,9 @@ export default function App() {
   }
 
   function sessionIsComplete(conn, session) {
-    const needed = ['com0326', 'com0068'].filter(k => conn[k]?.url)
-    return needed.length > 0 && needed.every(k => session?.[k]?.password)
+    const needed = ['com0326', 'com0068', 'com0924'].filter(k => conn[k]?.url)
+    if (needed.length === 0) return true
+    return needed.every(k => session?.[k]?.password)
   }
 
   function handleSelect(id) {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
@@ -6,10 +7,12 @@ import ScheduleModal from './ScheduleModal'
 
 const JOB_PATH    = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
+const DEFAULT_COL_WIDTHS = { JobTemplateName: 240, JobTemplateText: 480 }
 
 const TD = { padding: '6px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
 
 export default function Jobs({ connection, session }) {
+  const isMobile = useIsMobile()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -58,7 +61,7 @@ export default function Jobs({ connection, session }) {
 
   function onResizeStart(col, e) {
     e.preventDefault(); e.stopPropagation()
-    const startX = e.clientX, startW = colWidths[col] || 260
+    const startX = e.clientX, startW = colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240
     resizing.current = { col, startX, startW }
     function onMove(e) {
       if (!resizing.current) return
@@ -75,14 +78,14 @@ export default function Jobs({ connection, session }) {
   }
 
   if (loading) return (
-    <div style={{ padding: 28, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
+    <div style={{ padding: isMobile ? 14 : 28, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
       <ProgressBar loading />
       Cargando job templates de {connection.name}…
     </div>
   )
 
   if (error) return (
-    <div style={{ padding: 28 }}>
+    <div style={{ padding: isMobile ? 14 : 28 }}>
       <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 12 }}>Job Templates</div>
       <div style={{
         background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)',
@@ -92,13 +95,19 @@ export default function Jobs({ connection, session }) {
   )
 
   return (
-    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
+    <div style={{ padding: isMobile ? 14 : 28, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', boxSizing: 'border-box' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexShrink: 0 }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        justifyContent: 'space-between',
+        marginBottom: 16, flexShrink: 0, gap: isMobile ? 8 : 0,
+      }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Job Templates</div>
           <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-            {sorted.length}{search ? ` de ${rows.length}` : ''} registros · {connection.name}
+            {sorted.length}{search ? ` de ${rows.length}` : ''} registros
           </div>
         </div>
         <input
@@ -109,7 +118,7 @@ export default function Jobs({ connection, session }) {
           style={{
             background: 'var(--bg2)', border: '1px solid var(--border)',
             borderRadius: 6, color: 'var(--text)', fontSize: 12,
-            padding: '6px 12px', width: 240, outline: 'none',
+            padding: '6px 12px', width: isMobile ? '100%' : 240, outline: 'none',
           }}
         />
       </div>
@@ -117,12 +126,17 @@ export default function Jobs({ connection, session }) {
       {rows.length === 0 ? (
         <div style={{ fontSize: 13, color: 'var(--text2)' }}>Sin resultados</div>
       ) : (
-        <div style={{ overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
-          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%', fontSize: 12 }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
+          <table style={{
+            borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12,
+            // Suma de columnas + acción: fuerza que tableLayout:fixed respete los anchos
+            width: VISIBLE_COLS.reduce((s, c) => s + (colWidths[c] || DEFAULT_COL_WIDTHS[c] || 240), 110),
+            minWidth: '100%',
+          }}>
             <thead>
               <tr style={{ background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1 }}>
                 {VISIBLE_COLS.map(col => {
-                  const w = colWidths[col] || 260
+                  const w = colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240
                   return (
                     <th
                       key={col}
@@ -171,7 +185,7 @@ export default function Jobs({ connection, session }) {
                         padding: '7px 12px', color: 'var(--text)',
                         borderBottom: '1px solid var(--border)',
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        maxWidth: colWidths[col] || 260,
+                        maxWidth: colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240,
                       }}
                       title={String(row[col] ?? '')}
                     >

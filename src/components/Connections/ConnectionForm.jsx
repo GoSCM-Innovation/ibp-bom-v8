@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { upsert } from '../../services/connectionStorage'
 
 const AMBIENTES = [
@@ -8,6 +9,7 @@ const AMBIENTES = [
 ]
 
 export default function ConnectionForm({ initial, onSaved, onCancel }) {
+  const isMobile = useIsMobile()
   const [form, setForm] = useState({
     name:     initial?.name ? initial.name.replace(/ \((Calidad|Producción)\)$/, '') : '',
     ambiente: initial?.ambiente || '',
@@ -20,6 +22,10 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     com0068: {
       url:  initial?.com0068?.url  || '',
       user: initial?.com0068?.user || '',
+    },
+    com0924: {
+      url:  initial?.com0924?.url  || '',
+      user: initial?.com0924?.user || '',
     },
   })
   const [error, setError] = useState('')
@@ -39,10 +45,12 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     if (!form.name)    { setError('El nombre es obligatorio'); return }
     if (!form.ambiente) { setError('Selecciona un ambiente'); return }
 
-    const err326 = validateAgreement(form.com0326, 'SAP_COM_0326')
-    const err068 = validateAgreement(form.com0068, 'SAP_COM_0068')
-    if (err326) { setError(err326); return }
-    if (err068) { setError(err068); return }
+    const err326      = validateAgreement(form.com0326,     'SAP_COM_0326')
+    const err068      = validateAgreement(form.com0068,     'SAP_COM_0068')
+    const errMetering = validateAgreement(form.com0924, 'SAP_COM_0924')
+    if (err326)      { setError(err326);      return }
+    if (err068)      { setError(err068);      return }
+    if (errMetering) { setError(errMetering); return }
 
     const conn = {
       ...(initial ? { ...initial } : {}),
@@ -52,8 +60,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       logoUrl:  form.logoUrl,
     }
 
-    const has326 = form.com0326.url || form.com0326.user
-    const has068 = form.com0068.url || form.com0068.user
+    const has326      = form.com0326.url     || form.com0326.user
+    const has068      = form.com0068.url     || form.com0068.user
+    const hasMetering = form.com0924.url || form.com0924.user
 
     if (has326) {
       conn.com0326 = { url: form.com0326.url.replace(/\/$/, ''), user: form.com0326.user }
@@ -67,6 +76,12 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       delete conn.com0068
     }
 
+    if (hasMetering) {
+      conn.com0924 = { url: form.com0924.url.replace(/\/$/, ''), user: form.com0924.user }
+    } else {
+      delete conn.com0924
+    }
+
     upsert(conn)
     onSaved()
   }
@@ -78,7 +93,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       </div>
 
       {/* General */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14, marginBottom: 24 }}>
         <Field label="Nombre conexión" value={form.name} onChange={v => setGeneral('name', v)} placeholder="ej: IBP Cliente ABC" />
         <SelectField label="Ambiente" value={form.ambiente} onChange={v => setGeneral('ambiente', v)} options={AMBIENTES} />
         <Field label="Usuario de negocio (JobUser, opcional)" value={form.jobUser} onChange={v => setGeneral('jobUser', v)} placeholder="EXT_USUARIO" mono />
@@ -91,6 +106,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         subtitle="Resumen · Job Templates · Job Monitor"
         values={form.com0326}
         onChange={(k, v) => setAgreement('com0326', k, v)}
+        isMobile={isMobile}
       />
 
       {/* SAP_COM_0068 */}
@@ -99,6 +115,17 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         subtitle="Resource Stats"
         values={form.com0068}
         onChange={(k, v) => setAgreement('com0068', k, v)}
+        isMobile={isMobile}
+      />
+
+      {/* SAP_COM_0924 */}
+      <AgreementSection
+        title="SAP_COM_0924 — Metering Activity"
+        subtitle="Telemetría · Adopción · Excel Add-In · Dashboards (opcional)"
+        values={form.com0924}
+        onChange={(k, v) => setAgreement('com0924', k, v)}
+        urlPlaceholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata4/ibp/api_meteringactivity/srvd_a2x/ibp/api_meteringactivity/0001"
+        isMobile={isMobile}
       />
 
       <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text2)' }}>
@@ -126,7 +153,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
   )
 }
 
-function AgreementSection({ title, subtitle, values, onChange }) {
+function AgreementSection({ title, subtitle, values, onChange, urlPlaceholder, isMobile }) {
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ marginBottom: 10 }}>
@@ -135,8 +162,8 @@ function AgreementSection({ title, subtitle, values, onChange }) {
         </div>
         <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{subtitle}</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Field label="URL API" value={values.url} onChange={v => onChange('url', v)} placeholder="https://tenant-api.scmibp.ondemand.com/..." mono />
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
+        <Field label="URL API" value={values.url} onChange={v => onChange('url', v)} placeholder={urlPlaceholder || 'https://tenant-api.scmibp.ondemand.com/...'} mono />
         <Field label="Usuario de comunicación" value={values.user} onChange={v => onChange('user', v)} placeholder="COM_USER" mono />
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
 import {
@@ -23,6 +24,7 @@ const STATUS_COLORS = {
 }
 
 export default function Resumen({ connection, session }) {
+  const isMobile = useIsMobile()
   const [rows, setRows]           = useState([])
   const [statuses, setStatuses]   = useState([])
   const [loading, setLoading]     = useState(true)
@@ -170,47 +172,57 @@ export default function Resumen({ connection, session }) {
     .slice(0,5)
 
   if (error) return (
-    <div style={{ padding: 32 }}>
+    <div style={{ padding: isMobile ? 16 : 32 }}>
       <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>
       <TechLogs logs={logs} />
     </div>
   )
 
   if (loading && rows.length === 0) return (
-    <div style={{ padding: 32, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
+    <div style={{ padding: isMobile ? 16 : 32, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
       <ProgressBar loading />
       Cargando resumen de {connection.name}…
     </div>
   )
 
   return (
-    <div style={{ padding: 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
+    <div style={{ padding: isMobile ? 14 : 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
       <ProgressBar loading={loading} />
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        justifyContent: 'space-between',
+        marginBottom: 24, flexWrap: 'wrap', gap: 12,
+      }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Resumen</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-            {connection.name} · {total} jobs en el período
+            {total} jobs en el período
             {lastRefresh && !loading && (
-              <span style={{ marginLeft: 8, opacity: .6 }}>· Actualizado {lastRefresh.toLocaleTimeString()}</span>
+              <span style={{ marginLeft: 8, opacity: .6 }}>· {lastRefresh.toLocaleTimeString()}</span>
             )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <TzToggle mode={tzMode} onToggle={handleTzToggle} />
-          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
-          <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
-          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
+          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
+          {!isMobile && <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>}
+          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
           <button onClick={loadData} disabled={loading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
           }}>↺ Refresh</button>
-          <span style={{
-            fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
-            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-          }}>Auto-refresh cada 5 min</span>
+          {!isMobile && (
+            <span style={{
+              fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
+              padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
+            }}>Auto-refresh cada 5 min</span>
+          )}
         </div>
       </div>
 

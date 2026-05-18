@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import StepsPanel from './StepsPanel'
@@ -35,6 +36,8 @@ const CANCELABLE_STATUSES = ['P', 'R', 'S', 'Y']
 
 // A=Failed, U=User Error, C=Canceled, W=Finished w/Warning, F=Finished
 const RESTARTABLE_STATUSES = ['A', 'U', 'C', 'W', 'F']
+const ERROR_STATUSES        = ['A', 'U', 'C']   // detuvo en paso fallido
+const FINISHED_STATUSES     = ['F', 'W']        // completó todos los pasos
 
 const RESTART_MODES = [
   {
@@ -53,7 +56,10 @@ function encodeODataString(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
 
+const MOBILE_COL_KEYS = ['JobStatus', 'JobText', 'JobPlannedStartDateTime']
+
 export default function JobMonitor({ connection, session }) {
+  const isMobile = useIsMobile()
   const [statuses, setStatuses]       = useState([])
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
@@ -224,7 +230,8 @@ export default function JobMonitor({ connection, session }) {
     { key: 'Periodic',                 label: 'Periódico',                     w: 90,  render: v => v ? '✓' : '—' },
   ], [statuses, tzMode, tzSuffix])
 
-  const COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
+  const ALL_COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
+  const COLS = isMobile ? ALL_COLS.filter(c => MOBILE_COL_KEYS.includes(c.key)) : ALL_COLS
 
   function onResizeStart(col, e) {
     e.preventDefault(); e.stopPropagation()
@@ -248,34 +255,45 @@ export default function JobMonitor({ connection, session }) {
   const isRestartable = selectedRow && RESTARTABLE_STATUSES.includes(selectedRow.JobStatus)
 
   return (
-    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
+    <div style={{ padding: isMobile ? 14 : 28, display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
       <ProgressBar loading={loading || cancelling || restarting} />
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexShrink: 0, gap: 12, flexWrap: 'wrap' }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        justifyContent: 'space-between',
+        marginBottom: 16, flexShrink: 0, gap: 12, flexWrap: 'wrap',
+      }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Job Monitor</div>
           <div style={{ fontSize: 11, color: 'var(--text2)' }}>
             {loading ? 'Cargando…' : `${filtered.length} de ${rows.length} registros`}
             {lastRefresh && !loading && (
-              <span style={{ marginLeft: 8, opacity: .6 }}>· Actualizado {lastRefresh.toLocaleTimeString()}</span>
+              <span style={{ marginLeft: 8, opacity: .6 }}>· {lastRefresh.toLocaleTimeString()}</span>
             )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <TzToggle mode={tzMode} onToggle={handleTzToggle} />
-          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)} style={inputStyle} />
-          <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>
-          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)} style={inputStyle} />
-          <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, width: 180 }} />
+          <input type="datetime-local" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
+          {!isMobile && <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>}
+          <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)}
+            style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
+          <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)}
+            style={{ ...inputStyle, width: isMobile ? '100%' : 180, ...(isMobile && { flexBasis: '100%' }) }} />
           <button onClick={loadJobs} disabled={loading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
           }}>↺ Refresh</button>
-          <span style={{
-            fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
-            padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-          }}>🔄 Auto-refresh cada {REFRESH_MS / 1000}s</span>
+          {!isMobile && (
+            <span style={{
+              fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
+              padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
+            }}>🔄 Auto-refresh cada {REFRESH_MS / 1000}s</span>
+          )}
         </div>
       </div>
 
@@ -302,7 +320,10 @@ export default function JobMonitor({ connection, session }) {
 
       {/* Table */}
       {!error && (
-        <div style={{ overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
+        <div style={{
+          overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1,
+          ...(isMobile && selectedRow && { paddingBottom: 120 }),
+        }}>
           <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%', fontSize: 12 }}>
             <thead>
               <tr style={{ background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1 }}>
@@ -363,77 +384,89 @@ export default function JobMonitor({ connection, session }) {
 
       {/* Action bar — aparece al seleccionar una fila */}
       {selectedRow && (
-        <div style={{
+        <div style={isMobile ? {
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50,
+          padding: '12px 14px',
+          background: 'var(--bg2)', borderTop: '1px solid var(--border2)',
+          borderRadius: '12px 12px 0 0',
+          boxShadow: '0 -4px 24px rgba(0,0,0,.45)',
+        } : {
           marginTop: 12, padding: '12px 16px', flexShrink: 0,
           background: 'var(--bg2)', border: '1px solid var(--border2)',
           borderRadius: 8, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
         }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>Job seleccionado</div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {selectedRow.JobText || selectedRow.JobName}
-              <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
-                {selectedRow.JobName} · {selectedRow.JobRunCount}
-              </span>
-            </div>
-          </div>
 
-          {cancelMsg === 'ok'  && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job cancelado</span>}
-          {cancelMsg && cancelMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {cancelMsg}</span>}
-          {restartMsg === 'ok' && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job reiniciado</span>}
-          {restartMsg && restartMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {restartMsg}</span>}
-
-          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button
-              onClick={() => setStepsJob(selectedRow)}
-              title="Ver los pasos de ejecución de este job"
-              style={{
-                padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                border: '1px solid rgba(139,92,246,.4)',
-                background: 'rgba(139,92,246,.12)',
-                color: '#a78bfa', cursor: 'pointer',
-              }}
-            >
-              ▤ Ver pasos{selectedRow?.JobStepCount > 0 ? ` (${selectedRow.JobStepCount})` : ''}
-            </button>
-            <button
-              onClick={handleCancel}
-              disabled={!isCancelable || cancelling}
-              title={!isCancelable ? 'Solo se pueden cancelar jobs en ejecución' : 'Cancelar este job en SAP IBP'}
-              style={{
-                padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                border: '1px solid rgba(255,107,107,.4)',
-                background: isCancelable ? 'rgba(255,107,107,.12)' : 'transparent',
-                color: isCancelable ? 'var(--red)' : 'var(--text3)',
-                cursor: isCancelable ? 'pointer' : 'not-allowed',
-                opacity: cancelling ? .6 : 1,
-              }}
-            >
-              {cancelling ? 'Cancelando…' : '✕ Cancelar job'}
-            </button>
-            <button
-              onClick={() => setRestartModal(true)}
-              disabled={!isRestartable || restarting}
-              title={!isRestartable ? 'Solo se pueden reiniciar jobs finalizados o fallidos' : 'Reiniciar este job en SAP IBP'}
-              style={{
-                padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                border: '1px solid rgba(6,182,212,.4)',
-                background: isRestartable ? 'rgba(6,182,212,.12)' : 'transparent',
-                color: isRestartable ? 'var(--cyan)' : 'var(--text3)',
-                cursor: isRestartable ? 'pointer' : 'not-allowed',
-                opacity: restarting ? .6 : 1,
-              }}
-            >
-              {restarting ? 'Reiniciando…' : '↺ Reiniciar job'}
-            </button>
-            <button
-              onClick={() => { setSelectedRow(null); setCancelMsg(''); setRestartMsg('') }}
-              style={{
-                padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
-              }}
-            >Deseleccionar</button>
-          </div>
+          {/* Mobile layout */}
+          {isMobile ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 1 }}>Job seleccionado</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {selectedRow.JobText || selectedRow.JobName}
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setSelectedRow(null); setCancelMsg(''); setRestartMsg('') }}
+                  style={{ flexShrink: 0, marginLeft: 10, background: 'none', border: 'none', color: 'var(--text3)', fontSize: 18, cursor: 'pointer', lineHeight: 1, padding: '2px 6px' }}
+                >✕</button>
+              </div>
+              {(cancelMsg === 'ok' || restartMsg === 'ok') && (
+                <div style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600, marginBottom: 8 }}>
+                  ✓ {cancelMsg === 'ok' ? 'Job cancelado' : 'Job reiniciado'}
+                </div>
+              )}
+              {cancelMsg && cancelMsg !== 'ok' && <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 8 }}>✕ {cancelMsg}</div>}
+              {restartMsg && restartMsg !== 'ok' && <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 8 }}>✕ {restartMsg}</div>}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <button
+                  onClick={() => setStepsJob(selectedRow)}
+                  style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(139,92,246,.4)', background: 'rgba(139,92,246,.12)', color: '#a78bfa', cursor: 'pointer' }}
+                >▤ Ver pasos</button>
+                <button
+                  onClick={handleCancel}
+                  disabled={!isCancelable || cancelling}
+                  style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(255,107,107,.4)', background: isCancelable ? 'rgba(255,107,107,.12)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}
+                >{cancelling ? '…' : '✕ Cancelar'}</button>
+                <button
+                  onClick={() => setRestartModal(true)}
+                  disabled={!isRestartable || restarting}
+                  style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(6,182,212,.4)', background: isRestartable ? 'rgba(6,182,212,.12)' : 'transparent', color: isRestartable ? 'var(--cyan)' : 'var(--text3)', cursor: isRestartable ? 'pointer' : 'not-allowed', opacity: restarting ? .6 : 1 }}
+                >{restarting ? '…' : '↺ Reiniciar'}</button>
+              </div>
+            </>
+          ) : (
+            /* Desktop layout — igual que antes */
+            <>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>Job seleccionado</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {selectedRow.JobText || selectedRow.JobName}
+                  <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
+                    {selectedRow.JobName} · {selectedRow.JobRunCount}
+                  </span>
+                </div>
+              </div>
+              {cancelMsg === 'ok'  && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job cancelado</span>}
+              {cancelMsg && cancelMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {cancelMsg}</span>}
+              {restartMsg === 'ok' && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job reiniciado</span>}
+              {restartMsg && restartMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {restartMsg}</span>}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => setStepsJob(selectedRow)} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(139,92,246,.4)', background: 'rgba(139,92,246,.12)', color: '#a78bfa', cursor: 'pointer' }}>
+                  ▤ Ver pasos{selectedRow?.JobStepCount > 0 ? ` (${selectedRow.JobStepCount})` : ''}
+                </button>
+                <button onClick={handleCancel} disabled={!isCancelable || cancelling} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(255,107,107,.4)', background: isCancelable ? 'rgba(255,107,107,.12)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}>
+                  {cancelling ? 'Cancelando…' : '✕ Cancelar job'}
+                </button>
+                <button onClick={() => setRestartModal(true)} disabled={!isRestartable || restarting} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(6,182,212,.4)', background: isRestartable ? 'rgba(6,182,212,.12)' : 'transparent', color: isRestartable ? 'var(--cyan)' : 'var(--text3)', cursor: isRestartable ? 'pointer' : 'not-allowed', opacity: restarting ? .6 : 1 }}>
+                  {restarting ? 'Reiniciando…' : '↺ Reiniciar job'}
+                </button>
+                <button onClick={() => { setSelectedRow(null); setCancelMsg(''); setRestartMsg('') }} style={{ padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer' }}>
+                  Deseleccionar
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -451,51 +484,100 @@ export default function JobMonitor({ connection, session }) {
         />
       )}
 
-      {restartModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500,
-        }}>
+      {restartModal && selectedRow && (() => {
+        const isError    = ERROR_STATUSES.includes(selectedRow.JobStatus)
+        const isFinished = FINISHED_STATUSES.includes(selectedRow.JobStatus)
+        const jobLabel   = selectedRow.JobText || selectedRow.JobName
+        return (
           <div style={{
-            background: 'var(--bg2)', border: '1px solid var(--border2)',
-            borderRadius: 12, padding: 28, width: 'min(440px, 92vw)', boxShadow: '0 16px 48px rgba(0,0,0,.6)',
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500,
           }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>↺ Reiniciar job</div>
-            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 20 }}>
-              Selecciona el modo de reinicio para <strong style={{ color: 'var(--text)' }}>{selectedRow.JobText || selectedRow.JobName}</strong>
-            </div>
+            <div style={{
+              background: 'var(--bg2)', border: '1px solid var(--border2)',
+              borderRadius: 12, padding: 28, width: 'min(440px, 92vw)', boxShadow: '0 16px 48px rgba(0,0,0,.6)',
+            }}>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-              {RESTART_MODES.map(m => (
-                <button
-                  key={m.value}
-                  onClick={() => handleRestart(m.value)}
-                  style={{
-                    textAlign: 'left', padding: '12px 16px', borderRadius: 8,
-                    border: '1px solid var(--border2)', background: 'var(--bg3)',
-                    color: 'var(--text)', cursor: 'pointer', transition: 'all .15s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--cyan)'; e.currentTarget.style.background = 'rgba(6,182,212,.08)' }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.background = 'var(--bg3)' }}
-                >
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>
-                    Modo {m.value} — {m.label}
+              {/* ── Job fallido / cancelado → selector de modo ── */}
+              {isError && (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                    ↺ Reiniciar job con error
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>{m.desc}</div>
-                </button>
-              ))}
-            </div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 20 }}>
+                    Selecciona desde qué punto reanudar{' '}
+                    <strong style={{ color: 'var(--text)' }}>{jobLabel}</strong>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+                    {RESTART_MODES.map(m => (
+                      <button
+                        key={m.value}
+                        onClick={() => handleRestart(m.value)}
+                        style={{
+                          textAlign: 'left', padding: '12px 16px', borderRadius: 8,
+                          border: '1px solid var(--border2)', background: 'var(--bg3)',
+                          color: 'var(--text)', cursor: 'pointer', transition: 'all .15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--cyan)'; e.currentTarget.style.background = 'rgba(6,182,212,.08)' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.background = 'var(--bg3)' }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>
+                          Modo {m.value} — {m.label}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>{m.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
 
-            <button
-              onClick={() => setRestartModal(false)}
-              style={{
-                width: '100%', padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
-              }}
-            >Cancelar</button>
+              {/* ── Job finalizado correctamente → re-ejecución directa ── */}
+              {isFinished && (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                    ↺ Volver a ejecutar
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>
+                    <strong style={{ color: 'var(--text)' }}>{jobLabel}</strong>
+                  </div>
+                  <div style={{
+                    background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.25)',
+                    borderRadius: 8, padding: '10px 14px', marginBottom: 20,
+                  }}>
+                    <div style={{ fontSize: 11, color: '#86efac', lineHeight: 1.6 }}>
+                      Este job <strong>finalizó correctamente</strong>
+                      {selectedRow.JobStatus === 'W' ? ' (con advertencias)' : ''}
+                      {'. '}
+                      No hay pasos fallidos — se ejecutará nuevamente desde el inicio.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRestart('A')}
+                    style={{
+                      width: '100%', padding: '10px', borderRadius: 8, marginBottom: 10,
+                      border: '1px solid rgba(6,182,212,.4)', background: 'rgba(6,182,212,.1)',
+                      color: 'var(--cyan)', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                      transition: 'all .15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(6,182,212,.18)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(6,182,212,.1)' }}
+                  >
+                    ↺ Ejecutar nuevamente
+                  </button>
+                </>
+              )}
+
+              <button
+                onClick={() => setRestartModal(false)}
+                style={{
+                  width: '100%', padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
+                }}
+              >Cancelar</button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

@@ -45,7 +45,19 @@ function calcDuration(step, stepsArr, jobEnd) {
   return fmtDuration(end - start)
 }
 
-export default function StepsPanel({ job, connection, session, statuses, tzMode, onClose }) {
+const STEP_STATUS_FALLBACK = {
+  F: { bg: 'rgba(34,197,94,.12)',    color: '#22c55e', border: 'rgba(34,197,94,.3)',    text: 'Finished'  },
+  W: { bg: 'rgba(251,191,36,.12)',   color: '#fbbf24', border: 'rgba(251,191,36,.3)',   text: 'Warning'   },
+  A: { bg: 'rgba(255,107,107,.12)',  color: '#ff6b6b', border: 'rgba(255,107,107,.3)',  text: 'Aborted'   },
+  E: { bg: 'rgba(255,107,107,.12)',  color: '#ff6b6b', border: 'rgba(255,107,107,.3)',  text: 'Error'     },
+  U: { bg: 'rgba(255,107,107,.12)',  color: '#ff6b6b', border: 'rgba(255,107,107,.3)',  text: 'User Error'},
+  R: { bg: 'rgba(34,197,94,.08)',    color: '#22c55e', border: 'rgba(34,197,94,.2)',    text: 'Running'   },
+  S: { bg: 'rgba(156,163,175,.15)',  color: '#9ca3af', border: 'rgba(156,163,175,.3)',  text: 'Scheduled' },
+  C: { bg: 'rgba(148,163,184,.12)',  color: '#94a3b8', border: 'rgba(148,163,184,.3)',  text: 'Canceled'  },
+  P: { bg: 'rgba(99,102,241,.12)',   color: '#818cf8', border: 'rgba(99,102,241,.3)',   text: 'Released'  },
+}
+
+export default function StepsPanel({ job, connection, session, statuses, tzMode, onClose, inline = false }) {
   const [steps,      setSteps]      = useState([])
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
@@ -250,9 +262,10 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
   }
 
   function statusStyle(code) {
-    const s = statuses.find(x => x.JobStatus === code)
-    const c = s?.color ?? { bg: 'rgba(156,163,175,.15)', color: '#9ca3af', border: 'rgba(156,163,175,.3)' }
-    return { ...c, text: s?.JobStatusText || code || '—' }
+    const s   = (statuses || []).find(x => x.JobStatus === code)
+    const fb  = STEP_STATUS_FALLBACK[code] ?? { bg: 'rgba(156,163,175,.15)', color: '#9ca3af', border: 'rgba(156,163,175,.3)', text: code || '—' }
+    const c   = s?.color ?? fb
+    return { ...c, text: s?.JobStatusText || fb.text }
   }
 
   // Suma de conteos de mensajes para un paso (agrega todos sus LogHandles)
@@ -267,9 +280,11 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
 
   return (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 400 }} />
+      {!inline && <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 400 }} />}
 
-      <div style={{
+      <div style={inline ? {
+        display: 'flex', flexDirection: 'column', background: 'var(--bg2)',
+      } : {
         position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(600px, 95vw)',
         background: 'var(--bg)', borderLeft: '1px solid var(--border2)',
         zIndex: 401, display: 'flex', flexDirection: 'column',
@@ -292,7 +307,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
               <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 10, fontWeight: 700, background: jobSt.bg, color: jobSt.color, border: `1px solid ${jobSt.border}` }}>
                 {jobSt.text}
               </span>
-              <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', fontSize: 13, cursor: 'pointer', padding: '4px 10px', lineHeight: 1 }}>✕</button>
+              {!inline && <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', fontSize: 13, cursor: 'pointer', padding: '4px 10px', lineHeight: 1 }}>✕</button>}
             </div>
           </div>
           {!loading && steps.length > 0 && (

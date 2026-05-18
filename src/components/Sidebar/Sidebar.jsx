@@ -1,8 +1,22 @@
 const W = 220
 const W_MIN = 52
 
+const AVATAR_COLORS = [
+  '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B',
+  '#10B981', '#EF4444', '#06B6D4', '#F97316',
+]
+function colorFor(name = '') {
+  let hash = 0
+  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
+}
+function initials(name = '') {
+  return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('')
+}
+
 export default function Sidebar({ connections, sessions = {}, activeId, onSelect, expanded, onToggle, isMobile = false, mobileOpen = false }) {
-  const w = expanded ? W : W_MIN
+  const isExpanded = isMobile ? true : expanded
+  const w = isExpanded ? W : W_MIN
 
   return (
     <aside
@@ -22,20 +36,22 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
         padding: '12px 10px',
         borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center',
-        justifyContent: expanded ? 'space-between' : 'center',
+        justifyContent: isExpanded ? 'space-between' : 'center',
         gap: 8, flexShrink: 0,
       }}>
-        {expanded && (
+        {isExpanded && (
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
             Navegación
           </span>
         )}
-        <button onClick={onToggle} style={{
-          background: 'none', border: '1px solid var(--border)', borderRadius: 5,
-          color: 'var(--text2)', padding: '3px 6px', fontSize: 11, flexShrink: 0,
-        }} title={expanded ? 'Minimizar' : 'Expandir'}>
-          {expanded ? '◀' : '▶'}
-        </button>
+        {!isMobile && (
+          <button onClick={onToggle} style={{
+            background: 'none', border: '1px solid var(--border)', borderRadius: 5,
+            color: 'var(--text2)', padding: '3px 6px', fontSize: 11, flexShrink: 0,
+          }} title={isExpanded ? 'Minimizar' : 'Expandir'}>
+            {isExpanded ? '◀' : '▶'}
+          </button>
+        )}
       </div>
 
       {/* Conexiones link */}
@@ -44,7 +60,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
         label="Conexiones"
         icon="🔗"
         active={activeId === 'connections'}
-        expanded={expanded}
+        expanded={isExpanded}
         onClick={() => onSelect('connections')}
       />
 
@@ -54,7 +70,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
         label="Resumen"
         icon="📊"
         active={activeId === 'resumen-general'}
-        expanded={expanded}
+        expanded={isExpanded}
         onClick={() => onSelect('resumen-general')}
       />
 
@@ -65,7 +81,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
 
       {/* Connection list */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {connections.map((c, idx) => {
+        {connections.map((c) => {
           const hasCredentials = c.com0326?.url || c.com0068?.url
           const loggedIn = !!sessions[c.id]
           return (
@@ -73,10 +89,11 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
               key={c.id}
               id={c.id}
               label={c.name}
-              icon={String(idx + 1)}
+              icon={initials(c.name)}
+              iconColor={colorFor(c.name)}
               numberIcon
               active={activeId === c.id}
-              expanded={expanded}
+              expanded={isExpanded}
               onClick={() => onSelect(c.id)}
               sessionStatus={hasCredentials ? (loggedIn ? 'online' : 'offline') : null}
             />
@@ -93,14 +110,14 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
         }}>
           <span>+</span>
-          {expanded && <span>Nueva conexión</span>}
+          {isExpanded && <span>Nueva conexión</span>}
         </button>
       </div>
     </aside>
   )
 }
 
-function SidebarItem({ label, icon, numberIcon, active, expanded, onClick, sessionStatus }) {
+function SidebarItem({ label, icon, iconColor, numberIcon, active, expanded, onClick, sessionStatus }) {
   return (
     <button onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center',
@@ -121,13 +138,13 @@ function SidebarItem({ label, icon, numberIcon, active, expanded, onClick, sessi
       {/* Icon */}
       {numberIcon ? (
         <span style={{
-          width: 22, height: 22, borderRadius: '50%',
-          background: active ? 'rgba(247,168,0,.2)' : 'rgba(255,255,255,.08)',
-          border: `1px solid ${active ? 'rgba(247,168,0,.4)' : 'rgba(255,255,255,.12)'}`,
+          width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+          background: active ? iconColor : `${iconColor}33`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 10, fontWeight: 700, flexShrink: 0,
-          color: active ? 'var(--accent)' : 'var(--text2)',
+          fontSize: 10, fontWeight: 700,
+          color: active ? '#fff' : (iconColor || 'var(--text2)'),
           position: 'relative',
+          transition: 'background .15s',
         }}>
           {icon}
           {/* Session indicator dot */}

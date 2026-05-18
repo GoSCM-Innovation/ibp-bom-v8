@@ -1,22 +1,32 @@
 import { useState } from 'react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import Jobs from '../Jobs/Jobs'
 import JobMonitor from '../Jobs/JobMonitor'
 import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
+import Metering from '../Metering/Metering'
+import Orchestrations from '../Orchestrations/Orchestrations'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
+import { getSapSystemUrl } from '../../utils/sapUrl'
 
 export default function SystemView({ connection, session, onLogout }) {
-  const has0326 = !!(connection.com0326?.url && connection.com0326?.user)
-  const has0068 = !!(connection.com0068?.url && connection.com0068?.user)
+  const isMobile = useIsMobile()
+  const has0326    = !!(connection.com0326?.url    && connection.com0326?.user)
+  const has0068    = !!(connection.com0068?.url    && connection.com0068?.user)
+  const hasMetering = !!(connection.com0924?.url && connection.com0924?.user)
 
   const APPS = [
     ...(has0326 ? [
-      { id: 'resumen',  label: 'Resumen'        },
-      { id: 'jobs',     label: 'Job Templates'  },
-      { id: 'monitor',  label: 'Job Monitor'    },
+      { id: 'resumen',      label: 'Resumen'        },
+      { id: 'jobs',         label: 'Job Templates'  },
+      { id: 'monitor',      label: 'Job Monitor'    },
+      { id: 'orquestador',  label: 'Orquestador'    },
     ] : []),
     ...(has0068 ? [
       { id: 'stats', label: 'Resource Stats' },
+    ] : []),
+    ...(hasMetering ? [
+      { id: 'metering', label: 'Telemetría' },
     ] : []),
   ]
 
@@ -29,7 +39,8 @@ export default function SystemView({ connection, session, onLogout }) {
       {/* System header */}
       <div style={{
         background: 'var(--bg2)', borderBottom: '1px solid var(--border)',
-        padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
+        padding: isMobile ? '10px 12px' : '12px 24px',
+        display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
       }}>
         <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -37,6 +48,18 @@ export default function SystemView({ connection, session, onLogout }) {
           <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
             {session ? (session.com0326?.user || session.com0068?.user || '—') : displayUrl}
           </div>
+          {getSapSystemUrl(connection.com0326?.url) && (
+            <a
+              href={getSapSystemUrl(connection.com0326?.url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 10, color: 'var(--accent)', marginTop: 2, display: 'inline-block', textDecoration: 'none' }}
+              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+            >
+              Abrir en SAP IBP ↗
+            </a>
+          )}
         </div>
         {session && onLogout && (
           <button onClick={onLogout} title="Cerrar sesión" style={{
@@ -54,34 +77,37 @@ export default function SystemView({ connection, session, onLogout }) {
 
       {/* App sub-tabs */}
       {APPS.length > 0 && (
-        <div style={{
+        <div className="tab-bar" style={{
           display: 'flex', gap: 0, borderBottom: '1px solid var(--border)',
-          background: 'var(--bg2)', padding: '0 24px', flexShrink: 0,
+          background: 'var(--bg2)', padding: isMobile ? '0 12px' : '0 24px', flexShrink: 0,
         }}>
           {APPS.map(app => (
             <button key={app.id} onClick={() => setActiveApp(app.id)} style={{
-              padding: '10px 20px', fontSize: 12, background: 'none', border: 'none',
+              padding: isMobile ? '10px 14px' : '10px 20px',
+              fontSize: 12, background: 'none', border: 'none',
               borderBottom: activeApp === app.id ? '2px solid var(--accent)' : '2px solid transparent',
               color: activeApp === app.id ? 'var(--text)' : 'var(--text2)',
               fontWeight: activeApp === app.id ? 600 : 400,
-              cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap',
+              cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap', flexShrink: 0,
             }}>{app.label}</button>
           ))}
         </div>
       )}
 
       {/* App content */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {APPS.length === 0 && (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
             Esta conexión no tiene acuerdos de comunicación configurados.<br />
             Ve a Conexiones para agregar SAP_COM_0326 o SAP_COM_0068.
           </div>
         )}
-        {activeApp === 'resumen'  && <Resumen       connection={connection} session={session} />}
-        {activeApp === 'jobs'     && <Jobs          connection={connection} session={session} />}
-        {activeApp === 'monitor'  && <JobMonitor    connection={connection} session={session} />}
-        {activeApp === 'stats'    && <ResourceStats connection={connection} session={session} />}
+        {activeApp === 'resumen'      && <Resumen        connection={connection} session={session} />}
+        {activeApp === 'jobs'         && <Jobs           connection={connection} session={session} />}
+        {activeApp === 'monitor'      && <JobMonitor     connection={connection} session={session} />}
+        {activeApp === 'orquestador'  && <Orchestrations connection={connection} session={session} />}
+        {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
+        {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
       </div>
     </div>
   )

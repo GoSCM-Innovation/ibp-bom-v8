@@ -2,28 +2,24 @@ import { useState, useRef, useEffect } from 'react'
 
 const REQUIREMENTS = [
   {
-    title: '1. Usuario de Comunicación',
-    detail: 'Crear un Communication User en SAP IBP → Settings → Communication Users. Este usuario y su contraseña se usan como credenciales de la conexión.',
+    title: 'Configuración base — aplica a todos los acuerdos',
+    detail: 'En SAP IBP → Settings → Communication Management: crear un Communication User, un Communication System (representa este sistema externo) y un Communication Arrangement con el escenario correspondiente. La URL del endpoint se obtiene de cada Communication Arrangement una vez creado.',
   },
   {
-    title: '2. Sistema de Comunicación',
-    detail: 'Definir un Communication System en SAP IBP → Settings → Communication Systems, representando el sistema externo (GoSCM) que consumirá la API.',
+    title: 'SAP_COM_0326 — Administración de Application Jobs',
+    detail: 'Escenario "Programador externo - Integración de administración de jobs de aplicación". Otorga acceso completo al servicio BC_EXT_APPJOB_MANAGEMENT: programar jobs para cualquier usuario de negocio, cancelar, reiniciar y supervisar jobs creados por cualquier usuario. Activa: Resumen · Job Templates · Job Monitor.',
   },
   {
-    title: '3. Acuerdo de Comunicación',
-    detail: 'Crear un Communication Arrangement en SAP IBP → Settings → Communication Arrangements usando el escenario SAP_COM_0326. Asociar el Communication System y el Communication User — esto activa el endpoint OData.',
+    title: 'SAP_COM_0068 — Supervisión de integración',
+    detail: 'Escenario "Planificación: Supervisión de integración". Expone consumo de recursos (/IBP/RES_CONS_STATS_API_SRV) con CPU y memoria del tenant en % con timestamps UTC a nivel de minuto, y supervisión de tareas de sistema (/IBP/TASKMON_EXT_SRV) con datos de los últimos 90 días. Activa: Resource Stats.',
   },
   {
-    title: '4. URL del endpoint',
-    detail: 'La URL del API se obtiene directamente del Communication Arrangement creado. Formato: https://<tenant>-api.scmibp.ondemand.com/sap/opu/odata/sap/BC_EXT_APPJOB_MANAGEMENT;v=0002',
+    title: 'SAP_COM_0924 — Integración de datos de telemetría',
+    detail: 'Escenario "Planning – Telemetry Data Integration". Expone la Telemetry Read API con datos de los últimos 90 días: uso del Excel Add-In (logons, planning views, key figures), Dashboards, Analytics Stories, Alert Monitor y apps Fiori por usuario y Planning Area. Procesa datos personales. Activa: Adopción · Excel Add-In · Dashboards.',
   },
   {
-    title: '5. Rol de autorización',
-    detail: 'El Communication User debe tener asignado el business role correspondiente para leer y ejecutar Application Jobs en IBP.',
-  },
-  {
-    title: '6. Autenticación Basic Auth',
-    detail: 'La API usa HTTP Basic Authentication con el usuario y contraseña del Communication User. No se requiere configuración adicional de OAuth.',
+    title: 'Autenticación — todos los acuerdos',
+    detail: 'HTTP Basic Authentication con el usuario y contraseña del Communication User de cada acuerdo. Las credenciales se solicitan al iniciar sesión y no se almacenan en el servidor.',
   },
 ]
 
@@ -76,8 +72,8 @@ export default function Header({ onMenuToggle }) {
           alt="GoSCM"
           style={{ height: 32, width: 'auto', objectFit: 'contain', flexShrink: 0 }}
         />
-        <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,.12)' }} />
-        <div>
+        <div className="header-sep" style={{ width: 1, height: 28, background: 'rgba(255,255,255,.12)' }} />
+        <div className="header-title">
           <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '.01em', lineHeight: 1.2 }}>
             SAP IBP Control Tower
           </div>
@@ -96,7 +92,7 @@ export default function Header({ onMenuToggle }) {
             cursor: 'pointer', transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 6,
           }}
         >
-          <span style={{ fontSize: 14 }}>📋</span> Requisitos Técnicos
+          <span style={{ fontSize: 14 }}>📋</span><span className="header-btn-label"> Requisitos Técnicos</span>
         </button>
 
         {showReqs && (
