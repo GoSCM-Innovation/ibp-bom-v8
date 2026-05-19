@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { flushSync } from 'react-dom'
 import { useTheme } from '../hooks/useTheme'
 
 const REQUIREMENTS = [
@@ -26,9 +27,33 @@ const REQUIREMENTS = [
 
 function ThemeToggle({ theme, onToggle }) {
   const isLight = theme === 'light'
+  const btnRef = useRef(null)
+
+  function handleToggle() {
+    if (!document.startViewTransition) {
+      onToggle()
+      return
+    }
+    const rect = btnRef.current?.getBoundingClientRect()
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2
+    const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2
+    const maxR = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y)
+    )
+    const vt = document.startViewTransition(() => { flushSync(onToggle) })
+    vt.ready.then(() => {
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${maxR}px at ${x}px ${y}px)`] },
+        { duration: 500, easing: 'ease-in-out', pseudoElement: '::view-transition-new(root)' }
+      )
+    })
+  }
+
   return (
     <button
-      onClick={onToggle}
+      ref={btnRef}
+      onClick={handleToggle}
       role="switch"
       aria-checked={isLight}
       title={isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
