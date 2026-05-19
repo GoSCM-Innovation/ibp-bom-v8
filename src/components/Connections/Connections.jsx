@@ -154,7 +154,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
       {/* Title */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Conexiones</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Conexiones</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 3 }}>
             Tus conexiones SAP IBP, guardadas en este navegador
           </div>
@@ -181,7 +181,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
           </button>
           <button onClick={handleNew} style={{
             background: 'var(--accent)', border: 'none', borderRadius: 7,
-            color: '#000', fontWeight: 700, fontSize: 12, padding: '8px 18px', cursor: 'pointer',
+            color: 'var(--text-on-accent)', fontWeight: 700, fontSize: 12, padding: '8px 18px', cursor: 'pointer',
           }}>
             + Nueva conexión
           </button>
@@ -199,8 +199,8 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
       {feedback && (
         <div style={{
           marginBottom: 14, padding: '8px 14px', borderRadius: 8, fontSize: 12,
-          background: feedback.kind === 'ok' ? 'rgba(52,211,153,.10)' : 'rgba(255,107,107,.10)',
-          border:     `1px solid ${feedback.kind === 'ok' ? 'rgba(52,211,153,.30)' : 'rgba(255,107,107,.30)'}`,
+          background: feedback.kind === 'ok' ? 'color-mix(in srgb, var(--green) 12%, transparent)' : 'color-mix(in srgb, var(--red) 12%, transparent)',
+          border:     `1px solid ${feedback.kind === 'ok' ? 'color-mix(in srgb, var(--green) 35%, transparent)' : 'color-mix(in srgb, var(--red) 35%, transparent)'}`,
           color:      feedback.kind === 'ok' ? 'var(--green)' : 'var(--red)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
@@ -238,7 +238,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
           </div>
           <button onClick={handleNew} style={{
             background: 'var(--accent)', border: 'none', borderRadius: 7,
-            color: '#000', fontWeight: 700, fontSize: 12, padding: '8px 18px', cursor: 'pointer',
+            color: 'var(--text-on-accent)', fontWeight: 700, fontSize: 12, padding: '8px 18px', cursor: 'pointer',
           }}>
             + Nueva conexión
           </button>
@@ -256,7 +256,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
             <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={40} />
 
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{conn.name}</div>
+              <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{conn.name}</div>
               {conn.com0326?.user && (
                 <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
                   {conn.com0326.user}
@@ -314,7 +314,7 @@ const secondaryBtnStyle = {
 
 function btnStyle(color) {
   return {
-    background: 'none', border: `1px solid ${color}33`,
+    background: 'none', border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
     borderRadius: 6, color, fontSize: 11, fontWeight: 600,
     padding: '5px 12px', transition: 'all .15s',
   }

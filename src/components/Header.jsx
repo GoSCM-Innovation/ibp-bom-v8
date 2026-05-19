@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useTheme } from '../hooks/useTheme'
 
 const REQUIREMENTS = [
   {
@@ -23,9 +24,51 @@ const REQUIREMENTS = [
   },
 ]
 
+function ThemeToggle({ theme, onToggle }) {
+  const isLight = theme === 'light'
+  return (
+    <button
+      onClick={onToggle}
+      role="switch"
+      aria-checked={isLight}
+      title={isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+      style={{
+        position: 'relative',
+        width: 46, height: 24,
+        borderRadius: 12,
+        background: isLight ? 'var(--surface-glass-strong)' : 'var(--surface-glass)',
+        border: '1px solid var(--border)',
+        padding: 0,
+        cursor: 'pointer',
+        transition: 'background .2s ease, border-color .2s ease',
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 2, left: 2,
+          width: 18, height: 18,
+          borderRadius: '50%',
+          background: 'var(--accent)',
+          boxShadow: '0 1px 4px rgba(0,0,0,.25)',
+          transform: isLight ? 'translateX(22px)' : 'translateX(0)',
+          transition: 'transform .22s ease',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, lineHeight: 1,
+          color: 'var(--text-on-accent)',
+        }}
+      >
+        {isLight ? '☀' : '🌙'}
+      </span>
+    </button>
+  )
+}
+
 export default function Header({ onMenuToggle }) {
   const [showReqs, setShowReqs] = useState(false)
   const panelRef = useRef(null)
+  const { theme, toggle } = useTheme()
 
   useEffect(() => {
     if (!showReqs) return
@@ -38,8 +81,8 @@ export default function Header({ onMenuToggle }) {
 
   return (
     <header style={{
-      background: 'linear-gradient(135deg, #080f1e 0%, #0d1829 60%, #080f1e 100%)',
-      borderBottom: '2px solid rgba(247,168,0,.25)',
+      background: 'var(--header-bg)',
+      borderBottom: '2px solid var(--header-border)',
       padding: '0 24px',
       height: 'var(--header-h)',
       display: 'flex',
@@ -49,7 +92,7 @@ export default function Header({ onMenuToggle }) {
       position: 'sticky',
       top: 0,
       zIndex: 200,
-      boxShadow: '0 2px 20px rgba(0,0,0,.5)',
+      boxShadow: 'var(--shadow)',
       flexShrink: 0,
     }}>
       {/* Hamburger — mobile only */}
@@ -72,55 +115,59 @@ export default function Header({ onMenuToggle }) {
           alt="GoSCM"
           style={{ height: 32, width: 'auto', objectFit: 'contain', flexShrink: 0 }}
         />
-        <div className="header-sep" style={{ width: 1, height: 28, background: 'rgba(255,255,255,.12)' }} />
+        <div className="header-sep" style={{ width: 1, height: 28, background: 'var(--divider)' }} />
         <div className="header-title">
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '.01em', lineHeight: 1.2 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', letterSpacing: '.01em', lineHeight: 1.2 }}>
             SAP IBP Control Tower
           </div>
         </div>
       </div>
 
-      {/* Requisitos Técnicos button */}
-      <div style={{ position: 'relative' }} ref={panelRef}>
-        <button
-          onClick={() => setShowReqs(p => !p)}
-          style={{
-            background: showReqs ? 'rgba(247,168,0,.15)' : 'rgba(255,255,255,.06)',
-            border: `1px solid ${showReqs ? 'rgba(247,168,0,.4)' : 'rgba(255,255,255,.12)'}`,
-            borderRadius: 7, color: showReqs ? 'var(--accent)' : 'var(--text2)',
-            fontSize: 12, fontWeight: 600, padding: '6px 14px',
-            cursor: 'pointer', transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 6,
-          }}
-        >
-          <span style={{ fontSize: 14 }}>📋</span><span className="header-btn-label"> Requisitos Técnicos</span>
-        </button>
+      {/* Right cluster: theme toggle + Requisitos */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <ThemeToggle theme={theme} onToggle={toggle} />
 
-        {showReqs && (
-          <div style={{
-            position: 'absolute', top: 'calc(100% + 10px)', right: 0,
-            width: 'min(420px, 92vw)', background: '#0d1829',
-            border: '1px solid rgba(247,168,0,.25)', borderRadius: 10,
-            boxShadow: '0 8px 32px rgba(0,0,0,.6)', padding: 20, zIndex: 300,
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>📋</span> Requisitos Técnicos de la API
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {REQUIREMENTS.map((r, i) => (
-                <div key={i} style={{
-                  background: 'rgba(255,255,255,.04)', borderRadius: 7,
-                  border: '1px solid rgba(255,255,255,.07)', padding: '10px 14px',
-                  overflow: 'hidden',
-                }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 4, wordBreak: 'break-word' }}>
-                    {r.title}
+        <div style={{ position: 'relative' }} ref={panelRef}>
+          <button
+            onClick={() => setShowReqs(p => !p)}
+            style={{
+              background: showReqs ? 'var(--accent-bg-soft)' : 'var(--surface-glass)',
+              border: `1px solid ${showReqs ? 'var(--accent-border-soft)' : 'var(--border)'}`,
+              borderRadius: 7, color: showReqs ? 'var(--accent)' : 'var(--text2)',
+              fontSize: 12, fontWeight: 600, padding: '6px 14px',
+              cursor: 'pointer', transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 14 }}>📋</span><span className="header-btn-label"> Requisitos Técnicos</span>
+          </button>
+
+          {showReqs && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 10px)', right: 0,
+              width: 'min(420px, 92vw)', background: 'var(--modal-bg)',
+              border: '1px solid var(--header-border)', borderRadius: 10,
+              boxShadow: 'var(--shadow-lg)', padding: 20, zIndex: 300,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>📋</span> Requisitos Técnicos de la API
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {REQUIREMENTS.map((r, i) => (
+                  <div key={i} style={{
+                    background: 'var(--surface-glass-soft)', borderRadius: 7,
+                    border: '1px solid var(--border)', padding: '10px 14px',
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 4, wordBreak: 'break-word' }}>
+                      {r.title}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5, wordBreak: 'break-word', overflowWrap: 'break-word' }}>{r.detail}</div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5, wordBreak: 'break-word', overflowWrap: 'break-word' }}>{r.detail}</div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </header>
   )

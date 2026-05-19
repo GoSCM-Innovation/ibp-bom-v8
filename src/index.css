@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');
 
-:root {
+:root,
+:root[data-theme="dark"] {
   --bg:       #0b1120;
   --bg2:      #0f1829;
   --bg3:      #131e33;
@@ -17,6 +18,22 @@
   --green:    #34d399;
   --red:      #ff6b6b;
   --purple:   #a78bfa;
+
+  /* Theme-aware extras */
+  --header-bg:           linear-gradient(135deg, #080f1e 0%, #0d1829 60%, #080f1e 100%);
+  --header-border:       rgba(247,168,0,.25);
+  --overlay:             rgba(0,0,0,.55);
+  --surface-glass:       rgba(255,255,255,.06);
+  --surface-glass-soft:  rgba(255,255,255,.04);
+  --surface-glass-strong:rgba(255,255,255,.12);
+  --shadow:              0 2px 20px rgba(0,0,0,.5);
+  --shadow-lg:           0 8px 32px rgba(0,0,0,.6);
+  --accent-bg-soft:      rgba(247,168,0,.15);
+  --accent-border-soft:  rgba(247,168,0,.4);
+  --text-on-accent:      #ffffff;
+  --divider:             rgba(255,255,255,.12);
+  --modal-bg:            #0d1829;
+
   --font:     'DM Sans', sans-serif;
   --mono:     'JetBrains Mono', monospace;
   --sidebar-w: 220px;
@@ -24,8 +41,45 @@
   --header-h: 52px;
 }
 
+:root[data-theme="light"] {
+  --bg:       #faf6f0;
+  --bg2:      #f5ede0;
+  --bg3:      #efe4d1;
+  --surface:  #fffaf2;
+  --surface2: #f9f0de;
+  --border:   #e0d2b8;
+  --border2:  #c9b896;
+  --text:     #3d2e1f;
+  --text2:    #6b5743;
+  --text3:    #9c8770;
+  --accent:   #E89500;
+  --accent2:  #D5521A;
+  --cyan:     #1B8AB8;
+  --green:    #0d9668;
+  --red:      #dc2626;
+  --purple:   #7c3aed;
+
+  --header-bg:           linear-gradient(135deg, #fff8ec 0%, #faf0d9 60%, #fff8ec 100%);
+  --header-border:       rgba(232,149,0,.45);
+  --overlay:             rgba(60,40,20,.35);
+  --surface-glass:       rgba(255,255,255,.7);
+  --surface-glass-soft:  rgba(255,255,255,.5);
+  --surface-glass-strong:rgba(232,149,0,.18);
+  --shadow:              0 2px 20px rgba(151,113,72,.18);
+  --shadow-lg:           0 8px 32px rgba(151,113,72,.28);
+  --accent-bg-soft:      rgba(232,149,0,.18);
+  --accent-border-soft:  rgba(232,149,0,.55);
+  --text-on-accent:      #ffffff;
+  --divider:             rgba(61,46,31,.15);
+  --modal-bg:            #fffaf2;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; min-height: 100vh; overflow: hidden; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 13px; min-height: 100vh; overflow: hidden;
+  transition: background-color .25s ease, color .25s ease;
+}
 #root { display: flex; flex-direction: column; height: 100vh; }
 
 button { cursor: pointer; font-family: var(--font); }
@@ -67,7 +121,7 @@ input, select, textarea { font-family: var(--font); }
 .sidebar-backdrop {
   display: none;
   position: fixed; inset: 0;
-  background: rgba(0,0,0,.55);
+  background: var(--overlay);
   z-index: 90;
 }
 

@@ -175,7 +175,7 @@ export default function OrchBuilder({
         <div
           className="orch-palette-backdrop"
           onClick={() => { setPaletteOpen(false); setPendingGroup(null) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 200 }}
+          style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 200 }}
         />
       )}
 
@@ -245,7 +245,7 @@ export default function OrchBuilder({
               placeholder="Nombre de la orquestación…"
               style={{
                 flex: 1, background: 'var(--bg3)', border: '1px solid var(--border)',
-                borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
+                borderRadius: 6, color: 'var(--text)', fontSize: 13, fontWeight: 600,
                 padding: '6px 10px', outline: 'none',
               }}
             />
@@ -346,9 +346,9 @@ export default function OrchBuilder({
               style={{
                 position: 'fixed', bottom: 24, right: 24, zIndex: 100,
                 width: 52, height: 52, borderRadius: '50%',
-                background: '#22c55e', border: 'none',
-                color: '#000', fontSize: 24, fontWeight: 700,
-                cursor: 'pointer', boxShadow: '0 4px 16px rgba(34,197,94,.4)',
+                background: 'var(--green)', border: 'none',
+                color: 'var(--text-on-accent)', fontSize: 24, fontWeight: 700,
+                cursor: 'pointer', boxShadow: 'var(--shadow)',
               }}
             >+</button>
           </div>

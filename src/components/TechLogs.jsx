@@ -25,8 +25,8 @@ export default function TechLogs({ logs = [] }) {
       <button
         onClick={() => setOpen(p => !p)}
         style={{
-          background: open ? 'rgba(139,92,246,.1)' : 'rgba(255,255,255,.04)',
-          border: `1px solid ${open ? 'rgba(139,92,246,.3)' : 'var(--border)'}`,
+          background: open ? 'color-mix(in srgb, var(--purple) 15%, transparent)' : 'var(--surface-glass-soft)',
+          border: `1px solid ${open ? 'color-mix(in srgb, var(--purple) 35%, transparent)' : 'var(--border)'}`,
           borderRadius: 6, color: open ? 'var(--purple)' : 'var(--text2)',
           fontSize: 11, fontWeight: 600, padding: '6px 14px',
           cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,

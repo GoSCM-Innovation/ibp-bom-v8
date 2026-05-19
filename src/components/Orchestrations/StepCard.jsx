@@ -248,7 +248,7 @@ export default function StepCard({
           ) : (
             <>
               <div style={{
-                fontSize: 12, fontWeight: 600, color: '#fff',
+                fontSize: 12, fontWeight: 600, color: 'var(--text)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}>
                 {step.jobTemplateText || step.jobTemplateName}
@@ -321,7 +321,7 @@ export default function StepCard({
                 }}>∥</div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {child.jobTemplateText || child.jobTemplateName}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>

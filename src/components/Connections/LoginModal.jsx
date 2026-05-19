@@ -83,19 +83,19 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(4px)',
+      background: 'var(--overlay)', backdropFilter: 'blur(4px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
       <div style={{
         background: 'var(--bg2)', border: '1px solid var(--border2)',
         borderRadius: 12, padding: 28, width: 360, maxWidth: '90vw',
-        boxShadow: '0 24px 48px rgba(0,0,0,.5)',
+        boxShadow: 'var(--shadow-lg)',
       }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={36} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{conn.name}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{conn.name}</div>
             <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>Iniciar sesión</div>
           </div>
         </div>
@@ -122,13 +122,13 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
                     /* Already logged in — show OK row */
                     <div style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      background: 'rgba(52,211,153,.07)', border: '1px solid rgba(52,211,153,.2)',
+                      background: 'color-mix(in srgb, var(--green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--green) 30%, transparent)',
                       borderRadius: 8, padding: '10px 14px',
                     }}>
                       <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text2)' }}>
                         {existingSession[k].user}
                       </span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#34d399', letterSpacing: '.04em' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', letterSpacing: '.04em' }}>
                         ✓ activo
                       </span>
                     </div>
@@ -172,7 +172,7 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
             }}>Cancelar</button>
             <button type="submit" disabled={loading} style={{
               background: loading ? 'var(--border2)' : 'var(--accent)', border: 'none', borderRadius: 6,
-              color: loading ? 'var(--text3)' : '#000', fontSize: 12, fontWeight: 700, padding: '7px 20px',
+              color: loading ? 'var(--text3)' : 'var(--text-on-accent)', fontSize: 12, fontWeight: 700, padding: '7px 20px',
               cursor: loading ? 'not-allowed' : 'pointer', transition: 'background .15s',
             }}>{loading ? 'Verificando…' : 'Ingresar'}</button>
           </div>

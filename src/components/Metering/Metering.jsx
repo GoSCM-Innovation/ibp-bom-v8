@@ -160,7 +160,7 @@ function DataTable({ columns, rows, maxRows }) {
           {shown.map((row, i) => (
             <tr key={i} style={{
               borderBottom: i < shown.length - 1 ? '1px solid var(--border)' : 'none',
-              background: i % 2 ? 'rgba(255,255,255,.015)' : 'transparent',
+              background: i % 2 ? 'var(--surface-glass-soft)' : 'transparent',
             }}>
               {columns.map(c => (
                 <td key={c.key} style={{
@@ -311,7 +311,7 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
         <div style={{
           position: 'absolute', top: '100%', left: 24, zIndex: 200,
           background: 'var(--bg3)', border: '1px solid var(--border2)', borderRadius: 10,
-          boxShadow: '0 12px 32px rgba(0,0,0,.5)', minWidth: 280, maxHeight: 360,
+          boxShadow: 'var(--shadow-lg)', minWidth: 280, maxHeight: 360,
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}>
           <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
@@ -422,7 +422,7 @@ function UserProfile({ uid, overview, planningViews, logons, fiori, dashboards, 
           {(name[0] || uid[0] || '?').toUpperCase()}
         </div>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{name !== uid ? name : '—'}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{name !== uid ? name : '—'}</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 2 }}>{uid}</div>
           {firstSeen !== '—' && (
             <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6 }}>
@@ -539,7 +539,7 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
           fontSize: 10, fontWeight: 700, color: 'var(--purple)', fontFamily: 'var(--mono)', flexShrink: 0,
         }}>PA</div>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#fff', fontFamily: 'var(--mono)' }}>{pa}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--mono)' }}>{pa}</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>Planning Area</div>
         </div>
       </div>

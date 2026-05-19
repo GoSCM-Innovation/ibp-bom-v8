@@ -23,17 +23,17 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+      style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
       onClick={e => { if (e.target === e.currentTarget) onCancel() }}
     >
       <div style={{
         background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 12,
         width: 'min(640px, 95vw)', maxHeight: '85vh', display: 'flex', flexDirection: 'column',
-        boxShadow: '0 8px 32px rgba(0,0,0,.5)', overflow: 'hidden',
+        boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
       }}>
         {/* Header */}
         <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Importar conexiones</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Importar conexiones</div>
           {fileName && (
             <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4, fontFamily: 'var(--mono)' }}>
               {fileName}
@@ -62,7 +62,7 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
                 display: 'flex', gap: 10, alignItems: 'center',
               }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {c.name}
                     <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontWeight: 400 }}>
                       {c.ambiente}
@@ -80,7 +80,7 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
           )}
 
           {hasInvalid && (
-            <div style={{ marginTop: 12, padding: '8px 12px', background: 'rgba(255,107,107,.08)', border: '1px solid rgba(255,107,107,.25)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
+            <div style={{ marginTop: 12, padding: '8px 12px', background: 'color-mix(in srgb, var(--red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
               <div style={{ fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>
                 Entradas omitidas ({parsed.invalid.length})
               </div>
@@ -126,7 +126,7 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
             style={{
               background: willImport === 0 ? 'var(--bg3)' : 'var(--accent)',
               border: 'none', borderRadius: 6,
-              color: willImport === 0 ? 'var(--text3)' : '#000',
+              color: willImport === 0 ? 'var(--text3)' : 'var(--text-on-accent)',
               fontSize: 12, fontWeight: 700, padding: '7px 18px',
               cursor: willImport === 0 ? 'not-allowed' : 'pointer',
             }}

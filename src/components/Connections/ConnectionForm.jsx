@@ -88,7 +88,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
 
   return (
     <div style={{ background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 10, padding: 24 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 20 }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 20 }}>
         {initial ? 'Editar conexión' : 'Nueva conexión'}
       </div>
 
@@ -146,7 +146,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         }}>Cancelar</button>
         <button type="button" onClick={handleSave} style={{
           background: 'var(--accent)', border: 'none', borderRadius: 6,
-          color: '#000', fontSize: 12, fontWeight: 700, padding: '7px 18px',
+          color: 'var(--text-on-accent)', fontSize: 12, fontWeight: 700, padding: '7px 18px',
         }}>{initial ? 'Guardar cambios' : 'Crear conexión'}</button>
       </div>
     </div>

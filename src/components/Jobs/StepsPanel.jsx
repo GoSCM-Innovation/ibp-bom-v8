@@ -280,7 +280,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
 
   return (
     <>
-      {!inline && <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 400 }} />}
+      {!inline && <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 400 }} />}
 
       <div style={inline ? {
         display: 'flex', flexDirection: 'column', background: 'var(--bg2)',
@@ -288,14 +288,14 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
         position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(600px, 95vw)',
         background: 'var(--bg)', borderLeft: '1px solid var(--border2)',
         zIndex: 401, display: 'flex', flexDirection: 'column',
-        boxShadow: '-8px 0 32px rgba(0,0,0,.4)', animation: 'stepsPanelSlide .2s ease-out',
+        boxShadow: 'var(--shadow-lg)', animation: 'stepsPanelSlide .2s ease-out',
       }}>
 
         {/* ── Cabecera del panel ── */}
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Pasos del job</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Pasos del job</div>
               <div style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {job.JobText || job.JobName}
               </div>
@@ -368,7 +368,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
 
                   {/* Descripción + inicio */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {stepTitle}
                     </div>
                     {showCatalogSubtitle && (
@@ -540,7 +540,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                           {/* Cabecera toggle */}
                           <div
                             onClick={() => setParamsExpanded(p => ({ ...p, [n]: !p[n] }))}
-                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', background: isPOpen ? 'rgba(255,255,255,.03)' : 'transparent', userSelect: 'none' }}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', background: isPOpen ? 'var(--surface-glass-soft)' : 'transparent', userSelect: 'none' }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                               <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Parámetros</span>
@@ -591,7 +591,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                                                 ? `${p.Low} → ${p.High}`
                                                 : (p.Low ?? '')
                                               return (
-                                                <tr key={i} style={{ borderBottom: i < list.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
+                                                <tr key={i} style={{ borderBottom: i < list.length - 1 ? '1px solid var(--border)' : 'none' }}>
                                                   <td style={{ padding: '4px 10px 4px 0', verticalAlign: 'top', width: '42%' }}>
                                                     <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500 }}>{label}</span>
                                                   </td>

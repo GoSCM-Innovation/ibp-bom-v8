@@ -267,7 +267,7 @@ export default function JobMonitor({ connection, session }) {
         marginBottom: 16, flexShrink: 0, gap: 12, flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Job Monitor</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Job Monitor</div>
           <div style={{ fontSize: 11, color: 'var(--text2)' }}>
             {loading ? 'Cargando…' : `${filtered.length} de ${rows.length} registros`}
             {lastRefresh && !loading && (
@@ -313,7 +313,7 @@ export default function JobMonitor({ connection, session }) {
       {/* Error */}
       {error && (
         <div style={{
-          background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)',
+          background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)',
           borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12, marginBottom: 14,
         }}>✕ {error}</div>
       )}
@@ -359,8 +359,8 @@ export default function JobMonitor({ connection, session }) {
                     key={i}
                     onClick={() => setSelectedRow(isSelected ? null : row)}
                     style={{
-                      background: isSelected ? 'rgba(247,168,0,.08)' : i % 2 === 0 ? 'var(--bg)' : 'var(--bg2)',
-                      outline: isSelected ? '1px solid rgba(247,168,0,.35)' : 'none',
+                      background: isSelected ? 'var(--accent-bg-soft)' : i % 2 === 0 ? 'var(--bg)' : 'var(--bg2)',
+                      outline: isSelected ? '1px solid var(--accent-border-soft)' : 'none',
                       cursor: 'pointer',
                     }}
                   >
@@ -389,7 +389,7 @@ export default function JobMonitor({ connection, session }) {
           padding: '12px 14px',
           background: 'var(--bg2)', borderTop: '1px solid var(--border2)',
           borderRadius: '12px 12px 0 0',
-          boxShadow: '0 -4px 24px rgba(0,0,0,.45)',
+          boxShadow: 'var(--shadow)',
         } : {
           marginTop: 12, padding: '12px 16px', flexShrink: 0,
           background: 'var(--bg2)', border: '1px solid var(--border2)',
@@ -402,7 +402,7 @@ export default function JobMonitor({ connection, session }) {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 1 }}>Job seleccionado</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {selectedRow.JobText || selectedRow.JobName}
                   </div>
                 </div>
@@ -421,12 +421,12 @@ export default function JobMonitor({ connection, session }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                 <button
                   onClick={() => setStepsJob(selectedRow)}
-                  style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(139,92,246,.4)', background: 'rgba(139,92,246,.12)', color: '#a78bfa', cursor: 'pointer' }}
+                  style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--purple) 45%, transparent)', background: 'color-mix(in srgb, var(--purple) 15%, transparent)', color: 'var(--purple)', cursor: 'pointer' }}
                 >▤ Ver pasos</button>
                 <button
                   onClick={handleCancel}
                   disabled={!isCancelable || cancelling}
-                  style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(255,107,107,.4)', background: isCancelable ? 'rgba(255,107,107,.12)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}
+                  style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--red) 45%, transparent)', background: isCancelable ? 'color-mix(in srgb, var(--red) 15%, transparent)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}
                 >{cancelling ? '…' : '✕ Cancelar'}</button>
                 <button
                   onClick={() => setRestartModal(true)}
@@ -440,7 +440,7 @@ export default function JobMonitor({ connection, session }) {
             <>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>Job seleccionado</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {selectedRow.JobText || selectedRow.JobName}
                   <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
                     {selectedRow.JobName} · {selectedRow.JobRunCount}
@@ -452,10 +452,10 @@ export default function JobMonitor({ connection, session }) {
               {restartMsg === 'ok' && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job reiniciado</span>}
               {restartMsg && restartMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {restartMsg}</span>}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={() => setStepsJob(selectedRow)} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(139,92,246,.4)', background: 'rgba(139,92,246,.12)', color: '#a78bfa', cursor: 'pointer' }}>
+                <button onClick={() => setStepsJob(selectedRow)} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--purple) 45%, transparent)', background: 'color-mix(in srgb, var(--purple) 15%, transparent)', color: 'var(--purple)', cursor: 'pointer' }}>
                   ▤ Ver pasos{selectedRow?.JobStepCount > 0 ? ` (${selectedRow.JobStepCount})` : ''}
                 </button>
-                <button onClick={handleCancel} disabled={!isCancelable || cancelling} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(255,107,107,.4)', background: isCancelable ? 'rgba(255,107,107,.12)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}>
+                <button onClick={handleCancel} disabled={!isCancelable || cancelling} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--red) 45%, transparent)', background: isCancelable ? 'color-mix(in srgb, var(--red) 15%, transparent)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}>
                   {cancelling ? 'Cancelando…' : '✕ Cancelar job'}
                 </button>
                 <button onClick={() => setRestartModal(true)} disabled={!isRestartable || restarting} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(6,182,212,.4)', background: isRestartable ? 'rgba(6,182,212,.12)' : 'transparent', color: isRestartable ? 'var(--cyan)' : 'var(--text3)', cursor: isRestartable ? 'pointer' : 'not-allowed', opacity: restarting ? .6 : 1 }}>
@@ -490,18 +490,18 @@ export default function JobMonitor({ connection, session }) {
         const jobLabel   = selectedRow.JobText || selectedRow.JobName
         return (
           <div style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)',
+            position: 'fixed', inset: 0, background: 'var(--overlay)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500,
           }}>
             <div style={{
               background: 'var(--bg2)', border: '1px solid var(--border2)',
-              borderRadius: 12, padding: 28, width: 'min(440px, 92vw)', boxShadow: '0 16px 48px rgba(0,0,0,.6)',
+              borderRadius: 12, padding: 28, width: 'min(440px, 92vw)', boxShadow: 'var(--shadow-lg)',
             }}>
 
               {/* ── Job fallido / cancelado → selector de modo ── */}
               {isError && (
                 <>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
                     ↺ Reiniciar job con error
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 20 }}>
@@ -534,17 +534,17 @@ export default function JobMonitor({ connection, session }) {
               {/* ── Job finalizado correctamente → re-ejecución directa ── */}
               {isFinished && (
                 <>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
                     ↺ Volver a ejecutar
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>
                     <strong style={{ color: 'var(--text)' }}>{jobLabel}</strong>
                   </div>
                   <div style={{
-                    background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.25)',
+                    background: 'color-mix(in srgb, var(--green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--green) 30%, transparent)',
                     borderRadius: 8, padding: '10px 14px', marginBottom: 20,
                   }}>
-                    <div style={{ fontSize: 11, color: '#86efac', lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 11, color: 'var(--green)', lineHeight: 1.6 }}>
                       Este job <strong>finalizó correctamente</strong>
                       {selectedRow.JobStatus === 'W' ? ' (con advertencias)' : ''}
                       {'. '}

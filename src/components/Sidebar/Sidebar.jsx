@@ -120,7 +120,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
       <div style={{ padding: 8, borderTop: '1px solid var(--border)', flexShrink: 0 }}>
         <button onClick={() => onSelect('connections')} style={{
           width: '100%', padding: '7px 0',
-          background: 'rgba(247,168,0,.08)', border: '1px dashed rgba(247,168,0,.3)',
+          background: 'var(--accent-bg-soft)', border: '1px dashed var(--accent-border-soft)',
           borderRadius: 6, color: 'var(--accent)', fontSize: 11, fontWeight: 600,
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
         }}>
@@ -139,14 +139,14 @@ function SidebarItem({ label, icon, iconColor, envColor, numberIcon, active, exp
       padding: '9px 14px',
       justifyContent: 'flex-start',
       gap: 10,
-      background: active ? 'rgba(247,168,0,.1)' : 'none',
+      background: active ? 'var(--accent-bg-soft)' : 'none',
       border: 'none',
       borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
       color: active ? 'var(--accent)' : 'var(--text2)',
       fontSize: 12, fontWeight: active ? 600 : 400,
       transition: 'all .15s', textAlign: 'left',
     }}
-      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,.04)' }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--surface-glass-soft)' }}
       onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'none' }}
       title={!expanded ? label : undefined}
     >
@@ -157,7 +157,7 @@ function SidebarItem({ label, icon, iconColor, envColor, numberIcon, active, exp
           background: active ? iconColor : `${iconColor}33`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 10, fontWeight: 700,
-          color: active ? '#fff' : (iconColor || 'var(--text2)'),
+          color: active ? 'var(--text-on-accent)' : (iconColor || 'var(--text2)'),
           position: 'relative',
           transition: 'background .15s',
         }}>
@@ -176,7 +176,7 @@ function SidebarItem({ label, icon, iconColor, envColor, numberIcon, active, exp
             <span style={{
               position: 'absolute', bottom: -2, right: -2,
               width: 7, height: 7, borderRadius: '50%',
-              background: sessionStatus === 'online' ? '#34d399' : 'rgba(255,255,255,.25)',
+              background: sessionStatus === 'online' ? 'var(--green)' : 'var(--text3)',
               border: '1.5px solid var(--bg2)',
             }} />
           )}

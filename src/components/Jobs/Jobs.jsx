@@ -86,9 +86,9 @@ export default function Jobs({ connection, session }) {
 
   if (error) return (
     <div style={{ padding: isMobile ? 14 : 28 }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 12 }}>Job Templates</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>Job Templates</div>
       <div style={{
-        background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)',
+        background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)',
         borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12,
       }}>✕ {error}</div>
     </div>
@@ -105,7 +105,7 @@ export default function Jobs({ connection, session }) {
         marginBottom: 16, flexShrink: 0, gap: isMobile ? 8 : 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Job Templates</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Job Templates</div>
           <div style={{ fontSize: 11, color: 'var(--text2)' }}>
             {sorted.length}{search ? ` de ${rows.length}` : ''} registros
           </div>
@@ -194,13 +194,13 @@ export default function Jobs({ connection, session }) {
                   ))}
                   <td style={TD} onClick={e => e.stopPropagation()}>
                     {scheduledRows[row.JobTemplateName] === 'ok' ? (
-                      <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>✓ Enviado</span>
+                      <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Enviado</span>
                     ) : (
                       <button
                         onClick={() => setScheduleRow(row)}
                         style={{
-                          padding: '4px 12px', borderRadius: 5, border: '1px solid rgba(34,197,94,.35)',
-                          background: 'rgba(34,197,94,.08)', color: '#22c55e',
+                          padding: '4px 12px', borderRadius: 5, border: '1px solid color-mix(in srgb, var(--green) 40%, transparent)',
+                          background: 'color-mix(in srgb, var(--green) 12%, transparent)', color: 'var(--green)',
                           fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
                         }}
                       >▶ Ejecutar</button>

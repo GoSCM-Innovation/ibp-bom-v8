@@ -44,7 +44,7 @@ export default function SystemView({ connection, session, onLogout }) {
       }}>
         <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>{connection.name}</div>
+          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connection.name}</div>
           <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
             {session ? (session.com0326?.user || session.com0068?.user || '—') : displayUrl}
           </div>
@@ -63,12 +63,12 @@ export default function SystemView({ connection, session, onLogout }) {
         </div>
         {session && onLogout && (
           <button onClick={onLogout} title="Cerrar sesión" style={{
-            background: 'none', border: '1px solid rgba(255,255,255,.12)', borderRadius: 6,
+            background: 'none', border: '1px solid var(--border)', borderRadius: 6,
             color: 'var(--text3)', fontSize: 11, fontWeight: 600, padding: '4px 10px',
             cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
           }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--red)'; e.currentTarget.style.color = 'var(--red)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,.12)'; e.currentTarget.style.color = 'var(--text3)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text3)' }}
           >
             Cerrar sesión
           </button>

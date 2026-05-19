@@ -120,7 +120,7 @@ export default function ResourceStats({ connection, session }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Resource Stats</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Resource Stats</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 3 }}>
             {lastRefresh ? `Actualizado ${lastRefresh.toLocaleTimeString()}` : 'Cargando...'}
           </div>
@@ -195,8 +195,8 @@ export default function ResourceStats({ connection, session }) {
                   wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
                   formatter={v => v === 'cpu' ? 'CPU' : 'Memoria'}
                 />
-                <Line type="monotone" dataKey="cpu" stroke="#06b6d4" dot={false} strokeWidth={1.5} isAnimationActive={false} />
-                <Line type="monotone" dataKey="mem" stroke="#a78bfa" dot={false} strokeWidth={1.5} isAnimationActive={false} />
+                <Line type="monotone" dataKey="cpu" stroke="var(--cyan)" dot={false} strokeWidth={1.5} isAnimationActive={false} />
+                <Line type="monotone" dataKey="mem" stroke="var(--purple)" dot={false} strokeWidth={1.5} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}

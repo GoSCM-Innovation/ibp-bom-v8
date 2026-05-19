@@ -190,7 +190,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
         marginBottom: 24, flexWrap: 'wrap', gap: 12,
       }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Resumen Global</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Resumen Global</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
             {connections.length} conexion{connections.length !== 1 ? 'es' : ''} · {gTotal} jobs
             {lastRefresh && (
@@ -270,9 +270,9 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text2)' }} allowDecimals={false} />
                 <Tooltip contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} />
                 <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text2)' }} />
-                <Bar dataKey="Finalizados" stackId="a" fill="#34d399" />
-                <Bar dataKey="Fallidos" stackId="a" fill="#ff6b6b" />
-                <Bar dataKey="Otros" stackId="a" fill="#6b7280" radius={[3,3,0,0]} />
+                <Bar dataKey="Finalizados" stackId="a" fill="var(--green)" />
+                <Bar dataKey="Fallidos" stackId="a" fill="var(--red)" />
+                <Bar dataKey="Otros" stackId="a" fill="var(--text3)" radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -303,28 +303,28 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                   <td style={tdStyle}>
                     <span style={{
                       width: 22, height: 22, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.12)',
+                      background: 'var(--surface-glass)', border: '1px solid var(--border)',
                       fontSize: 10, fontWeight: 700, color: 'var(--text2)',
                     }}>{cs.idx + 1}</span>
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#fff' }}>
+                  <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)' }}>
                     {cs.conn.name}
                   </td>
                   <td style={tdStyle}>
                     {cs.noSession ? (
                       <button onClick={() => onLogin?.(cs.conn.id)} style={{
                         fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, cursor: 'pointer',
-                        background: 'rgba(255,255,255,.06)', color: 'var(--text3)',
-                        border: '1px solid rgba(255,255,255,.12)',
+                        background: 'var(--surface-glass)', color: 'var(--text3)',
+                        border: '1px solid var(--border)',
                       }}>🔒 Iniciar sesión</button>
                     ) : cs.loading ? (
                       <span style={{ color: 'var(--text3)' }}>Cargando…</span>
                     ) : cs.error ? (
-                      <span style={{ ...statusBadge, background: 'rgba(255,107,107,.15)', color: 'var(--red)', border: '1px solid rgba(255,107,107,.3)' }}>Error</span>
+                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--red) 15%, transparent)', color: 'var(--red)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)' }}>Error</span>
                     ) : cs.failed > 0 ? (
-                      <span style={{ ...statusBadge, background: 'rgba(251,191,36,.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,.3)' }}>Atención</span>
+                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' }}>Atención</span>
                     ) : (
-                      <span style={{ ...statusBadge, background: 'rgba(52,211,153,.15)', color: 'var(--green)', border: '1px solid rgba(52,211,153,.3)' }}>Saludable</span>
+                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--green) 15%, transparent)', color: 'var(--green)', border: '1px solid color-mix(in srgb, var(--green) 35%, transparent)' }}>Saludable</span>
                     )}
                   </td>
                   <td style={{ ...tdStyle, fontWeight: 700 }}>{cs.total}</td>

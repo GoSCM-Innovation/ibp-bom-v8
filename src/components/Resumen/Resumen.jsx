@@ -173,7 +173,7 @@ export default function Resumen({ connection, session }) {
 
   if (error) return (
     <div style={{ padding: isMobile ? 16 : 32 }}>
-      <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>
+      <div style={{ background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>
       <TechLogs logs={logs} />
     </div>
   )
@@ -198,7 +198,7 @@ export default function Resumen({ connection, session }) {
         marginBottom: 24, flexWrap: 'wrap', gap: 12,
       }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Resumen</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Resumen</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
             {total} jobs en el período
             {lastRefresh && !loading && (
@@ -276,9 +276,9 @@ export default function Resumen({ connection, session }) {
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text2)' }} allowDecimals={false} />
                 <Tooltip contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} />
                 <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text2)' }} />
-                <Bar dataKey="Finalizados" stackId="a" fill="#34d399" radius={[0,0,0,0]} />
-                <Bar dataKey="Fallidos"    stackId="a" fill="#ff6b6b" radius={[0,0,0,0]} />
-                <Bar dataKey="Otros"       stackId="a" fill="#6b7280" radius={[3,3,0,0]} />
+                <Bar dataKey="Finalizados" stackId="a" fill="var(--green)" radius={[0,0,0,0]} />
+                <Bar dataKey="Fallidos"    stackId="a" fill="var(--red)" radius={[0,0,0,0]} />
+                <Bar dataKey="Otros"       stackId="a" fill="var(--text3)" radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -396,7 +396,7 @@ function TzToggle({ mode, onToggle }) {
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'utc' ? 'var(--border2)' : 'transparent',
-          color: mode === 'utc' ? '#fff' : 'var(--text3)',
+          color: mode === 'utc' ? 'var(--text)' : 'var(--text3)',
         }}
       >UTC</button>
       <button
@@ -405,7 +405,7 @@ function TzToggle({ mode, onToggle }) {
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'local' ? 'var(--border2)' : 'transparent',
-          color: mode === 'local' ? '#fff' : 'var(--text3)',
+          color: mode === 'local' ? 'var(--text)' : 'var(--text3)',
         }}
       >{getTzLabel()}</button>
     </div>

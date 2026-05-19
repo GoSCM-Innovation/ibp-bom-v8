@@ -79,7 +79,7 @@ function NodeRow({ ns, label, techName, indent = 0, isChild = false, connection,
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: isChild ? 11 : 12, fontWeight: isChild ? 500 : 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: isChild ? 11 : 12, fontWeight: isChild ? 500 : 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {label}
             </span>
             <span style={{ fontSize: 10, color, fontWeight: 600 }}>
@@ -181,7 +181,7 @@ export default function RunView({ run, orch, onCancel, onClose, connection, sess
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{orch.name}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{orch.name}</div>
           <div style={{ fontSize: 11, color: overallColor, marginTop: 2 }}>
             {STATUS_LABEL[run.status] || run.status}
             {!isRunning && getDuration() && <span style={{ color: 'var(--text3)', marginLeft: 8 }}>· {getDuration()}</span>}

@@ -313,7 +313,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     <>
       <div
         onClick={executing ? undefined : onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 500, backdropFilter: 'blur(2px)' }}
+        style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 500, backdropFilter: 'blur(2px)' }}
       />
 
       <div style={{
@@ -323,7 +323,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         background: 'var(--bg)', border: '1px solid var(--border2)',
         borderRadius: 12, zIndex: 501,
         display: 'flex', flexDirection: 'column',
-        boxShadow: '0 24px 64px rgba(0,0,0,.5)',
+        boxShadow: 'var(--shadow-lg)',
         animation: 'scheduleModalIn .18s ease-out',
       }}>
 
@@ -331,7 +331,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Ejecutar job</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Ejecutar job</div>
               <div style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{templateLabel}</div>
               <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 2 }}>{row.JobTemplateName}</div>
             </div>
@@ -377,7 +377,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           )}
 
           {loadError && (
-            <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '10px 14px', color: 'var(--red)', fontSize: 12 }}>
+            <div style={{ background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 8, padding: '10px 14px', color: 'var(--red)', fontSize: 12 }}>
               ✕ {loadError}
             </div>
           )}
@@ -421,7 +421,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
                   }}>{step.seqPos}</span>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {stepTitle}
                     </div>
                     {showCatalogSubtitle && (
@@ -460,7 +460,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         {/* ── Footer ── */}
         <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
           {execError && (
-            <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 6, padding: '8px 12px', color: 'var(--red)', fontSize: 11, marginBottom: 12, wordBreak: 'break-word' }}>
+            <div style={{ background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 6, padding: '8px 12px', color: 'var(--red)', fontSize: 11, marginBottom: 12, wordBreak: 'break-word' }}>
               ✕ {execError}
             </div>
           )}
@@ -478,7 +478,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
             </button>
             <button
               onClick={handleExecute} disabled={executing || loading}
-              style={{ padding: '7px 18px', borderRadius: 6, border: '1px solid rgba(34,197,94,.35)', background: 'rgba(34,197,94,.1)', color: '#22c55e', fontSize: 12, fontWeight: 600, cursor: (executing || loading) ? 'default' : 'pointer', opacity: (executing || loading) ? 0.6 : 1 }}
+              style={{ padding: '7px 18px', borderRadius: 6, border: '1px solid color-mix(in srgb, var(--green) 40%, transparent)', background: 'color-mix(in srgb, var(--green) 15%, transparent)', color: 'var(--green)', fontSize: 12, fontWeight: 600, cursor: (executing || loading) ? 'default' : 'pointer', opacity: (executing || loading) ? 0.6 : 1 }}
             >
               {executing ? 'Ejecutando…' : '▶ Ejecutar'}
             </button>

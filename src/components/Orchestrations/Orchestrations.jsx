@@ -395,7 +395,7 @@ export default function Orchestrations({ connection, session }) {
                       width: 26, height: 26, borderRadius: 5, cursor: isRunning ? 'default' : 'pointer',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, fontWeight: 700,
-                      background: isActive ? 'rgba(59,130,246,.2)' : 'rgba(255,255,255,.05)',
+                      background: isActive ? 'var(--accent-bg-soft)' : 'var(--surface-glass)',
                       border: isActive ? '1px solid var(--accent)' : '1px solid var(--border)',
                       color: isActive ? 'var(--accent)' : 'var(--text3)',
                     }}
@@ -405,7 +405,7 @@ export default function Orchestrations({ connection, session }) {
                       <span style={{
                         position: 'absolute', top: -3, right: -3,
                         width: 7, height: 7, borderRadius: '50%',
-                        background: '#22c55e',
+                        background: 'var(--green)',
                         animation: 'orchRunPulse 1.2s ease-in-out infinite',
                       }} />
                     )}
@@ -499,7 +499,7 @@ export default function Orchestrations({ connection, session }) {
         <>
           <div
             onClick={() => setShowImportModal(false)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 500, backdropFilter: 'blur(2px)' }}
+            style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 500, backdropFilter: 'blur(2px)' }}
           />
           <div style={{
             position: 'fixed', top: '50%', left: '50%',
@@ -507,13 +507,13 @@ export default function Orchestrations({ connection, session }) {
             width: 'min(440px, 95vw)',
             background: 'var(--bg)', border: '1px solid var(--border2)',
             borderRadius: 12, zIndex: 501, padding: '24px',
-            boxShadow: '0 24px 64px rgba(0,0,0,.5)',
+            boxShadow: 'var(--shadow-lg)',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
               Importar orquestaciones
             </div>
             <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 16 }}>
-              Se encontraron <strong style={{ color: '#fff' }}>{importParsed.orchestrations.length}</strong> orquestación(es) en el archivo.
+              Se encontraron <strong style={{ color: 'var(--text)' }}>{importParsed.orchestrations.length}</strong> orquestación(es) en el archivo.
               {importParsed.sourceConnection && (
                 <span style={{ color: 'var(--text3)' }}> (origen: {importParsed.sourceConnection})</span>
               )}
@@ -559,7 +559,7 @@ export default function Orchestrations({ connection, session }) {
         <>
           <div
             onClick={() => setShowCreateModal(false)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 500, backdropFilter: 'blur(2px)' }}
+            style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 500, backdropFilter: 'blur(2px)' }}
           />
           <div style={{
             position: 'fixed', top: '50%', left: '50%',
@@ -567,9 +567,9 @@ export default function Orchestrations({ connection, session }) {
             width: 'min(400px, 92vw)',
             background: 'var(--bg2)', border: '1px solid var(--border2)',
             borderRadius: 12, zIndex: 501, padding: 24,
-            boxShadow: '0 24px 64px rgba(0,0,0,.5)',
+            boxShadow: 'var(--shadow-lg)',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 16 }}>
               Nueva orquestación
             </div>
             <input
@@ -580,7 +580,7 @@ export default function Orchestrations({ connection, session }) {
               placeholder="Nombre de la orquestación…"
               style={{
                 width: '100%', background: 'var(--bg)', border: '1px solid var(--border2)',
-                borderRadius: 7, color: '#fff', fontSize: 13, fontWeight: 500,
+                borderRadius: 7, color: 'var(--text)', fontSize: 13, fontWeight: 500,
                 padding: '9px 12px', outline: 'none', marginBottom: 18,
               }}
               onFocus={e => e.target.style.borderColor = 'var(--accent)'}
@@ -617,7 +617,7 @@ export default function Orchestrations({ connection, session }) {
         <>
           <div
             onClick={() => setDeleteTargetId(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 500, backdropFilter: 'blur(2px)' }}
+            style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 500, backdropFilter: 'blur(2px)' }}
           />
           <div style={{
             position: 'fixed', top: '50%', left: '50%',
@@ -625,9 +625,9 @@ export default function Orchestrations({ connection, session }) {
             width: 'min(380px, 92vw)',
             background: 'var(--bg2)', border: '1px solid var(--border2)',
             borderRadius: 12, zIndex: 501, padding: 24,
-            boxShadow: '0 24px 64px rgba(0,0,0,.5)',
+            boxShadow: 'var(--shadow-lg)',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Eliminar orquestación</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Eliminar orquestación</div>
             <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 20 }}>
               Esta acción no se puede deshacer. ¿Confirmas?
             </div>
