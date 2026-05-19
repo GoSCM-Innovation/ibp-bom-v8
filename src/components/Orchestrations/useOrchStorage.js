@@ -31,6 +31,21 @@ export function deleteOrch(connId, id) {
   saveOrchs(connId, loadOrchs(connId).filter(o => o.id !== id))
 }
 
+export function duplicateOrch(connId, id) {
+  const orchs = loadOrchs(connId)
+  const original = orchs.find(o => o.id === id)
+  if (!original) return null
+  const copy = {
+    ...original,
+    id: crypto.randomUUID(),
+    name: `${original.name} (copia)`,
+    createdAt: new Date().toISOString(),
+    steps: JSON.parse(JSON.stringify(original.steps || [])),
+  }
+  saveOrchs(connId, [...orchs, copy])
+  return copy
+}
+
 export function exportOrchs(orchs, connectionName) {
   const payload = {
     version: '1.0',

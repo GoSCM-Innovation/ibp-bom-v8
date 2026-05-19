@@ -10,7 +10,21 @@ function colorFor(name = '') {
 }
 
 function initials(name = '') {
-  return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('')
+  const match = name.trim().match(/^(.*?)\s*\(([^)]+)\)\s*$/)
+  if (match) {
+    const words = match[1].trim().split(/\s+/).filter(Boolean)
+    const abbr = words.length === 1 ? words[0].slice(0, 2).toUpperCase() : words.map(w => w[0]?.toUpperCase() || '').join('')
+    const env = match[2].trim()
+    let envLetter
+    if (/calidad/i.test(env)) envLetter = 'Q'
+    else if (/producci[oó]n/i.test(env)) envLetter = 'P'
+    else if (/desarrollo/i.test(env)) envLetter = 'D'
+    else envLetter = env[0]?.toUpperCase() || ''
+    return envLetter ? `${abbr}-${envLetter}` : abbr
+  }
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
+  return words.slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('')
 }
 
 export default function ConnectionAvatar({ name, logoUrl, size = 36 }) {
@@ -32,7 +46,7 @@ export default function ConnectionAvatar({ name, logoUrl, size = 36 }) {
     <div style={{
       width: size, height: size, borderRadius: 8, background: bg,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontWeight: 700, fontSize: size * 0.36, color: '#fff',
+      fontWeight: 700, fontSize: size * (letters.length > 3 ? 0.28 : 0.36), color: '#fff',
       flexShrink: 0, userSelect: 'none',
     }}>
       {letters}

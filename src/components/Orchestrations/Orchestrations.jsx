@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { loadOrchs, saveOrchs, createOrch, updateOrch, deleteOrch, exportOrchs, importOrchs } from './useOrchStorage'
+import { loadOrchs, saveOrchs, createOrch, updateOrch, deleteOrch, duplicateOrch, exportOrchs, importOrchs } from './useOrchStorage'
 import { useOrchRun } from './useOrchRun'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import OrchBuilder from './OrchBuilder'
@@ -77,6 +77,16 @@ export default function Orchestrations({ connection, session }) {
 
   function handleDelete(id) {
     setDeleteTargetId(id)
+  }
+
+  function handleDuplicate(id) {
+    const copy = duplicateOrch(connId, id)
+    if (!copy) return
+    setOrchs(loadOrchs(connId))
+    setSelectedId(copy.id)
+    setMode('build')
+    setMobileView('builder')
+    reset()
   }
 
   function confirmDelete() {
@@ -278,18 +288,32 @@ export default function Orchestrations({ connection, session }) {
                         </div>
                       </div>
                       {!isRunning && (
-                        <button
-                          onClick={e => { e.stopPropagation(); handleDelete(orch.id) }}
-                          title="Eliminar"
-                          style={{
-                            background: 'none', border: 'none', color: 'var(--text3)',
-                            fontSize: 11, cursor: 'pointer', padding: '2px 4px', lineHeight: 1,
-                            flexShrink: 0, opacity: 0.5,
-                            transition: 'opacity .12s, color .12s',
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.opacity = 1; e.currentTarget.style.color = 'var(--red)' }}
-                          onMouseLeave={e => { e.currentTarget.style.opacity = 0.5; e.currentTarget.style.color = 'var(--text3)' }}
-                        >✕</button>
+                        <>
+                          <button
+                            onClick={e => { e.stopPropagation(); handleDuplicate(orch.id) }}
+                            title="Duplicar"
+                            style={{
+                              background: 'none', border: 'none', color: 'var(--text3)',
+                              fontSize: 12, cursor: 'pointer', padding: '2px 4px', lineHeight: 1,
+                              flexShrink: 0, opacity: 0.5,
+                              transition: 'opacity .12s, color .12s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.opacity = 1; e.currentTarget.style.color = '#22c55e' }}
+                            onMouseLeave={e => { e.currentTarget.style.opacity = 0.5; e.currentTarget.style.color = 'var(--text3)' }}
+                          >⧉</button>
+                          <button
+                            onClick={e => { e.stopPropagation(); handleDelete(orch.id) }}
+                            title="Eliminar"
+                            style={{
+                              background: 'none', border: 'none', color: 'var(--text3)',
+                              fontSize: 11, cursor: 'pointer', padding: '2px 4px', lineHeight: 1,
+                              flexShrink: 0, opacity: 0.5,
+                              transition: 'opacity .12s, color .12s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.opacity = 1; e.currentTarget.style.color = 'var(--red)' }}
+                            onMouseLeave={e => { e.currentTarget.style.opacity = 0.5; e.currentTarget.style.color = 'var(--text3)' }}
+                          >✕</button>
+                        </>
                       )}
                     </div>
                   )
