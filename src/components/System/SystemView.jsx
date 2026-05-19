@@ -32,8 +32,6 @@ export default function SystemView({ connection, session, onLogout }) {
 
   const [activeApp, setActiveApp] = useState(APPS[0]?.id || null)
 
-  const displayUrl = connection.com0326?.url || connection.com0068?.url || ''
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* System header */}
@@ -45,9 +43,6 @@ export default function SystemView({ connection, session, onLogout }) {
         <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connection.name}</div>
-          <div style={{ fontSize: 10, color: 'var(--text2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
-            {session ? (session.com0326?.user || session.com0068?.user || '—') : displayUrl}
-          </div>
           {getSapSystemUrl(connection.com0326?.url) && (
             <a
               href={getSapSystemUrl(connection.com0326?.url)}
