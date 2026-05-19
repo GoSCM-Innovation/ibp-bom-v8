@@ -11,21 +11,21 @@ function colorFor(name = '') {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
 }
 function initials(name = '') {
-  const match = name.trim().match(/^(.*?)\s*\(([^)]+)\)\s*$/)
-  if (match) {
-    const words = match[1].trim().split(/\s+/).filter(Boolean)
-    const abbr = words.length === 1 ? words[0].slice(0, 2).toUpperCase() : words.map(w => w[0]?.toUpperCase() || '').join('')
-    const env = match[2].trim()
-    let envLetter
-    if (/calidad/i.test(env)) envLetter = 'Q'
-    else if (/producci[oó]n/i.test(env)) envLetter = 'P'
-    else if (/desarrollo/i.test(env)) envLetter = 'D'
-    else envLetter = env[0]?.toUpperCase() || ''
-    return envLetter ? `${abbr}-${envLetter}` : abbr
-  }
-  const words = name.trim().split(/\s+/).filter(Boolean)
+  const base = name.trim().replace(/\s*\([^)]*\)\s*$/, '').trim()
+  const words = base.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return name.slice(0, 2).toUpperCase()
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
   return words.slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('')
+}
+
+function envDotColor(name = '') {
+  const match = name.trim().match(/\(([^)]+)\)\s*$/)
+  if (!match) return null
+  const env = match[1].trim()
+  if (/calidad/i.test(env)) return '#F59E0B'
+  if (/producci[oó]n/i.test(env)) return '#3B82F6'
+  if (/desarrollo/i.test(env)) return '#8B5CF6'
+  return '#6B7280'
 }
 
 export default function Sidebar({ connections, sessions = {}, activeId, onSelect, expanded, onToggle, isMobile = false, mobileOpen = false }) {
@@ -105,6 +105,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
               label={c.name}
               icon={initials(c.name)}
               iconColor={colorFor(c.name)}
+              envColor={envDotColor(c.name)}
               numberIcon
               active={activeId === c.id}
               expanded={isExpanded}
@@ -131,7 +132,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
   )
 }
 
-function SidebarItem({ label, icon, iconColor, numberIcon, active, expanded, onClick, sessionStatus }) {
+function SidebarItem({ label, icon, iconColor, envColor, numberIcon, active, expanded, onClick, sessionStatus }) {
   return (
     <button onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center',
@@ -161,6 +162,15 @@ function SidebarItem({ label, icon, iconColor, numberIcon, active, expanded, onC
           transition: 'background .15s',
         }}>
           {icon}
+          {/* Environment indicator dot */}
+          {envColor && (
+            <span style={{
+              position: 'absolute', top: -2, right: -2,
+              width: 7, height: 7, borderRadius: '50%',
+              background: envColor,
+              border: '1.5px solid var(--bg2)',
+            }} />
+          )}
           {/* Session indicator dot */}
           {sessionStatus && (
             <span style={{
