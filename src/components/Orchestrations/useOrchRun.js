@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
+import { saveRunState, clearRunState } from './useOrchStorage'
 
 const POLL_MS = 5000
 
@@ -50,7 +51,9 @@ export function useOrchRun(connection, session) {
   const runRef    = useRef(null)
 
   function flush() {
-    setRun(deepCopy(runRef.current))
+    const copy = deepCopy(runRef.current)
+    setRun(copy)
+    saveRunState(connection.id, copy)
   }
 
   function patch(stepId, changes, childId = null) {
@@ -274,6 +277,16 @@ export function useOrchRun(connection, session) {
     cancelRef.current = false
     runRef.current = null
     setRun(null)
+    clearRunState(connection.id)
+  }, [connection.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const restoreRun = useCallback((savedRun) => {
+    runRef.current = savedRun
+    setRun(deepCopy(savedRun))
+  }, [])
+
+  useEffect(() => {
+    return () => { cancelRef.current = true }
   }, [])
 
   return {
@@ -282,5 +295,6 @@ export function useOrchRun(connection, session) {
     start,
     cancel,
     reset,
+    restoreRun,
   }
 }

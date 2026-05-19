@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { loadOrchs, saveOrchs, createOrch, updateOrch, deleteOrch, duplicateOrch, exportOrchs, importOrchs } from './useOrchStorage'
+import { loadOrchs, saveOrchs, createOrch, updateOrch, deleteOrch, duplicateOrch, exportOrchs, importOrchs, loadRunState } from './useOrchStorage'
 import { useOrchRun } from './useOrchRun'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import OrchBuilder from './OrchBuilder'
@@ -31,17 +31,25 @@ export default function Orchestrations({ connection, session }) {
   const fileRef = useRef(null)
   const isMobile = useIsMobile()
 
-  const { run, isRunning, start, cancel, reset } = useOrchRun(connection, session)
+  const { run, isRunning, start, cancel, reset, restoreRun } = useOrchRun(connection, session)
 
   const selected = orchs.find(o => o.id === selectedId) || null
 
   useEffect(() => {
     setOrchs(loadOrchs(connId))
-    setSelectedId(null)
-    setMode('build')
     setMobileView('list')
     setFullscreen(false)
-    reset()
+
+    const savedRun = loadRunState(connId)
+    if (savedRun) {
+      restoreRun(savedRun)
+      setSelectedId(savedRun.orchId)
+      setMode('run')
+    } else {
+      setSelectedId(null)
+      setMode('build')
+      reset()
+    }
   }, [connId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Exit fullscreen + go back to list if selection cleared

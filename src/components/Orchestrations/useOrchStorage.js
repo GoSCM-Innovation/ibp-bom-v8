@@ -66,6 +66,20 @@ export function exportOrchs(orchs, connectionName) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+const RUN_KEY = connId => `ibp_orch_run_${connId}`
+
+export function saveRunState(connId, run) {
+  try { localStorage.setItem(RUN_KEY(connId), JSON.stringify(run)) } catch {}
+}
+
+export function loadRunState(connId) {
+  try { return JSON.parse(localStorage.getItem(RUN_KEY(connId))) } catch { return null }
+}
+
+export function clearRunState(connId) {
+  try { localStorage.removeItem(RUN_KEY(connId)) } catch {}
+}
+
 export function importOrchs(connId, parsed, replaceDuplicates) {
   const orchs = loadOrchs(connId)
   let added = 0, replaced = 0, skipped = 0
