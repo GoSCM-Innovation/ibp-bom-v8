@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
-import { saveRunState, clearRunState } from './useOrchStorage'
+import { saveRunState, loadRunState, clearRunState } from './useOrchStorage'
 
 const POLL_MS = 5000
 
@@ -45,23 +45,49 @@ function initNodes(steps) {
 
 function deepCopy(obj) { return JSON.parse(JSON.stringify(obj)) }
 
+// ── Module-level store keyed by connId ────────────────────────────────────────
+// Allows cancelRef and runRef to survive component unmount/remount, so:
+// - background polling continues when the user navigates away
+// - cancel() works correctly after returning to the tab
+const _stores = new Map()
+
+function getStore(connId) {
+  if (!_stores.has(connId)) {
+    _stores.set(connId, { cancelRef: { current: false }, runRef: { current: null }, notify: null })
+  }
+  return _stores.get(connId)
+}
+
 export function useOrchRun(connection, session) {
-  const [run, setRun] = useState(null)
-  const cancelRef = useRef(false)
-  const runRef    = useRef(null)
+  const connId = connection.id
+  const store = getStore(connId)
+
+  const [run, setRun] = useState(() => {
+    if (store.runRef.current) return deepCopy(store.runRef.current)
+    return loadRunState(connId)
+  })
+
+  // Register this component instance as the active listener.
+  // When the component unmounts we unregister, but do NOT cancel the run.
+  useEffect(() => {
+    store.notify = setRun
+    // Sync in case the background loop updated the store while we were away
+    if (store.runRef.current) setRun(deepCopy(store.runRef.current))
+    return () => { if (store.notify === setRun) store.notify = null }
+  }, [connId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function flush() {
-    const copy = deepCopy(runRef.current)
-    setRun(copy)
-    saveRunState(connection.id, copy)
+    const copy = deepCopy(store.runRef.current)
+    saveRunState(connId, copy)
+    if (store.notify) store.notify(copy)
   }
 
   function patch(stepId, changes, childId = null) {
-    if (!runRef.current) return
+    if (!store.runRef.current) return
     if (childId) {
-      Object.assign(runRef.current.nodes[stepId].children[childId], changes)
+      Object.assign(store.runRef.current.nodes[stepId].children[childId], changes)
     } else {
-      Object.assign(runRef.current.nodes[stepId], changes)
+      Object.assign(store.runRef.current.nodes[stepId], changes)
     }
     flush()
   }
@@ -76,11 +102,9 @@ export function useOrchRun(connection, session) {
     const data = await r.json()
     if (data?.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
 
-    // Prefer a JobName returned directly in the response
     const direct = data?.d?.JobName || data?.d?.JobSchedule?.JobName
     if (direct) return direct
 
-    // Fallback: fetch the most recent job for this template
     await new Promise(res => setTimeout(res, 2000))
     const r2 = await proxyCall({ connection, session, path: `/JobHeaderSet?$filter=JobTemplateName+eq+${enc(templateName)}&$orderby=JobPlannedStartDateTime+desc&$top=1` })
     const d2 = await r2.json()
@@ -97,9 +121,9 @@ export function useOrchRun(connection, session) {
     let currentJob      = jobName
     let retryCount      = 0
 
-    while (!cancelRef.current) {
+    while (!store.cancelRef.current) {
       await new Promise(res => setTimeout(res, POLL_MS))
-      if (cancelRef.current) break
+      if (store.cancelRef.current) break
 
       let sapStatus
       try {
@@ -123,7 +147,7 @@ export function useOrchRun(connection, session) {
         retryCount++
         patch(stepId, { retryCount, error: `Reintentando ${retryCount}/${maxRetries}…` }, childId)
         await new Promise(res => setTimeout(res, retryDelaySec * 1000))
-        if (cancelRef.current) break
+        if (store.cancelRef.current) break
         try {
           currentJob = await scheduleJob(step)
           patch(stepId, { jobName: currentJob, sapStatus: null, status: 'running', error: `Intento ${retryCount}/${maxRetries}` }, childId)
@@ -143,7 +167,6 @@ export function useOrchRun(connection, session) {
       return orchStatus
     }
 
-    // cancelled
     const now = new Date().toISOString()
     patch(stepId, { status: 'cancelled', finishedAt: now }, childId)
     return 'cancelled'
@@ -174,11 +197,10 @@ export function useOrchRun(connection, session) {
     patch(step.id, { status: 'running', startedAt: new Date().toISOString() })
 
     const results = await Promise.allSettled(children.map(async child => {
-      patch(step.id, { status: 'running', startedAt: runRef.current.nodes[step.id].startedAt }, child.id)
-      // set child running
-      if (runRef.current?.nodes[step.id]?.children[child.id]) {
-        runRef.current.nodes[step.id].children[child.id].status = 'running'
-        runRef.current.nodes[step.id].children[child.id].startedAt = new Date().toISOString()
+      patch(step.id, { status: 'running', startedAt: store.runRef.current.nodes[step.id].startedAt }, child.id)
+      if (store.runRef.current?.nodes[step.id]?.children[child.id]) {
+        store.runRef.current.nodes[step.id].children[child.id].status = 'running'
+        store.runRef.current.nodes[step.id].children[child.id].startedAt = new Date().toISOString()
         flush()
       }
 
@@ -197,7 +219,7 @@ export function useOrchRun(connection, session) {
     const hasCancelled = statuses.some(s => s === 'cancelled')
     const hasError     = statuses.some(s => s === 'error')
 
-    const groupStatus = (cancelRef.current || hasCancelled)
+    const groupStatus = (store.cancelRef.current || hasCancelled)
       ? 'cancelled'
       : hasError ? 'error' : 'success'
 
@@ -208,9 +230,9 @@ export function useOrchRun(connection, session) {
   // ── Main start function ────────────────────────────────────────────────────
   const start = useCallback(async (orch) => {
     if (!orch?.steps?.length) return
-    cancelRef.current = false
+    store.cancelRef.current = false
 
-    runRef.current = {
+    store.runRef.current = {
       orchId: orch.id,
       orchName: orch.name,
       status: 'running',
@@ -223,24 +245,23 @@ export function useOrchRun(connection, session) {
     let finalStatus = 'success'
 
     for (let i = 0; i < orch.steps.length; i++) {
-      if (cancelRef.current) { finalStatus = 'cancelled'; break }
+      if (store.cancelRef.current) { finalStatus = 'cancelled'; break }
 
       const step = orch.steps[i]
       const result = step.type === 'group'
         ? await executeGroup(step)
         : await executeTask(step)
 
-      if (cancelRef.current) { finalStatus = 'cancelled'; break }
+      if (store.cancelRef.current) { finalStatus = 'cancelled'; break }
 
       if (result === 'error') {
         const strategy = step.errorStrategy || 'stop'
         if (strategy === 'stop' || strategy === 'retry') {
-          // mark remaining steps as skipped
           for (let j = i + 1; j < orch.steps.length; j++) {
-            runRef.current.nodes[orch.steps[j].id].status = 'skipped'
+            store.runRef.current.nodes[orch.steps[j].id].status = 'skipped'
             if (orch.steps[j].type === 'group') {
               for (const child of (orch.steps[j].children || [])) {
-                runRef.current.nodes[orch.steps[j].id].children[child.id].status = 'skipped'
+                store.runRef.current.nodes[orch.steps[j].id].children[child.id].status = 'skipped'
               }
             }
           }
@@ -248,46 +269,36 @@ export function useOrchRun(connection, session) {
           finalStatus = 'error'
           break
         }
-        // strategy === 'continue': keep going
       }
     }
 
-    if (!runRef.current) return
-    runRef.current.status = finalStatus
-    runRef.current.finishedAt = new Date().toISOString()
+    if (!store.runRef.current) return
+    store.runRef.current.status = finalStatus
+    store.runRef.current.finishedAt = new Date().toISOString()
     flush()
 
-    // Browser notification
     if ('Notification' in window && Notification.permission === 'granted') {
       const body = { success: 'Completada correctamente', error: 'Finalizó con errores', cancelled: 'Cancelada' }
       new Notification(orch.name || 'Orquestación', { body: body[finalStatus] || finalStatus })
     }
-  }, [connection, session]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection, session, connId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cancel = useCallback(() => {
-    cancelRef.current = true
-    if (runRef.current) {
-      runRef.current.status = 'cancelled'
-      runRef.current.finishedAt = new Date().toISOString()
+    store.cancelRef.current = true
+    if (store.runRef.current) {
+      store.runRef.current.status = 'cancelled'
+      store.runRef.current.finishedAt = new Date().toISOString()
       flush()
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const reset = useCallback(() => {
-    cancelRef.current = false
-    runRef.current = null
-    setRun(null)
-    clearRunState(connection.id)
-  }, [connection.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const restoreRun = useCallback((savedRun) => {
-    runRef.current = savedRun
-    setRun(deepCopy(savedRun))
-  }, [])
-
-  useEffect(() => {
-    return () => { cancelRef.current = true }
-  }, [])
+    store.cancelRef.current = false
+    store.runRef.current = null
+    clearRunState(connId)
+    if (store.notify) store.notify(null)
+    else setRun(null)
+  }, [connId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     run,
@@ -295,6 +306,5 @@ export function useOrchRun(connection, session) {
     start,
     cancel,
     reset,
-    restoreRun,
   }
 }

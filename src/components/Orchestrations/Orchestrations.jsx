@@ -15,8 +15,8 @@ export default function Orchestrations({ connection, session }) {
   const connId = connection.id
 
   const [orchs, setOrchs]               = useState(() => loadOrchs(connId))
-  const [selectedId, setSelectedId]     = useState(null)
-  const [mode, setMode]                 = useState('build') // 'build' | 'run'
+  const [selectedId, setSelectedId]     = useState(() => loadRunState(connId)?.orchId ?? null)
+  const [mode, setMode]                 = useState(() => loadRunState(connId) ? 'run' : 'build')
   const [importError, setImportError]   = useState('')
   const [importSuccess, setImportSuccess] = useState('')
   const [showImportModal, setShowImportModal] = useState(false)
@@ -31,7 +31,7 @@ export default function Orchestrations({ connection, session }) {
   const fileRef = useRef(null)
   const isMobile = useIsMobile()
 
-  const { run, isRunning, start, cancel, reset, restoreRun } = useOrchRun(connection, session)
+  const { run, isRunning, start, cancel, reset } = useOrchRun(connection, session)
 
   const selected = orchs.find(o => o.id === selectedId) || null
 
@@ -39,10 +39,8 @@ export default function Orchestrations({ connection, session }) {
     setOrchs(loadOrchs(connId))
     setMobileView('list')
     setFullscreen(false)
-
     const savedRun = loadRunState(connId)
     if (savedRun) {
-      restoreRun(savedRun)
       setSelectedId(savedRun.orchId)
       setMode('run')
     } else {
@@ -349,12 +347,15 @@ export default function Orchestrations({ connection, session }) {
                     }}
                   >↓ Exportar</button>
                   <button
-                    onClick={() => fileRef.current?.click()}
-                    title="Importar desde JSON"
+                    disabled={isRunning}
+                    onClick={() => !isRunning && fileRef.current?.click()}
+                    title={isRunning ? 'No se puede importar durante una ejecución activa' : 'Importar desde JSON'}
                     style={{
                       flex: 1, padding: '5px 0', borderRadius: 5,
                       border: '1px solid var(--border)', background: 'transparent',
-                      color: 'var(--text2)', fontSize: 10, cursor: 'pointer',
+                      color: isRunning ? 'var(--text3)' : 'var(--text2)',
+                      fontSize: 10, cursor: isRunning ? 'default' : 'pointer',
+                      opacity: isRunning ? 0.45 : 1,
                     }}
                   >↑ Importar</button>
                 </div>
