@@ -5,7 +5,7 @@ import Connections from './components/Connections/Connections'
 import SystemView from './components/System/SystemView'
 import GlobalResumen from './components/Resumen/GlobalResumen'
 import LoginModal from './components/Connections/LoginModal'
-import { getAll } from './services/connectionStorage'
+import { getAll, bulkImport } from './services/connectionStorage'
 import { loadAllSessions, setSession, clearSession } from './services/sessionStorage'
 import { useIsMobile } from './hooks/useIsMobile'
 import './App.css'
@@ -25,6 +25,12 @@ export default function App() {
 
   function refreshConnections() {
     setConnections(getAll())
+  }
+
+  function handleBulkImport(toImport, opts) {
+    const result = bulkImport(toImport, opts)
+    refreshConnections()
+    return result
   }
 
   function handleDeleted(id) {
@@ -72,7 +78,7 @@ export default function App() {
 
   function renderMain() {
     if (activeId === 'connections') {
-      return <Connections connections={connections} onSaved={refreshConnections} onDeleted={handleDeleted} onSelect={handleSelect} />
+      return <Connections connections={connections} onSaved={refreshConnections} onDeleted={handleDeleted} onSelect={handleSelect} onBulkImport={handleBulkImport} />
     }
     if (activeId === 'resumen-general') {
       return <GlobalResumen connections={connections} sessions={sessions} onLogin={(id) => setLoginTarget(id)} />
