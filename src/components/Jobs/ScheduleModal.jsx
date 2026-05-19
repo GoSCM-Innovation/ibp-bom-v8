@@ -64,10 +64,11 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     Promise.all([
       proxyCall({ connection, session, path: `/JobTemplateRead?JobTemplateName=${enc(name)}` }).then(r => r.json()),
       proxyCall({ connection, session, path: `/JobTemplateParamGroupSet?$filter=JobTemplateName+eq+${enc(name)}` }).then(r => r.json()),
-      proxyCall({ connection, session, path: `/JobTemplateSequenceSet?$filter=substringof(${enc(name)},JobTemplateName)` }).then(r => r.json()).catch(() => ({ d: { results: [] } })),
+      proxyCall({ connection, session, path: `/JobTemplateSet(JobTemplateName=${enc(name)},JobTemplateVersion=${enc('0')})/JobTemplateSequenceSet` }).then(r => r.json()).catch(() => ({ d: { results: [] } })),
     ]).then(async ([tplData, gData, seqData]) => {
+      const seqResults = seqData?.d?.results ?? seqData?.value ?? []
       const seqTextByPos = {}
-      ;(seqData?.d?.results ?? seqData?.value ?? []).forEach(s => {
+      seqResults.forEach(s => {
         if (s.JobSequenceText) seqTextByPos[s.JobSequencePosition] = s.JobSequenceText
       })
 
@@ -81,8 +82,10 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         sequences = td?.templates?.[0]?.sequences ?? []
       } catch { /* fall through */ }
 
-      // Texto legible de cada catálogo de step
-      const distinctCatalogs = [...new Set(sequences.map(s => s.basic_jce_name).filter(Boolean))]
+      // Texto legible de cada catálogo de step (solo si hay secuencias del path principal)
+      const distinctCatalogs = sequences.length > 0
+        ? [...new Set(sequences.map(s => s.basic_jce_name).filter(Boolean))]
+        : []
       const catalogTexts = {}
       await Promise.all(distinctCatalogs.map(async cat => {
         try {
@@ -93,45 +96,64 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         } catch { /* usa nombre técnico */ }
       }))
 
-      const finalSteps = sequences.map((seq, idx) => {
-        const stepNr    = idx + 1
-        const rawParams = seq.seq_param_val ?? []
-        const labelMap  = {}
-        rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
+      let finalSteps
+      if (sequences.length > 0) {
+        finalSteps = sequences.map((seq, idx) => {
+          const stepNr    = idx + 1
+          const rawParams = seq.seq_param_val ?? []
+          const labelMap  = {}
+          rawParams.forEach(p => { if (p.label) labelMap[p.name] = p.label })
 
-        // Valores desde seq_param_val[i].value[] — array para soportar multi-valor
-        const values = {}
-        rawParams.forEach(p => {
-          values[bn(p.name)] = (p.value ?? []).map(v => v.low ?? '').filter(v => v !== '')
-        })
-
-        // Cuántas variables custom activas (P_VARNO)
-        const varnoCount = parseInt(values['P_VARNO']?.[0] || '0', 10) || 0
-
-        const params = rawParams
-          .filter(p => p.hidden !== true)
-          .filter(p => {
-            // Slots P_VARN[N] / P_VARV[N]: mostrar solo N ≤ P_VARNO
-            const slot = varSlotNum(bn(p.name))
-            if (slot > 0) return slot <= varnoCount
-            return true
+          // Valores desde seq_param_val[i].value[] — array para soportar multi-valor
+          const values = {}
+          rawParams.forEach(p => {
+            values[bn(p.name)] = (p.value ?? []).map(v => v.low ?? '').filter(v => v !== '')
           })
-          .map(p => ({
-            name:       p.name,
-            label:      labelOf(p.name, labelMap),
-            group:      groupText[bn(p.name)] ?? null,
-            isCheckbox: p.check_box === true,
-          }))
 
-        return {
-          seqPos:       stepNr,
-          basicJceName: seq.basic_jce_name ?? '',
-          catalogText:  catalogTexts[seq.basic_jce_name] ?? seq.basic_jce_name ?? `Paso ${stepNr}`,
-          stepName:     seqTextByPos[seq.seq_position] ?? null,
-          params,
-          values,
-        }
-      })
+          // Cuántas variables custom activas (P_VARNO)
+          const varnoCount = parseInt(values['P_VARNO']?.[0] || '0', 10) || 0
+
+          const params = rawParams
+            .filter(p => p.hidden !== true)
+            .filter(p => {
+              // Slots P_VARN[N] / P_VARV[N]: mostrar solo N ≤ P_VARNO
+              const slot = varSlotNum(bn(p.name))
+              if (slot > 0) return slot <= varnoCount
+              return true
+            })
+            .map(p => ({
+              name:       p.name,
+              label:      labelOf(p.name, labelMap),
+              group:      groupText[bn(p.name)] ?? null,
+              isCheckbox: p.check_box === true,
+            }))
+
+          return {
+            seqPos:       stepNr,
+            basicJceName: seq.basic_jce_name ?? '',
+            catalogText:  catalogTexts[seq.basic_jce_name] ?? seq.basic_jce_name ?? `Paso ${stepNr}`,
+            stepName:     seqTextByPos[seq.seq_position] ?? null,
+            params,
+            values,
+          }
+        })
+      } else if (seqResults.length > 0) {
+        // Fallback para templates RHCI_DI u otros donde JobTemplateRead falla:
+        // la navigation JobTemplateSet(name,version)/JobTemplateSequenceSet sí devuelve steps.
+        finalSteps = seqResults
+          .slice()
+          .sort((a, b) => (a.JobSequencePosition || 0) - (b.JobSequencePosition || 0))
+          .map(seq => ({
+            seqPos:       seq.JobSequencePosition || 1,
+            basicJceName: seq.BasicJobCatalogEntryName ?? '',
+            catalogText:  seq.JceText || seq.BasicJobCatalogEntryName || '',
+            stepName:     seq.JobSequenceText || null,
+            params:       [],
+            values:       {},
+          }))
+      } else {
+        finalSteps = []
+      }
 
       setSteps(finalSteps)
       setLoading(false)
