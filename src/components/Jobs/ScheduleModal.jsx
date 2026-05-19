@@ -29,6 +29,12 @@ const PARAM_LABEL = {
   P_SCMTP: 'S&OP Time Profile Level', S_VERS: 'Version',
   P_CMD: 'Batch Command', P_PRES: 'Preview', P_SIMU: 'Simulation Mode',
   P_RULE: 'Rule ID', P_SCNID: 'Scenario', P_PLAREA: 'Planning Area',
+  // CIDS / HCI integration parameters
+  P_AGTGP: 'Agent Group', P_AGTNM: 'Agent Name', P_ORGNM: 'Organization Name',
+  P_ISPRD: 'Production', P_TSKID: 'Task Name', P_TSKDSC: 'Task Description',
+  P_PROF: 'System Configuration', P_CHDUR: 'Status Check (Hours)',
+  P_TEMPT: 'Template Type', P_FLTNM: 'Filter', P_AREANM: 'Planning Area',
+  P_GCONF: 'Configuration', P_URCTX: 'URL Context',
 }
 
 function labelOf(name, labelMap) {
@@ -138,8 +144,40 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           }
         })
       } else if (seqResults.length > 0) {
-        // Fallback para templates RHCI_DI u otros donde JobTemplateRead falla:
-        // la navigation JobTemplateSet(name,version)/JobTemplateSequenceSet sí devuelve steps.
+        // Fallback para templates RHCI_DI u otros donde JobTemplateRead falla.
+        // JobTemplateParameterValueDataSet sí es accesible y contiene los valores configurados.
+        const valData = await proxyCall({ connection, session,
+          path: `/JobTemplateParameterValueDataSet?$filter=JobTemplateName+eq+${enc(name)}`
+        }).then(r => r.json()).catch(() => ({ d: { results: [] } }))
+
+        const valResults = valData?.d?.results ?? valData?.value ?? []
+
+        // Agrupar valores por nombre base (bn() maneja nombres con o sin hash suffix)
+        const valsByBase = {}
+        valResults.forEach(v => {
+          const base = bn(v.JobTemplateParameterName)
+          if (!valsByBase[base]) valsByBase[base] = []
+          if (v.Low !== undefined) valsByBase[base].push(v.Low)
+        })
+
+        const varnoCount = parseInt(valsByBase['P_VARNO']?.[0] || '0', 10) || 0
+
+        const seenBases = new Set()
+        const paramDefs = valResults
+          .filter(v => {
+            const base = bn(v.JobTemplateParameterName)
+            if (seenBases.has(base)) return false
+            seenBases.add(base)
+            const slot = varSlotNum(base)
+            return slot <= 0 || slot <= varnoCount
+          })
+          .map(v => ({
+            name:       v.JobTemplateParameterName,
+            label:      labelOf(v.JobTemplateParameterName, {}),
+            group:      null,
+            isCheckbox: bn(v.JobTemplateParameterName) === 'P_ISPRD',
+          }))
+
         finalSteps = seqResults
           .slice()
           .sort((a, b) => (a.JobSequencePosition || 0) - (b.JobSequencePosition || 0))
@@ -148,8 +186,8 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
             basicJceName: seq.BasicJobCatalogEntryName ?? '',
             catalogText:  seq.JceText || seq.BasicJobCatalogEntryName || '',
             stepName:     seq.JobSequenceText || null,
-            params:       [],
-            values:       {},
+            params:       paramDefs,
+            values:       valsByBase,
           }))
       } else {
         finalSteps = []
