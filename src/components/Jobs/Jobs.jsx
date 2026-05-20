@@ -4,9 +4,12 @@ import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
 import ScheduleModal from './ScheduleModal'
+import TruncText from '../ui/TruncText'
 
 const JOB_PATH    = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
+const MOBILE_COLS  = ['JobTemplateName']
+const COL_LABELS   = { JobTemplateName: 'Nombre', JobTemplateText: 'Descripción' }
 const DEFAULT_COL_WIDTHS = { JobTemplateName: 240, JobTemplateText: 480 }
 
 const TD = { padding: '6px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
@@ -53,6 +56,8 @@ export default function Jobs({ connection, session }) {
     const av = String(a[sortCol] ?? ''), bv = String(b[sortCol] ?? '')
     return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av)
   })
+
+  const activeCols = isMobile ? MOBILE_COLS : VISIBLE_COLS
 
   function handleSort(col) {
     if (sortCol === col) setSortAsc(a => !a)
@@ -129,13 +134,12 @@ export default function Jobs({ connection, session }) {
         <div style={{ overflowX: 'auto', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
           <table style={{
             borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12,
-            // Suma de columnas + acción: fuerza que tableLayout:fixed respete los anchos
-            width: VISIBLE_COLS.reduce((s, c) => s + (colWidths[c] || DEFAULT_COL_WIDTHS[c] || 240), 110),
+            width: activeCols.reduce((s, c) => s + (colWidths[c] || DEFAULT_COL_WIDTHS[c] || 240), 110),
             minWidth: '100%',
           }}>
             <thead>
               <tr style={{ background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1 }}>
-                {VISIBLE_COLS.map(col => {
+                {activeCols.map(col => {
                   const w = colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240
                   return (
                     <th
@@ -145,11 +149,12 @@ export default function Jobs({ connection, session }) {
                         color: sortCol === col ? 'var(--accent)' : 'var(--text2)',
                         fontWeight: 600, whiteSpace: 'nowrap', position: 'relative',
                         borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                        userSelect: 'none', overflow: 'hidden',
+                        userSelect: 'none', overflow: 'hidden', textOverflow: 'ellipsis',
                       }}
+                      title={COL_LABELS[col] ?? col}
                       onClick={() => handleSort(col)}
                     >
-                      {col}
+                      {COL_LABELS[col] ?? col}
                       {sortCol === col && <span style={{ marginLeft: 4, fontSize: 10 }}>{sortAsc ? '↑' : '↓'}</span>}
                       <span
                         style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'col-resize', background: 'transparent' }}
@@ -169,7 +174,7 @@ export default function Jobs({ connection, session }) {
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={VISIBLE_COLS.length + 1} style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text2)', fontSize: 12 }}>
+                  <td colSpan={activeCols.length + 1} style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text2)', fontSize: 12 }}>
                     Sin resultados para "{search}"
                   </td>
                 </tr>
@@ -178,18 +183,16 @@ export default function Jobs({ connection, session }) {
                   key={i}
                   style={{ background: i % 2 === 0 ? 'var(--bg)' : 'var(--bg2)' }}
                 >
-                  {VISIBLE_COLS.map(col => (
+                  {activeCols.map(col => (
                     <td
                       key={col}
                       style={{
                         padding: '7px 12px', color: 'var(--text)',
                         borderBottom: '1px solid var(--border)',
-                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                         maxWidth: colWidths[col] || DEFAULT_COL_WIDTHS[col] || 240,
                       }}
-                      title={String(row[col] ?? '')}
                     >
-                      {String(row[col] ?? '')}
+                      <TruncText text={String(row[col] ?? '')} />
                     </td>
                   ))}
                   <td style={TD} onClick={e => e.stopPropagation()}>
