@@ -3,6 +3,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import StepsPanel from './StepsPanel'
+import TruncText from '../ui/TruncText'
 import { proxyCall } from '../../services/proxyCall'
 import {
   toSapTs, formatSapTs, toInputDate, inputDateToDate,
@@ -220,9 +221,9 @@ export default function JobMonitor({ connection, session }) {
   const tzSuffix = tzMode === 'utc' ? ' (UTC)' : ` (${getTzLabel()})`
   const BASE_COLS = useMemo(() => [
     { key: 'JobStatus',                label: 'Estado',                        w: 130, render: (v) => <StatusBadge code={v} /> },
-    { key: 'JobTemplateText',          label: 'Template',                      w: 220 },
-    { key: 'JobText',                  label: 'Descripción',                   w: 220 },
-    { key: 'JobCreatedByFormattedName',label: 'Usuario',                       w: 180 },
+    { key: 'JobTemplateText',          label: 'Template',                      w: 220, truncate: true },
+    { key: 'JobText',                  label: 'Descripción',                   w: 220, truncate: true },
+    { key: 'JobCreatedByFormattedName',label: 'Usuario',                       w: 180, truncate: true },
     { key: 'JobStepCount',             label: 'Pasos',                         w: 70  },
     { key: 'JobPlannedStartDateTime',  label: `Inicio planificado${tzSuffix}`, w: 190, render: v => formatSapTs(v, tzMode) },
     { key: 'JobStartDateTime',         label: `Inicio real${tzSuffix}`,        w: 175, render: v => formatSapTs(v, tzMode) },
@@ -331,8 +332,9 @@ export default function JobMonitor({ connection, session }) {
                   <th key={col.key} style={{
                     width: col.w, minWidth: col.w, padding: '9px 12px', textAlign: 'left',
                     color: 'var(--text2)', fontWeight: 600, whiteSpace: 'nowrap',
+                    overflow: 'hidden', textOverflow: 'ellipsis',
                     borderBottom: '1px solid var(--border)', position: 'relative', userSelect: 'none',
-                  }}>
+                  }} title={col.label}>
                     {col.label}
                     <span
                       style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'col-resize', background: 'transparent' }}
@@ -368,10 +370,12 @@ export default function JobMonitor({ connection, session }) {
                       <td key={col.key} style={{
                         padding: '7px 12px', color: isSelected ? '#fff' : 'var(--text)',
                         borderBottom: '1px solid var(--border)',
-                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap', overflow: 'hidden',
                         width: col.w, maxWidth: col.w,
-                      }} title={String(row[col.key] ?? '')}>
-                        {col.render ? col.render(row[col.key], row) : String(row[col.key] ?? '—')}
+                      }}>
+                        {col.truncate
+                          ? <TruncText text={String(row[col.key] ?? '')} />
+                          : col.render ? col.render(row[col.key], row) : String(row[col.key] ?? '—')}
                       </td>
                     ))}
                   </tr>

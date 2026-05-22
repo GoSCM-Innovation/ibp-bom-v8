@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import ProgressBar from '../ui/ProgressBar'
+import TruncText from '../ui/TruncText'
 import { proxyCall } from '../../services/proxyCall'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -287,7 +288,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
             <thead>
               <tr style={{ background: 'var(--bg3)' }}>
                 <th style={thStyle}>#</th>
-                <th style={{ ...thStyle, textAlign: 'left' }}>Conexión</th>
+                <th style={{ ...thStyle, textAlign: 'left', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>Conexión</th>
                 <th style={thStyle}>Estado</th>
                 <th style={thStyle}>Total</th>
                 <th style={thStyle}>Ejecutando</th>
@@ -307,8 +308,8 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                       fontSize: 10, fontWeight: 700, color: 'var(--text2)',
                     }}>{cs.idx + 1}</span>
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)' }}>
-                    {cs.conn.name}
+                  <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 160 }}>
+                    <TruncText text={cs.conn.name} style={{ fontWeight: 600, color: 'var(--text)' }} />
                   </td>
                   <td style={tdStyle}>
                     {cs.noSession ? (
