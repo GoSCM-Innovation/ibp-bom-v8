@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import TruncText from '../ui/TruncText'
 
 const STRATEGIES = [
   { value: 'stop',     label: 'Detener si falla'    },
@@ -247,18 +248,14 @@ export default function StepCard({
             </>
           ) : (
             <>
-              <div style={{
-                fontSize: 12, fontWeight: 600, color: 'var(--text)',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}>
-                {step.jobTemplateText || step.jobTemplateName}
-              </div>
-              <div style={{
-                fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)',
-                marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}>
-                {step.jobTemplateName}
-              </div>
+              <TruncText
+                text={step.jobTemplateText || step.jobTemplateName}
+                style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}
+              />
+              <TruncText
+                text={step.jobTemplateName}
+                style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}
+              />
               <StrategyRow step={step} onChange={p => !disabled && onChange(p)} />
               {connection && (
                 <TemplateSteps
@@ -321,12 +318,14 @@ export default function StepCard({
                 }}>∥</div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {child.jobTemplateText || child.jobTemplateName}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
-                    {child.jobTemplateName}
-                  </div>
+                  <TruncText
+                    text={child.jobTemplateText || child.jobTemplateName}
+                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}
+                  />
+                  <TruncText
+                    text={child.jobTemplateName}
+                    style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}
+                  />
                   <StrategyRow step={child} onChange={p => !disabled && onChangeChild(child.id, p)} />
                 </div>
 
