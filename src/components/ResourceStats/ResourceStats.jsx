@@ -6,14 +6,7 @@ import {
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { getTzMode, setTzMode as saveTzMode, getTzLabel } from '../../utils/dateUtils'
-
-const RANGES = [
-  { label: 'Última hora',    hours: 1   },
-  { label: 'Últimas 4h',     hours: 4   },
-  { label: 'Últimas 24h',    hours: 24  },
-  { label: 'Últimos 7 días', hours: 168 },
-  { label: 'Últimos 30 días', hours: 720 },
-]
+import { useI18n } from '../../context/I18nContext'
 
 // Extrae ms del formato OData /Date(1234567890+0000)/
 function parseMs(t) { return parseInt(t.slice(6)) }
@@ -39,7 +32,17 @@ function downsample(rows, intervalMs) {
 }
 
 export default function ResourceStats({ connection, session }) {
-  const [range,       setRange]       = useState(RANGES[2]) // 24h default
+  const { t } = useI18n()
+
+  const RANGES = [
+    { label: t('stats.range1h'),  hours: 1   },
+    { label: t('stats.range4h'),  hours: 4   },
+    { label: t('stats.range24h'), hours: 24  },
+    { label: t('stats.range7d'),  hours: 168 },
+    { label: t('stats.range30d'), hours: 720 },
+  ]
+
+  const [range,       setRange]       = useState(() => ({ label: t('stats.range24h'), hours: 24 }))
   const [data,        setData]        = useState([])
   const [current,     setCurrent]     = useState(null)
   const [loading,     setLoading]     = useState(true)
@@ -63,7 +66,6 @@ export default function ResourceStats({ connection, session }) {
       if (!res.ok) throw new Error((await res.json()).error || `Error ${res.status}`)
       const json = await res.json()
 
-      // API devuelve descendente → invertir para el gráfico (ascendente)
       const rows = (json.d?.results || [])
         .map(r => ({
           ts:  parseMs(r.Timestamp),
@@ -72,7 +74,6 @@ export default function ResourceStats({ connection, session }) {
         }))
         .reverse()
 
-      // Downsample: 7d → cada 10min, 30d → cada hora
       const intervalMs = range.hours >= 720 ? 60 * 60000
                        : range.hours >= 168 ? 10 * 60000
                        : null
@@ -122,12 +123,12 @@ export default function ResourceStats({ connection, session }) {
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Resource Stats</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 3 }}>
-            {lastRefresh ? `Actualizado ${lastRefresh.toLocaleTimeString()}` : 'Cargando...'}
+            {lastRefresh ? t('stats.updated', { time: lastRefresh.toLocaleTimeString() }) : t('stats.loading')}
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <TzToggle mode={tzMode} onToggle={handleTzToggle} />
+          <TzToggle mode={tzMode} onToggle={handleTzToggle} t={t} />
           {RANGES.map(r => (
             <button key={r.hours} onClick={() => setRange(r)} style={{
               padding: '5px 11px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
@@ -147,8 +148,8 @@ export default function ResourceStats({ connection, session }) {
 
       {/* KPIs */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
-        <KpiCard label="CPU actual" value={current?.cpu ?? null} color="#06b6d4" />
-        <KpiCard label="Memoria actual" value={current?.mem ?? null} color="#a78bfa" />
+        <KpiCard label={t('stats.kpiCpu')} value={current?.cpu ?? null} color="#06b6d4" />
+        <KpiCard label={t('stats.kpiMem')} value={current?.mem ?? null} color="#a78bfa" />
       </div>
 
       {/* Error */}
@@ -164,11 +165,11 @@ export default function ResourceStats({ connection, session }) {
         }}>
           {loading ? (
             <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 12 }}>
-              Cargando datos...
+              {t('stats.chartLoading')}
             </div>
           ) : data.length === 0 ? (
             <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', fontSize: 12 }}>
-              Sin datos para el rango seleccionado.
+              {t('stats.noData')}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={300}>
@@ -189,11 +190,11 @@ export default function ResourceStats({ connection, session }) {
                 <Tooltip
                   contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
                   labelFormatter={formatTooltipLabel}
-                  formatter={(v, name) => [`${v}%`, name === 'cpu' ? 'CPU' : 'Memoria']}
+                  formatter={(v, name) => [`${v}%`, name === 'cpu' ? 'CPU' : t('stats.legendMem')]}
                 />
                 <Legend
                   wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-                  formatter={v => v === 'cpu' ? 'CPU' : 'Memoria'}
+                  formatter={v => v === 'cpu' ? 'CPU' : t('stats.legendMem')}
                 />
                 <Line type="monotone" dataKey="cpu" stroke="var(--cyan)" dot={false} strokeWidth={1.5} isAnimationActive={false} />
                 <Line type="monotone" dataKey="mem" stroke="var(--purple)" dot={false} strokeWidth={1.5} isAnimationActive={false} />
@@ -206,12 +207,12 @@ export default function ResourceStats({ connection, session }) {
   )
 }
 
-function TzToggle({ mode, onToggle }) {
+function TzToggle({ mode, onToggle, t }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
       <button
         onClick={() => onToggle('utc')}
-        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        title={t('resumen.tzUtcTitle')}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'utc' ? 'var(--border2)' : 'transparent',
@@ -220,7 +221,7 @@ function TzToggle({ mode, onToggle }) {
       >UTC</button>
       <button
         onClick={() => onToggle('local')}
-        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        title={t('resumen.tzLocalTitle', { tz: getTzLabel() })}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'local' ? 'var(--border2)' : 'transparent',
