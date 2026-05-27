@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import StepsPanel from '../Jobs/StepsPanel'
+import { useI18n } from '../../context/I18nContext'
 
 const STATUS_COLOR = {
   pending:   'var(--text3)',
@@ -21,21 +22,11 @@ const STATUS_ICON = {
   skipped:   '–',
 }
 
-const STATUS_LABEL = {
-  pending:   'Pendiente',
-  running:   'En ejecución',
-  success:   'Completado',
-  warning:   'Con advertencias',
-  error:     'Error',
-  cancelled: 'Cancelado',
-  skipped:   'Omitido',
-}
-
 function Elapsed({ startedAt }) {
   const [, setTick] = useState(0)
   useEffect(() => {
-    const t = setInterval(() => setTick(n => n + 1), 1000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setTick(n => n + 1), 1000)
+    return () => clearInterval(timer)
   }, [])
   if (!startedAt) return null
   const secs = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
@@ -46,8 +37,20 @@ function Elapsed({ startedAt }) {
 const TERMINAL_STATUSES = new Set(['success', 'warning', 'error', 'cancelled'])
 
 function NodeRow({ ns, label, techName, indent = 0, isChild = false, connection, session }) {
+  const { t } = useI18n()
   const [sapExpanded, setSapExpanded] = useState(false)
   if (!ns) return null
+
+  const STATUS_LABEL = {
+    pending:   t('runview.statusPending'),
+    running:   t('runview.statusRunning'),
+    success:   t('runview.statusSuccess'),
+    warning:   t('runview.statusWarning'),
+    error:     t('runview.statusError'),
+    cancelled: t('runview.statusCancelled'),
+    skipped:   t('runview.statusSkipped'),
+  }
+
   const color = STATUS_COLOR[ns.status] || 'var(--text3)'
   const canShowSap = TERMINAL_STATUSES.has(ns.status) && ns.jobName && ns.jobRunCount != null
 
@@ -88,7 +91,7 @@ function NodeRow({ ns, label, techName, indent = 0, isChild = false, connection,
             {ns.status === 'running' && ns.startedAt && <Elapsed startedAt={ns.startedAt} />}
             {ns.retryCount > 0 && (
               <span style={{ fontSize: 9, color: '#fbbf24', background: 'rgba(251,191,36,.1)', borderRadius: 3, padding: '1px 5px' }}>
-                intento {ns.retryCount}
+                {t('runview.retry', { n: ns.retryCount })}
               </span>
             )}
           </div>
@@ -151,7 +154,18 @@ function NodeRow({ ns, label, techName, indent = 0, isChild = false, connection,
 }
 
 export default function RunView({ run, orch, onCancel, onClose, connection, session }) {
+  const { t } = useI18n()
   if (!run || !orch) return null
+
+  const STATUS_LABEL = {
+    pending:   t('runview.statusPending'),
+    running:   t('runview.statusRunning'),
+    success:   t('runview.statusSuccess'),
+    warning:   t('runview.statusWarning'),
+    error:     t('runview.statusError'),
+    cancelled: t('runview.statusCancelled'),
+    skipped:   t('runview.statusSkipped'),
+  }
 
   const overallColor = STATUS_COLOR[run.status] || 'var(--text3)'
   const isRunning    = run.status === 'running'
@@ -198,7 +212,7 @@ export default function RunView({ run, orch, onCancel, onClose, connection, sess
               color: '#ff6b6b', fontSize: 11, fontWeight: 600, cursor: 'pointer',
             }}
           >
-            ⊘ Cancelar
+            {t('runview.cancel')}
           </button>
         )}
 
@@ -212,7 +226,7 @@ export default function RunView({ run, orch, onCancel, onClose, connection, sess
               color: 'var(--text2)', fontSize: 11, cursor: 'pointer',
             }}
           >
-            ← Volver al editor
+            {t('runview.backToEditor')}
           </button>
         )}
       </div>
@@ -244,7 +258,7 @@ export default function RunView({ run, orch, onCancel, onClose, connection, sess
                   </div>
                   <div style={{ flex: 1 }}>
                     <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(129,140,248,1)' }}>
-                      {step.label || `Grupo paralelo · paso ${i + 1}`}
+                      {step.label || t('runview.groupHeader', { n: i + 1 })}
                     </span>
                     <span style={{ fontSize: 10, color: STATUS_COLOR[ns.status], marginLeft: 8 }}>
                       {STATUS_LABEL[ns.status] || ns.status}

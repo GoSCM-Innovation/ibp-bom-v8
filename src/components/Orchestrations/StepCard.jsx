@@ -1,13 +1,8 @@
 import { useState, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useI18n } from '../../context/I18nContext'
 import TruncText from '../ui/TruncText'
-
-const STRATEGIES = [
-  { value: 'stop',     label: 'Detener si falla'    },
-  { value: 'continue', label: 'Continuar si falla'  },
-  { value: 'retry',    label: 'Reintentar si falla' },
-]
 
 const inputStyle = {
   background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 5,
@@ -22,6 +17,12 @@ const selectStyle = {
 }
 
 function StrategyRow({ step, onChange }) {
+  const { t } = useI18n()
+  const STRATEGIES = [
+    { value: 'stop',     label: t('stepcard.strategyStop')    },
+    { value: 'continue', label: t('stepcard.strategyContinue') },
+    { value: 'retry',    label: t('stepcard.strategyRetry')   },
+  ]
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 8 }}>
       <div style={{ position: 'relative', flex: '1 1 160px', minWidth: 140 }}>
@@ -36,7 +37,7 @@ function StrategyRow({ step, onChange }) {
       {(step.errorStrategy === 'retry') && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' }}>
-            <span style={{ fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap' }}>Reintentos:</span>
+            <span style={{ fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap' }}>{t('stepcard.retries')}</span>
             <input
               type="number" min={1} max={10}
               value={step.maxRetries || 3}
@@ -45,7 +46,7 @@ function StrategyRow({ step, onChange }) {
             />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' }}>
-            <span style={{ fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap' }}>Espera (s):</span>
+            <span style={{ fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap' }}>{t('stepcard.delay')}</span>
             <input
               type="number" min={10} max={3600}
               value={step.retryDelaySec || 60}
@@ -60,6 +61,7 @@ function StrategyRow({ step, onChange }) {
 }
 
 function TemplateSteps({ jobTemplateName, connection, session }) {
+  const { t } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const [steps, setSteps]       = useState(null)
   const [loading, setLoading]   = useState(false)
@@ -89,14 +91,17 @@ function TemplateSteps({ jobTemplateName, connection, session }) {
           color: 'var(--text3)', fontSize: 10, padding: 0, display: 'flex', alignItems: 'center', gap: 4,
         }}
       >
-        {expanded ? '▲' : '▼'} {steps !== null ? `${count} paso${count !== 1 ? 's' : ''} del template` : 'Ver pasos del template'}
+        {expanded ? '▲' : '▼'}{' '}
+        {steps !== null
+          ? (count === 1 ? t('stepcard.stepsCount1') : t('stepcard.stepsCountN', { n: count }))
+          : t('stepcard.viewSteps')}
       </button>
 
       {expanded && (
         <div style={{ marginTop: 4, paddingLeft: 8, borderLeft: '2px solid var(--border)' }}>
-          {loading && <div style={{ fontSize: 10, color: 'var(--text3)', padding: '4px 0' }}>Cargando…</div>}
+          {loading && <div style={{ fontSize: 10, color: 'var(--text3)', padding: '4px 0' }}>{t('stepcard.loadingSteps')}</div>}
           {!loading && steps?.length === 0 && (
-            <div style={{ fontSize: 10, color: 'var(--text3)', fontStyle: 'italic', padding: '4px 0' }}>Sin pasos disponibles</div>
+            <div style={{ fontSize: 10, color: 'var(--text3)', fontStyle: 'italic', padding: '4px 0' }}>{t('stepcard.noSteps')}</div>
           )}
           {!loading && steps?.map((s, i) => (
             <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline', padding: '2px 0' }}>
@@ -104,7 +109,7 @@ function TemplateSteps({ jobTemplateName, connection, session }) {
                 {s.JobSequencePosition ?? i + 1}
               </span>
               <span style={{ fontSize: 10, color: 'var(--text2)' }}>
-                {s.JobSequenceText || s.JobCatalogEntryText || s.JobCatalogEntryName || `Paso ${i + 1}`}
+                {s.JobSequenceText || s.JobCatalogEntryText || s.JobCatalogEntryName || t('stepcard.noSteps')}
               </span>
             </div>
           ))}
@@ -122,14 +127,14 @@ export default function StepCard({
   disabled,
   isPendingGroup,
   connection, session,
-  // DnD props from OrchBuilder
   isDragOver,
-  dragOverPos,   // 'top' | 'bottom'
+  dragOverPos,
   onDragStart,
   onDragOver,
   onDragLeave,
   onDrop,
 }) {
+  const { t } = useI18n()
   const [groupExpanded, setGroupExpanded] = useState(true)
   const [dragging, setDragging] = useState(false)
   const isMobile = useIsMobile()
@@ -144,7 +149,6 @@ export default function StepCard({
     transition: 'color .12s, border-color .12s',
   }
 
-  // Drop indicator line
   const dropLine = isDragOver ? (
     <div style={{
       position: 'absolute', left: 0, right: 0,
@@ -193,7 +197,7 @@ export default function StepCard({
         {/* Drag handle — desktop only */}
         {!isMobile && (
           <div
-            title={disabled ? undefined : 'Arrastrar para reordenar'}
+            title={disabled ? undefined : t('stepcard.dragHandle')}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: 18, flexShrink: 0, alignSelf: 'stretch',
@@ -223,10 +227,10 @@ export default function StepCard({
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(129,140,248,1)' }}>
-                  Grupo paralelo
+                  {t('stepcard.group')}
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--text3)' }}>
-                  {children.length} tarea{children.length !== 1 ? 's' : ''}
+                  {children.length === 1 ? t('stepcard.task1') : t('stepcard.taskN', { n: children.length })}
                 </span>
                 <button
                   onMouseDown={e => e.stopPropagation()}
@@ -239,7 +243,7 @@ export default function StepCard({
               <input
                 value={step.label || ''}
                 onChange={e => !disabled && onChange({ label: e.target.value })}
-                placeholder="Descripción opcional…"
+                placeholder={t('stepcard.groupLabel')}
                 disabled={disabled}
                 onMouseDown={e => e.stopPropagation()}
                 style={{ ...inputStyle, marginTop: 6, fontSize: 11 }}
@@ -276,19 +280,19 @@ export default function StepCard({
           <button
             disabled={disabled || index === 0}
             onClick={onMoveUp}
-            title="Mover arriba"
+            title={t('stepcard.moveUp')}
             style={{ ...btnBase, opacity: (disabled || index === 0) ? 0.25 : 1 }}
           >↑</button>
           <button
             disabled={disabled || index === total - 1}
             onClick={onMoveDown}
-            title="Mover abajo"
+            title={t('stepcard.moveDown')}
             style={{ ...btnBase, opacity: (disabled || index === total - 1) ? 0.25 : 1 }}
           >↓</button>
           <button
             disabled={disabled}
             onClick={onDelete}
-            title="Eliminar paso"
+            title={t('stepcard.deleteStep')}
             style={{ ...btnBase, color: 'var(--red)', borderColor: 'rgba(239,68,68,.3)' }}
           >✕</button>
         </div>
@@ -299,7 +303,7 @@ export default function StepCard({
         <div style={{ padding: '0 12px 12px 48px' }}>
           {children.length === 0 ? (
             <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic', padding: '6px 0' }}>
-              Sin tareas en el grupo. Agrega tareas desde el panel de templates.
+              {t('stepcard.emptyGroup')}
             </div>
           ) : (
             children.map((child, ci) => (
@@ -348,7 +352,7 @@ export default function StepCard({
                 color: 'rgba(129,140,248,.8)', fontSize: 11, cursor: 'pointer',
               }}
             >
-              + Agregar tarea al grupo
+              {t('stepcard.addToGroup')}
             </button>
           )}
         </div>

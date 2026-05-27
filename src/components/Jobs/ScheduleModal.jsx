@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
+import { useI18n } from '../../context/I18nContext'
 
 function enc(val) {
   return `%27${encodeURIComponent(val)}%27`
@@ -49,6 +50,7 @@ function varSlotNum(base) {
 }
 
 export default function ScheduleModal({ row, connection, session, onClose, onSuccess }) {
+  const { t } = useI18n()
   const [loading, setLoading]           = useState(true)
   const [loadError, setLoadError]       = useState('')
   const [steps, setSteps]               = useState([])
@@ -137,7 +139,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           return {
             seqPos:       stepNr,
             basicJceName: seq.basic_jce_name ?? '',
-            catalogText:  catalogTexts[seq.basic_jce_name] ?? seq.basic_jce_name ?? `Paso ${stepNr}`,
+            catalogText:  catalogTexts[seq.basic_jce_name] ?? seq.basic_jce_name ?? t('schedule.stepFallback', { n: stepNr }),
             stepName:     seqTextByPos[seq.seq_position] ?? null,
             params,
             values,
@@ -277,7 +279,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
     if (step.params.length === 0) {
       return (
         <div style={{ padding: '14px', fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>
-          Sin parámetros configurados para este paso.
+          {t('schedule.noParams')}
         </div>
       )
     }
@@ -331,7 +333,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Ejecutar job</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{t('schedule.title')}</div>
               <div style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{templateLabel}</div>
               <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 2 }}>{row.JobTemplateName}</div>
             </div>
@@ -344,7 +346,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           {!loading && !loadError && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-                Nombre del run
+                {t('schedule.runNameLabel')}
               </div>
               <input
                 type="text" value={jobText}
@@ -361,8 +363,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
           {!loading && !loadError && (
             <div style={{ marginTop: 10, fontSize: 10, color: 'var(--text3)', fontStyle: 'italic' }}>
-              Los parámetros se ejecutan con los valores configurados en SAP IBP.
-              Para modificarlos, edita el template directamente en el sistema.
+              {t('schedule.paramsNote')}
             </div>
           )}
         </div>
@@ -372,7 +373,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
           {loading && (
             <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--text2)', fontSize: 12 }}>
-              Cargando pasos…
+              {t('schedule.loadingSteps')}
             </div>
           )}
 
@@ -384,7 +385,7 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
 
           {!loading && !loadError && steps.length === 0 && (
             <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text2)', fontSize: 12 }}>
-              Este template no tiene pasos configurados.
+              {t('schedule.noSteps')}
             </div>
           )}
 
@@ -467,20 +468,20 @@ export default function ScheduleModal({ row, connection, session, onClose, onSuc
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center' }}>
             {!loading && steps.length > 0 && (
               <span style={{ fontSize: 10, color: 'var(--text3)', marginRight: 'auto' }}>
-                {steps.length} paso{steps.length !== 1 ? 's' : ''}
+                {steps.length === 1 ? t('schedule.step1') : t('schedule.stepN', { n: steps.length })}
               </span>
             )}
             <button
               onClick={executing ? undefined : onClose} disabled={executing}
               style={{ padding: '7px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontSize: 12, cursor: executing ? 'default' : 'pointer' }}
             >
-              Cancelar
+              {t('schedule.cancel')}
             </button>
             <button
               onClick={handleExecute} disabled={executing || loading}
               style={{ padding: '7px 18px', borderRadius: 6, border: '1px solid color-mix(in srgb, var(--green) 40%, transparent)', background: 'color-mix(in srgb, var(--green) 15%, transparent)', color: 'var(--green)', fontSize: 12, fontWeight: 600, cursor: (executing || loading) ? 'default' : 'pointer', opacity: (executing || loading) ? 0.6 : 1 }}
             >
-              {executing ? 'Ejecutando…' : '▶ Ejecutar'}
+              {executing ? t('schedule.executing') : t('schedule.executeBtn')}
             </button>
           </div>
         </div>

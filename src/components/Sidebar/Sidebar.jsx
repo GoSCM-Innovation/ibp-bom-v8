@@ -1,3 +1,5 @@
+import { useI18n } from '../../context/I18nContext'
+
 const W = 220
 const W_MIN = 52
 
@@ -29,6 +31,7 @@ function envDotColor(name = '') {
 }
 
 export default function Sidebar({ connections, sessions = {}, activeId, onSelect, expanded, onToggle, isMobile = false, mobileOpen = false }) {
+  const { t, lang, setLang } = useI18n()
   const isExpanded = isMobile ? true : expanded
   const w = isExpanded ? W : W_MIN
 
@@ -55,14 +58,14 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
       }}>
         {isExpanded && (
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-            Navegación
+            {t('sidebar.nav')}
           </span>
         )}
         {!isMobile && (
           <button onClick={onToggle} style={{
             background: 'none', border: '1px solid var(--border)', borderRadius: 5,
             color: 'var(--text2)', padding: '3px 6px', fontSize: 11, flexShrink: 0,
-          }} title={isExpanded ? 'Minimizar' : 'Expandir'}>
+          }} title={isExpanded ? t('sidebar.minimize') : t('sidebar.expand')}>
             {isExpanded ? '◀' : '▶'}
           </button>
         )}
@@ -71,7 +74,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
       {/* Conexiones link */}
       <SidebarItem
         id="connections"
-        label="Conexiones"
+        label={t('sidebar.connections')}
         icon="🔗"
         active={activeId === 'connections'}
         expanded={isExpanded}
@@ -81,7 +84,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
       {/* Resumen general link */}
       <SidebarItem
         id="resumen-general"
-        label="Resumen"
+        label={t('resumen.title')}
         icon="📊"
         active={activeId === 'resumen-general'}
         expanded={isExpanded}
@@ -116,6 +119,47 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
         })}
       </div>
 
+      {/* Language toggle */}
+      {isExpanded && (
+        <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', gap: 4 }}>
+          <button
+            onClick={() => setLang('es')}
+            style={{
+              flex: 1, padding: '4px 0', borderRadius: 5, fontSize: 11, fontWeight: 700,
+              border: `1px solid ${lang === 'es' ? 'var(--accent)' : 'var(--border)'}`,
+              background: lang === 'es' ? 'rgba(247,168,0,.12)' : 'transparent',
+              color: lang === 'es' ? 'var(--accent)' : 'var(--text3)',
+              cursor: 'pointer', transition: 'all .15s',
+            }}
+          >ES</button>
+          <button
+            onClick={() => setLang('en')}
+            style={{
+              flex: 1, padding: '4px 0', borderRadius: 5, fontSize: 11, fontWeight: 700,
+              border: `1px solid ${lang === 'en' ? 'var(--accent)' : 'var(--border)'}`,
+              background: lang === 'en' ? 'rgba(247,168,0,.12)' : 'transparent',
+              color: lang === 'en' ? 'var(--accent)' : 'var(--text3)',
+              cursor: 'pointer', transition: 'all .15s',
+            }}
+          >EN</button>
+        </div>
+      )}
+      {!isExpanded && (
+        <div style={{ padding: '8px 4px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+          <button
+            onClick={() => setLang(lang === 'es' ? 'en' : 'es')}
+            title={lang === 'es' ? 'Switch to English' : 'Cambiar a Español'}
+            style={{
+              width: '100%', padding: '4px 0', borderRadius: 5, fontSize: 9, fontWeight: 700,
+              border: '1px solid var(--accent)',
+              background: 'rgba(247,168,0,.12)',
+              color: 'var(--accent)',
+              cursor: 'pointer',
+            }}
+          >{lang.toUpperCase()}</button>
+        </div>
+      )}
+
       {/* Add new */}
       <div style={{ padding: 8, borderTop: '1px solid var(--border)', flexShrink: 0 }}>
         <button onClick={() => onSelect('connections')} style={{
@@ -125,7 +169,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
         }}>
           <span>+</span>
-          {isExpanded && <span>Nueva conexión</span>}
+          {isExpanded && <span>{t('sidebar.newConn')}</span>}
         </button>
       </div>
     </aside>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import ConnectionAvatar from './ConnectionAvatar'
+import { useI18n } from '../../context/I18nContext'
 
 const ALL_AGREEMENTS = ['com0326', 'com0068', 'com0924']
 
@@ -10,7 +11,6 @@ const COM_META = {
 }
 
 async function verifyCredentials(conn, comKey, userCred) {
-  const comNum = comKey.replace('com', '')
   const serviceRoot = conn[comKey]?.url || ''
   const resp = await fetch('/api/proxy', {
     method: 'POST',
@@ -27,7 +27,8 @@ async function verifyCredentials(conn, comKey, userCred) {
 }
 
 export default function LoginModal({ conn, existingSession, onLogin, onCancel }) {
-  // All configured agreements, split by whether they already have credentials
+  const { t } = useI18n()
+
   const allKeys     = ALL_AGREEMENTS.filter(k => conn[k]?.url)
   const pendingKeys = allKeys.filter(k => !existingSession?.[k]?.password)
   const multi       = allKeys.length > 1
@@ -48,8 +49,8 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
   async function handleSubmit(e) {
     e.preventDefault()
     for (const k of pendingKeys) {
-      if (!creds[k].user)     { setError(`Usuario requerido para ${COM_META[k].name}`); return }
-      if (!creds[k].password) { setError(`Contraseña requerida para ${COM_META[k].name}`); return }
+      if (!creds[k].user)     { setError(t('login.errUserRequired', { name: COM_META[k].name })); return }
+      if (!creds[k].password) { setError(t('login.errPwdRequired',  { name: COM_META[k].name })); return }
     }
 
     setError('')
@@ -59,19 +60,20 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
         const resp = await verifyCredentials(conn, k, creds[k])
         if (!resp.ok) {
           if (resp.status === 401) {
-            const label = multi ? ` (${COM_META[k].name})` : ''
-            setError(`Usuario o contraseña incorrectos${label}. Verifica tus credenciales e inténtalo de nuevo.`)
+            setError(multi
+              ? t('login.err401Multi', { name: COM_META[k].name })
+              : t('login.err401'))
           } else {
             let detail = ''
             try { const j = await resp.json(); detail = j?.detail || j?.error || '' } catch { /* noop */ }
-            setError(detail || `Error al conectar con SAP IBP (${resp.status}). Verifica la URL y vuelve a intentarlo.`)
+            setError(detail || t('login.errConnect', { status: resp.status }))
           }
           setLoading(false)
           return
         }
       }
     } catch {
-      setError('No se pudo contactar el servidor. Verifica tu conexión e inténtalo de nuevo.')
+      setError(t('login.errNetwork'))
       setLoading(false)
       return
     }
@@ -96,7 +98,7 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
           <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={36} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{conn.name}</div>
-            <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>Iniciar sesión</div>
+            <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{t('login.title')}</div>
           </div>
         </div>
 
@@ -110,7 +112,6 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
                 <div key={k}>
                   {i > 0 && <div style={{ height: 1, background: 'var(--border)', margin: '16px 0' }} />}
 
-                  {/* Agreement label — always shown when multi */}
                   {multi && (
                     <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: 10,
                       color: authenticated ? 'var(--text3)' : 'var(--accent)' }}>
@@ -119,7 +120,6 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
                   )}
 
                   {authenticated ? (
-                    /* Already logged in — show OK row */
                     <div style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       background: 'color-mix(in srgb, var(--green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--green) 30%, transparent)',
@@ -129,14 +129,13 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
                         {existingSession[k].user}
                       </span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', letterSpacing: '.04em' }}>
-                        ✓ activo
+                        {t('login.statusActive')}
                       </span>
                     </div>
                   ) : (
-                    /* Needs credentials */
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                       <Field
-                        label="Usuario"
+                        label={t('login.user')}
                         name={`username-${k}`}
                         value={creds[k].user}
                         onChange={v => setField(k, 'user', v)}
@@ -145,7 +144,7 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
                         mono
                       />
                       <Field
-                        label="Contraseña"
+                        label={t('login.password')}
                         name={`password-${k}`}
                         value={creds[k].password}
                         onChange={v => setField(k, 'password', v)}
@@ -169,12 +168,12 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
             <button type="button" onClick={onCancel} style={{
               background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
               color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 16px', cursor: 'pointer',
-            }}>Cancelar</button>
+            }}>{t('login.cancel')}</button>
             <button type="submit" disabled={loading} style={{
               background: loading ? 'var(--border2)' : 'var(--accent)', border: 'none', borderRadius: 6,
               color: loading ? 'var(--text3)' : 'var(--text-on-accent)', fontSize: 12, fontWeight: 700, padding: '7px 20px',
               cursor: loading ? 'not-allowed' : 'pointer', transition: 'background .15s',
-            }}>{loading ? 'Verificando…' : 'Ingresar'}</button>
+            }}>{loading ? t('login.verifying') : t('login.loginBtn')}</button>
           </div>
         </form>
       </div>

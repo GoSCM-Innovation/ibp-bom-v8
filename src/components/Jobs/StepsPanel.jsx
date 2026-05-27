@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { formatSapTs, parseSapTs } from '../../utils/dateUtils'
 import { proxyCall } from '../../services/proxyCall'
+import { useI18n } from '../../context/I18nContext'
 
 const MSG_STYLE = {
   A: { label: 'Abort',   color: '#ff6b6b', bg: 'rgba(255,107,107,.08)' },
@@ -58,6 +59,7 @@ const STEP_STATUS_FALLBACK = {
 }
 
 export default function StepsPanel({ job, connection, session, statuses, tzMode, onClose, inline = false }) {
+  const { t } = useI18n()
   const [steps,      setSteps]      = useState([])
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
@@ -295,7 +297,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Pasos del job</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{t('steps.title')}</div>
               <div style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {job.JobText || job.JobName}
               </div>
@@ -312,9 +314,12 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
           </div>
           {!loading && steps.length > 0 && (
             <div style={{ marginTop: 10, display: 'flex', gap: 14, fontSize: 10, color: 'var(--text3)' }}>
-              <span>{steps.length} paso{steps.length !== 1 ? 's' : ''}</span>
-              <span>{steps.filter(s => s.StepStatus === 'F').length} finalizados</span>
-              {failedCount > 0 && <span style={{ color: '#ff6b6b', fontWeight: 700 }}>{failedCount} fallido{failedCount !== 1 ? 's' : ''}</span>}
+              <span>{steps.length === 1 ? t('steps.count1') : t('steps.countN', { n: steps.length })}</span>
+              {(() => {
+                const finishedCount = steps.filter(s => s.StepStatus === 'F').length
+                return <span>{finishedCount === 1 ? t('steps.finished1') : t('steps.finishedN', { n: finishedCount })}</span>
+              })()}
+              {failedCount > 0 && <span style={{ color: '#ff6b6b', fontWeight: 700 }}>{failedCount === 1 ? t('steps.failed1') : t('steps.failedN', { n: failedCount })}</span>}
             </div>
           )}
         </div>
@@ -322,10 +327,10 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
         {/* ── Lista de pasos ── */}
         <div style={{ flex: 1, overflow: 'auto', padding: '14px 20px' }}>
 
-          {loading &&<div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>Cargando pasos…</div>}
+          {loading &&<div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>{t('steps.loadingSteps')}</div>}
           {error   && <div style={{ background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.3)', borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12 }}>✕ {error}</div>}
           {!loading && !error && steps.length === 0 && (
-            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>Sin pasos registrados para este job.</div>
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 12 }}>{t('steps.noStepsJob')}</div>
           )}
 
           {steps.map(step => {
@@ -344,7 +349,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
             // Nombre del paso: stepName (definido en IBP) > catalogText, con P_OPNAME si aplica
             const opName    = params.data.find(p => String(p.StepNr) === String(step.StepNumber) && p.JobParameterName === 'P_OPNAME')?.Low
             const stepName  = seqNames[n] ?? null
-            const titleBase = stepName ?? step.JobCatalogEntryText ?? step.JobCatalogEntryName ?? `Paso ${n}`
+            const titleBase = stepName ?? step.JobCatalogEntryText ?? step.JobCatalogEntryName ?? t('steps.stepFallback', { n })
             const stepTitle = opName ? `${titleBase}: ${opName}` : titleBase
             const showCatalogSubtitle = !!stepName
 
@@ -378,7 +383,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                     )}
                     {step.StepStartDateTime && (
                       <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 1 }}>
-                        Inicio: {formatSapTs(step.StepStartDateTime, tzMode)}
+                        {t('steps.start') + ': '}{formatSapTs(step.StepStartDateTime, tzMode)}
                       </div>
                     )}
                   </div>
@@ -435,24 +440,24 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
 
                     {/* Sección: datos técnicos del paso */}
                     <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Detalle del paso</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{t('steps.detailTitle')}</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px' }}>
-                        <DetailRow label="Catálogo" value={<span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{step.JobCatalogEntryName || '—'}</span>} />
-                        <DetailRow label="Return Code" value={
+                        <DetailRow label={t('steps.catalog')} value={<span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{step.JobCatalogEntryName || '—'}</span>} />
+                        <DetailRow label={t('steps.returnCode')} value={
                           <span style={{ fontWeight: 700, color: rcErr ? '#ff6b6b' : '#22c55e' }}>{step.StepAppRC ?? '—'}</span>
                         } />
-                        <DetailRow label="Inicio" value={formatSapTs(step.StepStartDateTime, tzMode)} />
-                        {dur && <DetailRow label="Duración" value={dur} />}
-                        <DetailRow label="Resultados" value={step.StepHasResults ? '✓ Sí' : '—'} />
+                        <DetailRow label={t('steps.start')} value={formatSapTs(step.StepStartDateTime, tzMode)} />
+                        {dur && <DetailRow label={t('steps.duration')} value={dur} />}
+                        <DetailRow label={t('steps.results')} value={step.StepHasResults ? '✓ Sí' : '—'} />
                       </div>
                     </div>
 
                     {/* Sección: info del log del paso */}
                     {nrLogs > 0 && liRec && (
                       <div style={{ marginBottom: 14 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Log de aplicación</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{t('steps.appLog')}</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', marginBottom: 10 }}>
-                          <DetailRow label="Severidad" value={
+                          <DetailRow label={t('steps.severity')} value={
                             (() => {
                               const sv = SEV_STYLE[liRec.Severity] ?? SEV_STYLE.I
                               return (
@@ -462,9 +467,9 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                               )
                             })()
                           } />
-                          <DetailRow label="Completado" value={formatSapTs(liRec.CreaDateTime, tzMode)} />
-                          <DetailRow label="Ejecutado por" value={liRec.CreaUserLong || liRec.CreaUser || '—'} />
-                          <DetailRow label="Nº de log" value={<span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{liRec.LogNumber?.replace(/^0+/, '') || '—'}</span>} />
+                          <DetailRow label={t('steps.completed')} value={formatSapTs(liRec.CreaDateTime, tzMode)} />
+                          <DetailRow label={t('steps.executedBy')} value={liRec.CreaUserLong || liRec.CreaUser || '—'} />
+                          <DetailRow label={t('steps.logNumber')} value={<span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{liRec.LogNumber?.replace(/^0+/, '') || '—'}</span>} />
                         </div>
                         {/* Desglose de conteos por tipo */}
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -543,7 +548,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                             style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', background: isPOpen ? 'var(--surface-glass-soft)' : 'transparent', userSelect: 'none' }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Parámetros</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('steps.params')}</span>
                               {(params.loading || meta.loading) && <span style={{ fontSize: 9, color: 'var(--text3)' }}>…</span>}
                               {!params.loading && !meta.loading && !params.error && sorted.length > 0 && (
                                 <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text3)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '1px 6px' }}>
@@ -551,7 +556,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                                 </span>
                               )}
                               {params.error && !params.loading && (
-                                <span style={{ fontSize: 9, color: isAuthErr ? '#fbbf24' : '#ff6b6b' }}>{isAuthErr ? '⚠ sin acceso' : '✕ error'}</span>
+                                <span style={{ fontSize: 9, color: isAuthErr ? '#fbbf24' : '#ff6b6b' }}>{isAuthErr ? t('steps.authErr') : '✕ error'}</span>
                               )}
                             </div>
                             <span style={{ fontSize: 10, color: 'var(--text3)' }}>{isPOpen ? '▲' : '▼'}</span>
@@ -560,7 +565,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                           {/* Contenido */}
                           {isPOpen && (
                             <div style={{ borderTop: '1px solid var(--border)', padding: '10px 10px' }}>
-                              {params.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando…</div>}
+                              {params.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('common.loading')}</div>}
                               {params.error && isAuthErr && (
                                 <div style={{ fontSize: 11, color: '#fbbf24', lineHeight: 1.5 }}>
                                   ⚠ Sin acceso — se requiere el rol <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>SAP_BCG_APPLICATION_JOB_DISP</code> para leer parámetros de jobs de otros usuarios.
@@ -620,17 +625,17 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                     {/* Sección: mensajes */}
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                        Mensajes {cnt.all > 0 ? `(${cnt.all})` : ''}
+                        {t('steps.messages')} {cnt.all > 0 ? `(${cnt.all})` : ''}
                       </div>
 
-                      {nrLogs === 0 && <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Sin mensajes de log.</div>}
-                      {li?.loading     && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando info de log…</div>}
+                      {nrLogs === 0 && <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>{t('steps.noMessages')}</div>}
+                      {li?.loading     && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('steps.loadingLog')}</div>}
                       {li?.error       && <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {li.error}</div>}
-                      {messages[n]?.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>Cargando mensajes…</div>}
+                      {messages[n]?.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('steps.loadingMessages')}</div>}
                       {messages[n]?.error   && <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {messages[n].error}</div>}
 
                       {messages[n]?.data?.length === 0 && !messages[n]?.loading && !messages[n]?.error && nrLogs > 0 && (
-                        <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Sin mensajes disponibles.</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>{t('steps.noMessagesAvail')}</div>
                       )}
 
                       {messages[n]?.data?.length > 0 && (

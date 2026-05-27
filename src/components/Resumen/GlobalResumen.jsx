@@ -12,6 +12,7 @@ import {
   toSapTs, formatSapTsShort, toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
 } from '../../utils/dateUtils'
+import { useI18n } from '../../context/I18nContext'
 
 const REFRESH_MS = 5 * 60 * 1000
 const DEFAULT_HOURS = 24
@@ -32,8 +33,9 @@ const STATUS_LABELS = {
 const CONN_COLORS = ['#3b82f6', '#34d399', '#f97316', '#8b5cf6', '#06b6d4', '#ff6b6b', '#fbbf24', '#a78bfa']
 
 export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
+  const { t } = useI18n()
   const isMobile = useIsMobile()
-  const [connData, setConnData] = useState({}) // { connId: { rows, error, loading } }
+  const [connData, setConnData] = useState({})
   const [lastRefresh, setLastRefresh] = useState(null)
   const [tzMode, setTzModeState]      = useState(() => getTzMode())
   const timerRef = useRef(null)
@@ -90,7 +92,6 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     return () => clearInterval(timerRef.current)
   }, [loadAll, connections.length])
 
-  // Filter by date — siempre en UTC para coincidir con SAP
   const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
   const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
 
@@ -102,11 +103,9 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     })
   }
 
-  // Aggregate data across all connections
   const globalLoading = connections.some(c => connData[c.id]?.loading)
   const anyLoading = connections.length > 0 && Object.keys(connData).length === 0
 
-  // Per-connection summary
   const connSummaries = connections.map((conn, idx) => {
     const d = connData[conn.id]
     const hasSession = !!sessions[conn.id]
@@ -124,7 +123,6 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     return { conn, idx, loading: false, total, finished, failed, running, scheduled, successRate, warned, error: '' }
   })
 
-  // Global totals
   const gTotal = connSummaries.reduce((s, c) => s + c.total, 0)
   const gFinished = connSummaries.reduce((s, c) => s + c.finished, 0)
   const gFailed = connSummaries.reduce((s, c) => s + c.failed, 0)
@@ -133,7 +131,6 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
   const gWarned = connSummaries.reduce((s, c) => s + (c.warned || 0), 0)
   const gSuccessRate = gTotal > 0 ? Math.round(((gFinished + gWarned) / gTotal) * 100) : 0
 
-  // Global status distribution
   const globalStatusCount = {}
   connections.forEach(conn => {
     const d = connData[conn.id]
@@ -146,17 +143,15 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     .map(([code, count]) => ({ name: STATUS_LABELS[code] || code, value: count, code }))
     .sort((a, b) => b.value - a.value)
 
-  // Jobs per connection (bar chart)
   const connBarData = connSummaries
     .filter(c => !c.error)
     .map(c => ({
       name: c.conn.name.length > 20 ? c.conn.name.slice(0, 18) + '…' : c.conn.name,
-      Finalizados: c.finished + (c.warned || 0),
-      Fallidos: c.failed,
-      Otros: c.total - c.finished - (c.warned || 0) - c.failed,
+      finished: c.finished + (c.warned || 0),
+      failed: c.failed,
+      others: c.total - c.finished - (c.warned || 0) - c.failed,
     }))
 
-  // Recent failures across all connections
   const allFailures = []
   connections.forEach(conn => {
     const d = connData[conn.id]
@@ -172,11 +167,13 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     return (
       <div style={{ padding: 32, textAlign: 'center' }}>
         <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>No hay conexiones configuradas</div>
-        <div style={{ fontSize: 12, color: 'var(--text2)' }}>Agrega conexiones SAP IBP para ver el resumen global</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>{t('global.empty')}</div>
+        <div style={{ fontSize: 12, color: 'var(--text2)' }}>{t('global.emptyHint')}</div>
       </div>
     )
   }
+
+  const connCountKey = connections.length === 1 ? 'global.conn1Job' : 'global.connNJob'
 
   return (
     <div style={{ padding: isMobile ? 14 : 28, overflowY: 'auto', height: '100%', boxSizing: 'border-box', position: 'relative' }}>
@@ -191,9 +188,9 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
         marginBottom: 24, flexWrap: 'wrap', gap: 12,
       }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Resumen Global</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{t('global.title')}</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-            {connections.length} conexion{connections.length !== 1 ? 'es' : ''} · {gTotal} jobs
+            {t(connCountKey, { conns: connections.length, jobs: gTotal })}
             {lastRefresh && (
               <span style={{ marginLeft: 8, opacity: .6 }}>· {lastRefresh.toLocaleTimeString()}</span>
             )}
@@ -209,31 +206,30 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
           <button onClick={loadAll} disabled={anyLoading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
-          }}>↺ Refresh</button>
+          }}>{t('resumen.refresh')}</button>
           {!isMobile && (
             <span style={{
               fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
               padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-            }}>Auto-refresh cada 5 min</span>
+            }}>{t('resumen.autoRefresh')}</span>
           )}
         </div>
       </div>
 
       {/* Global KPIs */}
       <div className="grid-kpi">
-        <KpiCard label="Total jobs" value={gTotal} color="var(--text)" />
-        <KpiCard label="En ejecución" value={gRunning} color="var(--cyan)" />
-        <KpiCard label="Programados" value={gScheduled} color="var(--purple)" />
-        <KpiCard label="Finalizados" value={gFinished} color="var(--green)" />
-        <KpiCard label="Fallidos" value={gFailed} color="var(--red)" />
-        <KpiCard label="Tasa de éxito" value={`${gSuccessRate}%`} color={gSuccessRate >= 90 ? 'var(--green)' : gSuccessRate >= 70 ? 'var(--accent)' : 'var(--red)'} />
+        <KpiCard label={t('global.kpiTotal')}     value={gTotal}     color="var(--text)" />
+        <KpiCard label={t('global.kpiRunning')}   value={gRunning}   color="var(--cyan)" />
+        <KpiCard label={t('global.kpiScheduled')} value={gScheduled} color="var(--purple)" />
+        <KpiCard label={t('global.kpiFinished')}  value={gFinished}  color="var(--green)" />
+        <KpiCard label={t('global.kpiFailed')}    value={gFailed}    color="var(--red)" />
+        <KpiCard label={t('global.kpiRate')}      value={`${gSuccessRate}%`} color={gSuccessRate >= 90 ? 'var(--green)' : gSuccessRate >= 70 ? 'var(--accent)' : 'var(--red)'} />
       </div>
 
       {/* Charts row */}
       <div className="grid-charts">
-        {/* Global donut */}
         <div style={cardStyle}>
-          <div style={cardTitle}>Distribución global por estado</div>
+          <div style={cardTitle}>{t('global.chartGlobalStatus')}</div>
           {donutData.length === 0 ? <Empty /> : (
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
@@ -260,9 +256,8 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
           </div>
         </div>
 
-        {/* Jobs per connection */}
         <div style={cardStyle}>
-          <div style={cardTitle}>Jobs por conexión</div>
+          <div style={cardTitle}>{t('global.chartByConn')}</div>
           {connBarData.length === 0 ? <Empty /> : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={connBarData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -271,9 +266,9 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text2)' }} allowDecimals={false} />
                 <Tooltip contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} />
                 <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text2)' }} />
-                <Bar dataKey="Finalizados" stackId="a" fill="var(--green)" />
-                <Bar dataKey="Fallidos" stackId="a" fill="var(--red)" />
-                <Bar dataKey="Otros" stackId="a" fill="var(--text3)" radius={[3,3,0,0]} />
+                <Bar dataKey="finished" name={t('resumen.chartFinished')} stackId="a" fill="var(--green)" />
+                <Bar dataKey="failed"   name={t('resumen.chartFailed')}   stackId="a" fill="var(--red)" />
+                <Bar dataKey="others"   name={t('resumen.chartOthers')}   stackId="a" fill="var(--text3)" radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -282,20 +277,20 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
 
       {/* Connection status table */}
       <div style={{ ...cardStyle, marginTop: 16 }}>
-        <div style={cardTitle}>Estado por conexión</div>
+        <div style={cardTitle}>{t('global.connHealth')}</div>
         <div style={{ overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ background: 'var(--bg3)' }}>
-                <th style={thStyle}>#</th>
-                <th style={{ ...thStyle, textAlign: 'left', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>Conexión</th>
-                <th style={thStyle}>Estado</th>
-                <th style={thStyle}>Total</th>
-                <th style={thStyle}>Ejecutando</th>
-                <th style={thStyle}>Programados</th>
-                <th style={thStyle}>Finalizados</th>
-                <th style={thStyle}>Fallidos</th>
-                <th style={thStyle}>Tasa éxito</th>
+                <th style={thStyle}>{t('global.colNum')}</th>
+                <th style={{ ...thStyle, textAlign: 'left', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('global.colConn')}</th>
+                <th style={thStyle}>{t('global.colStatus')}</th>
+                <th style={thStyle}>{t('global.colTotal')}</th>
+                <th style={thStyle}>{t('global.colRunning')}</th>
+                <th style={thStyle}>{t('global.colScheduled')}</th>
+                <th style={thStyle}>{t('global.colFinished')}</th>
+                <th style={thStyle}>{t('global.colFailed')}</th>
+                <th style={thStyle}>{t('global.colRate')}</th>
               </tr>
             </thead>
             <tbody>
@@ -317,15 +312,15 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                         fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, cursor: 'pointer',
                         background: 'var(--surface-glass)', color: 'var(--text3)',
                         border: '1px solid var(--border)',
-                      }}>🔒 Iniciar sesión</button>
+                      }}>{t('global.login')}</button>
                     ) : cs.loading ? (
-                      <span style={{ color: 'var(--text3)' }}>Cargando…</span>
+                      <span style={{ color: 'var(--text3)' }}>{t('global.loading')}</span>
                     ) : cs.error ? (
-                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--red) 15%, transparent)', color: 'var(--red)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)' }}>Error</span>
+                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--red) 15%, transparent)', color: 'var(--red)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)' }}>{t('global.statusError')}</span>
                     ) : cs.failed > 0 ? (
-                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' }}>Atención</span>
+                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' }}>{t('global.statusWarning')}</span>
                     ) : (
-                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--green) 15%, transparent)', color: 'var(--green)', border: '1px solid color-mix(in srgb, var(--green) 35%, transparent)' }}>Saludable</span>
+                      <span style={{ ...statusBadge, background: 'color-mix(in srgb, var(--green) 15%, transparent)', color: 'var(--green)', border: '1px solid color-mix(in srgb, var(--green) 35%, transparent)' }}>{t('global.statusHealthy')}</span>
                     )}
                   </td>
                   <td style={{ ...tdStyle, fontWeight: 700 }}>{cs.total}</td>
@@ -349,9 +344,9 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
       {/* Recent failures across all connections */}
       <div className="grid-stats" style={{ marginTop: 16 }}>
         <div style={cardStyle}>
-          <div style={cardTitle}>Últimos jobs fallidos (todas las conexiones)</div>
+          <div style={cardTitle}>{t('global.recentFailed')}</div>
           {recentFailures.length === 0
-            ? <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 8 }}>✓ Sin fallos en el período</div>
+            ? <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 8 }}>{t('global.noFailed')}</div>
             : recentFailures.map((r, i) => (
               <div key={i} style={{ padding: '7px 0', borderBottom: i < recentFailures.length-1 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -374,7 +369,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
 
         {/* Connection health summary */}
         <div style={cardStyle}>
-          <div style={cardTitle}>Salud de conexiones</div>
+          <div style={cardTitle}>{t('global.connHealthCard')}</div>
           {connSummaries.map((cs, i) => {
             const color = cs.error ? 'var(--red)' : cs.failed > 0 ? '#fbbf24' : 'var(--green)'
             const pct = gTotal > 0 ? (cs.total / gTotal) * 100 : 0
@@ -388,7 +383,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cs.conn.name}</span>
                   </div>
                   <span style={{ fontSize: 11, fontWeight: 700, color, flexShrink: 0, marginLeft: 8 }}>
-                    {cs.error ? 'Error' : `${cs.successRate}%`}
+                    {cs.error ? t('global.statusError') : `${cs.successRate}%`}
                   </span>
                 </div>
                 <div style={{ height: 3, background: 'var(--border)', borderRadius: 2 }}>
@@ -418,7 +413,8 @@ function KpiCard({ label, value, color }) {
 }
 
 function Empty() {
-  return <div style={{ fontSize: 12, color: 'var(--text3)', padding: '16px 0' }}>Sin datos en el período</div>
+  const { t } = useI18n()
+  return <div style={{ fontSize: 12, color: 'var(--text3)', padding: '16px 0' }}>{t('global.noData')}</div>
 }
 
 const cardStyle = {
@@ -453,11 +449,12 @@ const statusBadge = {
 }
 
 function TzToggle({ mode, onToggle }) {
+  const { t } = useI18n()
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
       <button
         onClick={() => onToggle('utc')}
-        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        title={t('resumen.tzUtcTitle')}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'utc' ? 'var(--border2)' : 'transparent',
@@ -466,7 +463,7 @@ function TzToggle({ mode, onToggle }) {
       >UTC</button>
       <button
         onClick={() => onToggle('local')}
-        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        title={t('resumen.tzLocalTitle', { tz: getTzLabel() })}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'local' ? 'var(--border2)' : 'transparent',
