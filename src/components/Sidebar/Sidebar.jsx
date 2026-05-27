@@ -1,6 +1,16 @@
 import { useI18n } from '../../context/I18nContext'
 
 const W = 220
+
+const ENV_KEY_MAP = { 'Calidad': 'form.envQuality', 'Producción': 'form.envProduction' }
+function connDisplayName(c, t) {
+  if (!c.ambiente) return c.name
+  const key = ENV_KEY_MAP[c.ambiente]
+  if (!key) return c.name
+  const translated = t(key)
+  if (translated === c.ambiente) return c.name
+  return c.name.replace(`(${c.ambiente})`, `(${translated})`)
+}
 const W_MIN = 52
 
 const AVATAR_COLORS = [
@@ -146,7 +156,7 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
             <SidebarItem
               key={c.id}
               id={c.id}
-              label={c.name}
+              label={connDisplayName(c, t)}
               icon={initials(c.name)}
               iconColor={colorFor(c.name)}
               envColor={envDotColor(c.name)}

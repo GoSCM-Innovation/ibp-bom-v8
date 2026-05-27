@@ -9,6 +9,16 @@ import { getSapSystemUrl } from '../../utils/sapUrl'
 
 const EXPORT_VERSION = '1.0'
 
+const ENV_KEY_MAP = { 'Calidad': 'form.envQuality', 'Producción': 'form.envProduction' }
+function connDisplayName(c, t) {
+  if (!c.ambiente) return c.name
+  const key = ENV_KEY_MAP[c.ambiente]
+  if (!key) return c.name
+  const translated = t(key)
+  if (translated === c.ambiente) return c.name
+  return c.name.replace(`(${c.ambiente})`, `(${translated})`)
+}
+
 function parseImportText(text, t) {
   let raw
   try { raw = JSON.parse(text) }
@@ -259,7 +269,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
             <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={40} />
 
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{conn.name}</div>
+              <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connDisplayName(conn, t)}</div>
               {conn.com0326?.user && (
                 <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
                   {conn.com0326.user}
