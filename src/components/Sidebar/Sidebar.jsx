@@ -49,26 +49,67 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
       }}
     >
       {/* Header */}
-      <div style={{
-        padding: '12px 10px',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center',
-        justifyContent: isExpanded ? 'space-between' : 'center',
-        gap: 8, flexShrink: 0,
-      }}>
-        {isExpanded && (
-          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-            {t('sidebar.nav')}
-          </span>
+      <div style={{ borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        {/* Language toggle row */}
+        {isExpanded ? (
+          <div style={{ padding: '8px 10px 0', display: 'flex', gap: 4 }}>
+            <button
+              onClick={() => setLang('es')}
+              style={{
+                flex: 1, padding: '3px 0', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                border: `1px solid ${lang === 'es' ? 'var(--accent)' : 'var(--border)'}`,
+                background: lang === 'es' ? 'rgba(247,168,0,.12)' : 'transparent',
+                color: lang === 'es' ? 'var(--accent)' : 'var(--text3)',
+                cursor: 'pointer', transition: 'all .15s',
+              }}
+            >ES</button>
+            <button
+              onClick={() => setLang('en')}
+              style={{
+                flex: 1, padding: '3px 0', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                border: `1px solid ${lang === 'en' ? 'var(--accent)' : 'var(--border)'}`,
+                background: lang === 'en' ? 'rgba(247,168,0,.12)' : 'transparent',
+                color: lang === 'en' ? 'var(--accent)' : 'var(--text3)',
+                cursor: 'pointer', transition: 'all .15s',
+              }}
+            >EN</button>
+          </div>
+        ) : (
+          <div style={{ padding: '8px 4px 0' }}>
+            <button
+              onClick={() => setLang(lang === 'es' ? 'en' : 'es')}
+              title={lang === 'es' ? 'Switch to English' : 'Cambiar a Español'}
+              style={{
+                width: '100%', padding: '3px 0', borderRadius: 5, fontSize: 9, fontWeight: 700,
+                border: '1px solid var(--accent)',
+                background: 'rgba(247,168,0,.12)',
+                color: 'var(--accent)',
+                cursor: 'pointer',
+              }}
+            >{lang.toUpperCase()}</button>
+          </div>
         )}
-        {!isMobile && (
-          <button onClick={onToggle} style={{
-            background: 'none', border: '1px solid var(--border)', borderRadius: 5,
-            color: 'var(--text2)', padding: '3px 6px', fontSize: 11, flexShrink: 0,
-          }} title={isExpanded ? t('sidebar.minimize') : t('sidebar.expand')}>
-            {isExpanded ? '◀' : '▶'}
-          </button>
-        )}
+        {/* Nav label + collapse button */}
+        <div style={{
+          padding: '8px 10px',
+          display: 'flex', alignItems: 'center',
+          justifyContent: isExpanded ? 'space-between' : 'center',
+          gap: 8,
+        }}>
+          {isExpanded && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
+              {t('sidebar.nav')}
+            </span>
+          )}
+          {!isMobile && (
+            <button onClick={onToggle} style={{
+              background: 'none', border: '1px solid var(--border)', borderRadius: 5,
+              color: 'var(--text2)', padding: '3px 6px', fontSize: 11, flexShrink: 0,
+            }} title={isExpanded ? t('sidebar.minimize') : t('sidebar.expand')}>
+              {isExpanded ? '◀' : '▶'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Conexiones link */}
@@ -118,47 +159,6 @@ export default function Sidebar({ connections, sessions = {}, activeId, onSelect
           )
         })}
       </div>
-
-      {/* Language toggle */}
-      {isExpanded && (
-        <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', gap: 4 }}>
-          <button
-            onClick={() => setLang('es')}
-            style={{
-              flex: 1, padding: '4px 0', borderRadius: 5, fontSize: 11, fontWeight: 700,
-              border: `1px solid ${lang === 'es' ? 'var(--accent)' : 'var(--border)'}`,
-              background: lang === 'es' ? 'rgba(247,168,0,.12)' : 'transparent',
-              color: lang === 'es' ? 'var(--accent)' : 'var(--text3)',
-              cursor: 'pointer', transition: 'all .15s',
-            }}
-          >ES</button>
-          <button
-            onClick={() => setLang('en')}
-            style={{
-              flex: 1, padding: '4px 0', borderRadius: 5, fontSize: 11, fontWeight: 700,
-              border: `1px solid ${lang === 'en' ? 'var(--accent)' : 'var(--border)'}`,
-              background: lang === 'en' ? 'rgba(247,168,0,.12)' : 'transparent',
-              color: lang === 'en' ? 'var(--accent)' : 'var(--text3)',
-              cursor: 'pointer', transition: 'all .15s',
-            }}
-          >EN</button>
-        </div>
-      )}
-      {!isExpanded && (
-        <div style={{ padding: '8px 4px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-          <button
-            onClick={() => setLang(lang === 'es' ? 'en' : 'es')}
-            title={lang === 'es' ? 'Switch to English' : 'Cambiar a Español'}
-            style={{
-              width: '100%', padding: '4px 0', borderRadius: 5, fontSize: 9, fontWeight: 700,
-              border: '1px solid var(--accent)',
-              background: 'rgba(247,168,0,.12)',
-              color: 'var(--accent)',
-              cursor: 'pointer',
-            }}
-          >{lang.toUpperCase()}</button>
-        </div>
-      )}
 
       {/* Add new */}
       <div style={{ padding: 8, borderTop: '1px solid var(--border)', flexShrink: 0 }}>
