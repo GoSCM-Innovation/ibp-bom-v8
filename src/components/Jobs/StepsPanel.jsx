@@ -317,7 +317,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
               <span>{steps.length === 1 ? t('steps.count1') : t('steps.countN', { n: steps.length })}</span>
               {(() => {
                 const finishedCount = steps.filter(s => s.StepStatus === 'F').length
-                return <span>{finishedCount === 1 ? t('steps.finished1') : t('steps.finishedN', { n: finishedCount })}</span>
+                return <span>{t('steps.finishedN', { n: finishedCount })}</span>
               })()}
               {failedCount > 0 && <span style={{ color: '#ff6b6b', fontWeight: 700 }}>{failedCount === 1 ? t('steps.failed1') : t('steps.failedN', { n: failedCount })}</span>}
             </div>
