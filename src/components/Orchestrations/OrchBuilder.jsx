@@ -1,12 +1,14 @@
 import { useState, useRef, useCallback } from 'react'
 import StepCard from './StepCard'
 import TemplatePalette from './TemplatePalette'
+import { useI18n } from '../../context/I18nContext'
 
 export default function OrchBuilder({
   orch, connection, session,
   onUpdate, onRun, disabled,
   fullscreen, onToggleFullscreen,
 }) {
+  const { t } = useI18n()
   const [name, setName]                = useState(orch.name)
   const [pendingGroup, setPendingGroup] = useState(null)
   const [paletteOpen, setPaletteOpen]  = useState(false)
@@ -14,8 +16,8 @@ export default function OrchBuilder({
   const resizingPalette = useRef(false)
 
   // DnD state
-  const dragId  = useRef(null)   // id of the card being dragged
-  const [dragOver, setDragOver]  = useState(null)   // { id, pos: 'top'|'bottom' }
+  const dragId  = useRef(null)
+  const [dragOver, setDragOver]  = useState(null)
 
   const onPaletteResizeStart = useCallback(e => {
     e.preventDefault()
@@ -37,7 +39,6 @@ export default function OrchBuilder({
 
   const steps = orch.steps || []
 
-  // ── helpers ─────────────────────────────────────────────────────────────────
   function save(newSteps, newName) {
     onUpdate({ ...orch, name: newName ?? name, steps: newSteps ?? steps })
   }
@@ -47,7 +48,6 @@ export default function OrchBuilder({
     onUpdate({ ...orch, name: v })
   }
 
-  // ── step mutations ───────────────────────────────────────────────────────────
   function addTask(step) {
     if (pendingGroup) {
       save(steps.map(s =>
@@ -122,7 +122,6 @@ export default function OrchBuilder({
     }))
   }
 
-  // ── DnD handlers ─────────────────────────────────────────────────────────────
   function handleDragStart(e, id) {
     dragId.current = id
     e.dataTransfer.effectAllowed = 'move'
@@ -134,7 +133,6 @@ export default function OrchBuilder({
       setDragOver(null)
       return
     }
-    // Determine top/bottom half from mouse position
     const rect = e.currentTarget.getBoundingClientRect()
     const pos = (e.clientY - rect.top) < rect.height / 2 ? 'top' : 'bottom'
     setDragOver({ id: overId, pos })
@@ -196,7 +194,7 @@ export default function OrchBuilder({
           {/* Resize handle */}
           <div
             onMouseDown={onPaletteResizeStart}
-            title="Arrastrar para cambiar ancho"
+            title={t('builder.dragResize')}
             style={{
               width: 5, flexShrink: 0, cursor: 'col-resize',
               background: 'var(--border)',
@@ -242,7 +240,7 @@ export default function OrchBuilder({
               value={name}
               onChange={e => !disabled && saveName(e.target.value)}
               disabled={disabled}
-              placeholder="Nombre de la orquestación…"
+              placeholder={t('builder.namePlaceholder')}
               style={{
                 flex: 1, background: 'var(--bg3)', border: '1px solid var(--border)',
                 borderRadius: 6, color: 'var(--text)', fontSize: 13, fontWeight: 600,
@@ -252,7 +250,7 @@ export default function OrchBuilder({
             {onToggleFullscreen && (
               <button
                 onClick={onToggleFullscreen}
-                title={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                title={fullscreen ? t('builder.exitFullscreen') : t('builder.fullscreen')}
                 style={{
                   padding: '7px 10px', borderRadius: 6, flexShrink: 0,
                   border: '1px solid var(--border)', background: 'transparent',
@@ -263,7 +261,7 @@ export default function OrchBuilder({
                 onMouseEnter={e => { e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.borderColor = 'var(--text2)' }}
                 onMouseLeave={e => { e.currentTarget.style.color = fullscreen ? 'var(--accent)' : 'var(--text3)'; e.currentTarget.style.borderColor = 'var(--border)' }}
               >
-                {fullscreen ? '✕ Salir' : '⤢'}
+                {fullscreen ? t('builder.exitFullscreen') : t('builder.fullscreen')}
               </button>
             )}
             <button
@@ -274,7 +272,7 @@ export default function OrchBuilder({
                 onRun()
               }}
               disabled={disabled || isEmpty}
-              title={isEmpty ? 'Agrega al menos un paso para ejecutar' : 'Ejecutar orquestación'}
+              title={isEmpty ? t('builder.addStepHint') : t('builder.executeTitle')}
               style={{
                 padding: '7px 18px', borderRadius: 6, flexShrink: 0,
                 border: '1px solid rgba(34,197,94,.4)',
@@ -285,7 +283,7 @@ export default function OrchBuilder({
                 opacity: (disabled || isEmpty) ? 0.5 : 1,
               }}
             >
-              ▶ Ejecutar
+              {t('builder.executeBtn')}
             </button>
           </div>
 
@@ -298,10 +296,10 @@ export default function OrchBuilder({
               }}>
                 <div style={{ fontSize: 32, opacity: 0.2 }}>⊞</div>
                 <div style={{ fontSize: 13, color: 'var(--text2)', textAlign: 'center' }}>
-                  Sin pasos configurados.
+                  {t('builder.emptyLine1')}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>
-                  Selecciona un template desde el panel izquierdo<br />para agregarlo a la secuencia.
+                  {t('builder.emptyLine2')}<br />{t('builder.emptyLine3')}
                 </div>
               </div>
             )}

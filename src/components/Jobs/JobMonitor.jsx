@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useI18n } from '../../context/I18nContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
@@ -40,19 +41,6 @@ const RESTARTABLE_STATUSES = ['A', 'U', 'C', 'W', 'F']
 const ERROR_STATUSES        = ['A', 'U', 'C']   // detuvo en paso fallido
 const FINISHED_STATUSES     = ['F', 'W']        // completó todos los pasos
 
-const RESTART_MODES = [
-  {
-    value: 'E',
-    label: 'Desde el paso fallido',
-    desc: 'Reinicia desde el paso que falló. Los pasos anteriores se omitirán.',
-  },
-  {
-    value: 'A',
-    label: 'Después del paso fallido',
-    desc: 'Reinicia omitiendo el paso fallido y todos los anteriores.',
-  },
-]
-
 function encodeODataString(val) {
   return `%27${encodeURIComponent(val)}%27`
 }
@@ -60,6 +48,7 @@ function encodeODataString(val) {
 const MOBILE_COL_KEYS = ['JobStatus', 'JobText', 'JobPlannedStartDateTime']
 
 export default function JobMonitor({ connection, session }) {
+  const { t } = useI18n()
   const isMobile = useIsMobile()
   const [statuses, setStatuses]       = useState([])
   const [rows, setRows]               = useState([])
@@ -94,6 +83,19 @@ export default function JobMonitor({ connection, session }) {
     setFromDate(toInputDate(fromD, newMode))
     setToDate(toInputDate(toD, newMode))
   }
+
+  const RESTART_MODES = [
+    {
+      value: 'E',
+      label: t('monitor.restartMode0label'),
+      desc: t('monitor.restartMode0desc'),
+    },
+    {
+      value: 'A',
+      label: t('monitor.restartMode1label'),
+      desc: t('monitor.restartMode1desc'),
+    },
+  ]
 
   const proxyPost = useCallback(async (path, opts = {}) => {
     const start = performance.now()
@@ -137,7 +139,7 @@ export default function JobMonitor({ connection, session }) {
   async function handleCancel() {
     if (!selectedRow) return
     const label = selectedRow.JobText || selectedRow.JobName
-    if (!window.confirm(`¿Cancelar el job "${label}"?\n\nEsta acción detendrá el job en SAP IBP.`)) return
+    if (!window.confirm(t('monitor.confirmCancel', { name: label }))) return
     setCancelling(true); setCancelMsg('')
     try {
       const path = `/JobCancel?JobName=${encodeODataString(selectedRow.JobName)}&JobRunCount=${encodeODataString(selectedRow.JobRunCount)}`
@@ -220,16 +222,16 @@ export default function JobMonitor({ connection, session }) {
 
   const tzSuffix = tzMode === 'utc' ? ' (UTC)' : ` (${getTzLabel()})`
   const BASE_COLS = useMemo(() => [
-    { key: 'JobStatus',                label: 'Estado',                        w: 130, render: (v) => <StatusBadge code={v} /> },
-    { key: 'JobTemplateText',          label: 'Template',                      w: 220, truncate: true },
-    { key: 'JobText',                  label: 'Descripción',                   w: 220, truncate: true },
-    { key: 'JobCreatedByFormattedName',label: 'Usuario',                       w: 180, truncate: true },
-    { key: 'JobStepCount',             label: 'Pasos',                         w: 70  },
-    { key: 'JobPlannedStartDateTime',  label: `Inicio planificado${tzSuffix}`, w: 190, render: v => formatSapTs(v, tzMode) },
-    { key: 'JobStartDateTime',         label: `Inicio real${tzSuffix}`,        w: 175, render: v => formatSapTs(v, tzMode) },
-    { key: 'JobEndDateTime',           label: `Fin${tzSuffix}`,                w: 175, render: v => formatSapTs(v, tzMode) },
-    { key: 'Periodic',                 label: 'Periódico',                     w: 90,  render: v => v ? '✓' : '—' },
-  ], [statuses, tzMode, tzSuffix])
+    { key: 'JobStatus',                label: t('monitor.colStatus'),                              w: 130, render: (v) => <StatusBadge code={v} /> },
+    { key: 'JobTemplateText',          label: t('monitor.colTemplate'),                            w: 220, truncate: true },
+    { key: 'JobText',                  label: t('monitor.colDesc'),                                w: 220, truncate: true },
+    { key: 'JobCreatedByFormattedName',label: t('monitor.colUser'),                                w: 180, truncate: true },
+    { key: 'JobStepCount',             label: t('monitor.colSteps'),                               w: 70  },
+    { key: 'JobPlannedStartDateTime',  label: `${t('monitor.colScheduled')}${tzSuffix}`,          w: 190, render: v => formatSapTs(v, tzMode) },
+    { key: 'JobStartDateTime',         label: `${t('monitor.colStartReal')}${tzSuffix}`,          w: 175, render: v => formatSapTs(v, tzMode) },
+    { key: 'JobEndDateTime',           label: `${t('monitor.colEnd')}${tzSuffix}`,                w: 175, render: v => formatSapTs(v, tzMode) },
+    { key: 'Periodic',                 label: t('monitor.colPeriodic'),                            w: 90,  render: v => v ? '✓' : '—' },
+  ], [statuses, tzMode, tzSuffix, t])
 
   const ALL_COLS = BASE_COLS.map(c => ({ ...c, w: colWidths[c.key] ?? c.w }))
   const COLS = isMobile ? ALL_COLS.filter(c => MOBILE_COL_KEYS.includes(c.key)) : ALL_COLS
@@ -270,7 +272,7 @@ export default function JobMonitor({ connection, session }) {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Job Monitor</div>
           <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-            {loading ? 'Cargando…' : `${filtered.length} de ${rows.length} registros`}
+            {loading ? t('monitor.loading') : t('monitor.recordsOf', { n: filtered.length, total: rows.length })}
             {lastRefresh && !loading && (
               <span style={{ marginLeft: 8, opacity: .6 }}>· {lastRefresh.toLocaleTimeString()}</span>
             )}
@@ -283,17 +285,17 @@ export default function JobMonitor({ connection, session }) {
           {!isMobile && <span style={{ color: 'var(--text2)', fontSize: 11 }}>→</span>}
           <input type="datetime-local" value={toDate} onChange={e => setToDate(e.target.value)}
             style={{ ...inputStyle, ...(isMobile && { flexBasis: '100%', width: '100%' }) }} />
-          <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)}
+          <input type="text" placeholder={t('monitor.search')} value={search} onChange={e => setSearch(e.target.value)}
             style={{ ...inputStyle, width: isMobile ? '100%' : 180, ...(isMobile && { flexBasis: '100%' }) }} />
           <button onClick={loadJobs} disabled={loading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
-          }}>↺ Refresh</button>
+          }}>{t('monitor.refresh')}</button>
           {!isMobile && (
             <span style={{
               fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
               padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-            }}>🔄 Auto-refresh cada {REFRESH_MS / 1000}s</span>
+            }}>{t('monitor.autoRefresh', { n: REFRESH_MS / 1000 })}</span>
           )}
         </div>
       </div>
@@ -301,7 +303,7 @@ export default function JobMonitor({ connection, session }) {
       {/* Status filter tabs */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexShrink: 0, flexWrap: 'wrap' }}>
         <FilterBtn active={activeStatus === 'ALL'} onClick={() => setActiveStatus('ALL')}
-          label="Todos" count={filteredBase.length} color={mk('#3b82f6')} />
+          label={t('monitor.filterAll')} count={filteredBase.length} color={mk('#3b82f6')} />
         {statuses.map(s => (
           <FilterBtn key={s.JobStatus} active={activeStatus === s.JobStatus}
             onClick={() => setActiveStatus(s.JobStatus)}
@@ -348,11 +350,11 @@ export default function JobMonitor({ connection, session }) {
             <tbody>
               {loading && rows.length === 0 ? (
                 <tr><td colSpan={COLS.length} style={{ padding: '32px 12px', textAlign: 'center', color: 'var(--text2)' }}>
-                  Cargando jobs…
+                  {t('monitor.loadingJobs')}
                 </td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={COLS.length} style={{ padding: '32px 12px', textAlign: 'center', color: 'var(--text2)' }}>
-                  Sin resultados para el período y filtros seleccionados
+                  {t('monitor.noResults')}
                 </td></tr>
               ) : filtered.map((row, i) => {
                 const isSelected = selectedRow?.JobName === row.JobName && selectedRow?.JobRunCount === row.JobRunCount
@@ -405,7 +407,7 @@ export default function JobMonitor({ connection, session }) {
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 1 }}>Job seleccionado</div>
+                  <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 1 }}>{t('monitor.jobSelected')}</div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {selectedRow.JobText || selectedRow.JobName}
                   </div>
@@ -417,7 +419,7 @@ export default function JobMonitor({ connection, session }) {
               </div>
               {(cancelMsg === 'ok' || restartMsg === 'ok') && (
                 <div style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600, marginBottom: 8 }}>
-                  ✓ {cancelMsg === 'ok' ? 'Job cancelado' : 'Job reiniciado'}
+                  ✓ {cancelMsg === 'ok' ? t('monitor.cancelledOk') : t('monitor.restartedOk')}
                 </div>
               )}
               {cancelMsg && cancelMsg !== 'ok' && <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 8 }}>✕ {cancelMsg}</div>}
@@ -426,24 +428,24 @@ export default function JobMonitor({ connection, session }) {
                 <button
                   onClick={() => setStepsJob(selectedRow)}
                   style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--purple) 45%, transparent)', background: 'color-mix(in srgb, var(--purple) 15%, transparent)', color: 'var(--purple)', cursor: 'pointer' }}
-                >▤ Ver pasos</button>
+                >{'▤ ' + (t('monitor.viewSteps', { n: '' }).split('(')[0].trim())}</button>
                 <button
                   onClick={handleCancel}
                   disabled={!isCancelable || cancelling}
                   style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--red) 45%, transparent)', background: isCancelable ? 'color-mix(in srgb, var(--red) 15%, transparent)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}
-                >{cancelling ? '…' : '✕ Cancelar'}</button>
+                >{cancelling ? '…' : t('monitor.cancelBtn')}</button>
                 <button
                   onClick={() => setRestartModal(true)}
                   disabled={!isRestartable || restarting}
                   style={{ padding: '8px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(6,182,212,.4)', background: isRestartable ? 'rgba(6,182,212,.12)' : 'transparent', color: isRestartable ? 'var(--cyan)' : 'var(--text3)', cursor: isRestartable ? 'pointer' : 'not-allowed', opacity: restarting ? .6 : 1 }}
-                >{restarting ? '…' : '↺ Reiniciar'}</button>
+                >{restarting ? '…' : t('monitor.restartBtn')}</button>
               </div>
             </>
           ) : (
             /* Desktop layout — igual que antes */
             <>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>Job seleccionado</div>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>{t('monitor.jobSelected')}</div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {selectedRow.JobText || selectedRow.JobName}
                   <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
@@ -451,22 +453,22 @@ export default function JobMonitor({ connection, session }) {
                   </span>
                 </div>
               </div>
-              {cancelMsg === 'ok'  && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job cancelado</span>}
+              {cancelMsg === 'ok'  && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ {t('monitor.cancelledOk')}</span>}
               {cancelMsg && cancelMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {cancelMsg}</span>}
-              {restartMsg === 'ok' && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Job reiniciado</span>}
+              {restartMsg === 'ok' && <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ {t('monitor.restartedOk')}</span>}
               {restartMsg && restartMsg !== 'ok' && <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 280 }}>✕ {restartMsg}</span>}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button onClick={() => setStepsJob(selectedRow)} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--purple) 45%, transparent)', background: 'color-mix(in srgb, var(--purple) 15%, transparent)', color: 'var(--purple)', cursor: 'pointer' }}>
-                  ▤ Ver pasos{selectedRow?.JobStepCount > 0 ? ` (${selectedRow.JobStepCount})` : ''}
+                  {selectedRow?.JobStepCount > 0 ? `▤ ${t('monitor.viewSteps', { n: selectedRow.JobStepCount })}` : `▤ ${t('monitor.viewSteps', { n: '' }).split('(')[0].trim()}`}
                 </button>
                 <button onClick={handleCancel} disabled={!isCancelable || cancelling} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid color-mix(in srgb, var(--red) 45%, transparent)', background: isCancelable ? 'color-mix(in srgb, var(--red) 15%, transparent)' : 'transparent', color: isCancelable ? 'var(--red)' : 'var(--text3)', cursor: isCancelable ? 'pointer' : 'not-allowed', opacity: cancelling ? .6 : 1 }}>
-                  {cancelling ? 'Cancelando…' : '✕ Cancelar job'}
+                  {cancelling ? t('monitor.cancelling') : t('monitor.cancelBtn')}
                 </button>
                 <button onClick={() => setRestartModal(true)} disabled={!isRestartable || restarting} style={{ padding: '6px 16px', borderRadius: 6, fontSize: 11, fontWeight: 700, border: '1px solid rgba(6,182,212,.4)', background: isRestartable ? 'rgba(6,182,212,.12)' : 'transparent', color: isRestartable ? 'var(--cyan)' : 'var(--text3)', cursor: isRestartable ? 'pointer' : 'not-allowed', opacity: restarting ? .6 : 1 }}>
-                  {restarting ? 'Reiniciando…' : '↺ Reiniciar job'}
+                  {restarting ? t('monitor.restarting') : t('monitor.restartBtn')}
                 </button>
                 <button onClick={() => { setSelectedRow(null); setCancelMsg(''); setRestartMsg('') }} style={{ padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer' }}>
-                  Deseleccionar
+                  {t('monitor.deselect')}
                 </button>
               </div>
             </>
@@ -506,11 +508,10 @@ export default function JobMonitor({ connection, session }) {
               {isError && (
                 <>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-                    ↺ Reiniciar job con error
+                    ↺ {t('monitor.restartErrTitle')}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 20 }}>
-                    Selecciona desde qué punto reanudar{' '}
-                    <strong style={{ color: 'var(--text)' }}>{jobLabel}</strong>
+                    {t('monitor.restartErrSubtitle', { name: jobLabel })}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
                     {RESTART_MODES.map(m => (
@@ -526,7 +527,7 @@ export default function JobMonitor({ connection, session }) {
                         onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.background = 'var(--bg3)' }}
                       >
                         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>
-                          Modo {m.value} — {m.label}
+                          {t('monitor.modeLabel', { value: m.value, label: m.label })}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>{m.desc}</div>
                       </button>
@@ -539,7 +540,7 @@ export default function JobMonitor({ connection, session }) {
               {isFinished && (
                 <>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-                    ↺ Volver a ejecutar
+                    ↺ {t('monitor.restartOkTitle')}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>
                     <strong style={{ color: 'var(--text)' }}>{jobLabel}</strong>
@@ -549,10 +550,7 @@ export default function JobMonitor({ connection, session }) {
                     borderRadius: 8, padding: '10px 14px', marginBottom: 20,
                   }}>
                     <div style={{ fontSize: 11, color: 'var(--green)', lineHeight: 1.6 }}>
-                      Este job <strong>finalizó correctamente</strong>
-                      {selectedRow.JobStatus === 'W' ? ' (con advertencias)' : ''}
-                      {'. '}
-                      No hay pasos fallidos — se ejecutará nuevamente desde el inicio.
+                      {selectedRow.JobStatus === 'W' ? t('monitor.restartOkNoteWarning') : t('monitor.restartOkNoteOk')}
                     </div>
                   </div>
                   <button
@@ -566,7 +564,7 @@ export default function JobMonitor({ connection, session }) {
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(6,182,212,.18)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'rgba(6,182,212,.1)' }}
                   >
-                    ↺ Ejecutar nuevamente
+                    {t('monitor.restartOkBtn')}
                   </button>
                 </>
               )}
@@ -577,7 +575,7 @@ export default function JobMonitor({ connection, session }) {
                   width: '100%', padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
                   border: '1px solid var(--border)', background: 'none', color: 'var(--text2)', cursor: 'pointer',
                 }}
-              >Cancelar</button>
+              >{t('common.cancel')}</button>
             </div>
           </div>
         )
@@ -605,11 +603,12 @@ function FilterBtn({ active, onClick, label, count, color }) {
 }
 
 function TzToggle({ mode, onToggle }) {
+  const { t } = useI18n()
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
       <button
         onClick={() => onToggle('utc')}
-        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        title={t('resumen.tzUtcTitle')}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'utc' ? 'var(--border2)' : 'transparent',
@@ -618,7 +617,7 @@ function TzToggle({ mode, onToggle }) {
       >UTC</button>
       <button
         onClick={() => onToggle('local')}
-        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        title={t('resumen.tzLocalTitle', { tz: getTzLabel() })}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'local' ? 'var(--border2)' : 'transparent',

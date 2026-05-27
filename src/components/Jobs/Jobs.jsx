@@ -1,20 +1,22 @@
 import { useState, useEffect, useRef } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useI18n } from '../../context/I18nContext'
 import TechLogs, { useTechLogs } from '../TechLogs'
 import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
 import ScheduleModal from './ScheduleModal'
 import TruncText from '../ui/TruncText'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const JOB_PATH    = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
 const MOBILE_COLS  = ['JobTemplateName']
-const COL_LABELS   = { JobTemplateName: 'Nombre', JobTemplateText: 'Descripción' }
 const DEFAULT_COL_WIDTHS = { JobTemplateName: 240, JobTemplateText: 480 }
 
 const TD = { padding: '6px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
 
 export default function Jobs({ connection, session }) {
+  const { t } = useI18n()
   const isMobile = useIsMobile()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -25,9 +27,10 @@ export default function Jobs({ connection, session }) {
   const [search, setSearch] = useState('')
   const resizing = useRef(null)
   const [logs, addLog] = useTechLogs()
-  // Modal de configuración de parámetros
-  const [scheduleRow, setScheduleRow]       = useState(null)  // template seleccionado
-  const [scheduledRows, setScheduledRows]   = useState({})    // { [JobTemplateName]: 'ok' }
+  const [scheduleRow, setScheduleRow]       = useState(null)
+  const [scheduledRows, setScheduledRows]   = useState({})
+
+  const COL_LABELS = { JobTemplateName: t('jobs.colName'), JobTemplateText: t('jobs.colDesc') }
 
   useEffect(() => {
     setLoading(true); setError(''); setRows([]); setSearch('')
@@ -85,13 +88,13 @@ export default function Jobs({ connection, session }) {
   if (loading) return (
     <div style={{ padding: isMobile ? 14 : 28, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
       <ProgressBar loading />
-      Cargando job templates de {connection.name}…
+      {t('jobs.loading', { name: connDisplayName(connection, t) })}
     </div>
   )
 
   if (error) return (
     <div style={{ padding: isMobile ? 14 : 28 }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>Job Templates</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>{t('jobs.title')}</div>
       <div style={{
         background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 35%, transparent)',
         borderRadius: 8, padding: '12px 16px', color: 'var(--red)', fontSize: 12,
@@ -110,14 +113,16 @@ export default function Jobs({ connection, session }) {
         marginBottom: 16, flexShrink: 0, gap: isMobile ? 8 : 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Job Templates</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{t('jobs.title')}</div>
           <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-            {sorted.length}{search ? ` de ${rows.length}` : ''} registros
+            {search
+              ? t('jobs.recordsFiltered', { n: sorted.length, total: rows.length })
+              : t('jobs.records', { n: sorted.length })}
           </div>
         </div>
         <input
           type="text"
-          placeholder="Buscar en todas las columnas…"
+          placeholder={t('jobs.search')}
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{
@@ -129,7 +134,7 @@ export default function Jobs({ connection, session }) {
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--text2)' }}>Sin resultados</div>
+        <div style={{ fontSize: 13, color: 'var(--text2)' }}>{t('jobs.noRecords')}</div>
       ) : (
         <div style={{ overflowX: 'auto', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, flex: 1 }}>
           <table style={{
@@ -168,14 +173,14 @@ export default function Jobs({ connection, session }) {
                   width: 110, minWidth: 110, padding: '9px 12px', textAlign: 'left',
                   color: 'var(--text2)', fontWeight: 600,
                   borderBottom: '1px solid var(--border)', userSelect: 'none',
-                }}>Acción</th>
+                }}>{t('jobs.colAction')}</th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
                   <td colSpan={activeCols.length + 1} style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text2)', fontSize: 12 }}>
-                    Sin resultados para "{search}"
+                    {t('jobs.noSearch', { search })}
                   </td>
                 </tr>
               ) : sorted.map((row, i) => (
@@ -197,7 +202,7 @@ export default function Jobs({ connection, session }) {
                   ))}
                   <td style={TD} onClick={e => e.stopPropagation()}>
                     {scheduledRows[row.JobTemplateName] === 'ok' ? (
-                      <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>✓ Enviado</span>
+                      <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>{t('jobs.sent')}</span>
                     ) : (
                       <button
                         onClick={() => setScheduleRow(row)}
@@ -206,7 +211,7 @@ export default function Jobs({ connection, session }) {
                           background: 'color-mix(in srgb, var(--green) 12%, transparent)', color: 'var(--green)',
                           fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
                         }}
-                      >▶ Ejecutar</button>
+                      >{t('jobs.executeBtn')}</button>
                     )}
                   </td>
                 </tr>

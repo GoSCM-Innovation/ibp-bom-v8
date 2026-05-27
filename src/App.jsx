@@ -8,6 +8,7 @@ import LoginModal from './components/Connections/LoginModal'
 import { getAll, bulkImport } from './services/connectionStorage'
 import { loadAllSessions, setSession, clearSession } from './services/sessionStorage'
 import { useIsMobile } from './hooks/useIsMobile'
+import { I18nProvider } from './context/I18nContext'
 import './App.css'
 
 export default function App() {
@@ -90,6 +91,7 @@ export default function App() {
   }
 
   return (
+    <I18nProvider>
     <>
       <Header onMenuToggle={isMobile ? () => setSidebarOpen(p => !p) : null} />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
@@ -124,5 +126,6 @@ export default function App() {
         />
       )}
     </>
+    </I18nProvider>
   )
 }

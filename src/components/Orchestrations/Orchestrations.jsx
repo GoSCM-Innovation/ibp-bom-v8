@@ -2,16 +2,18 @@ import { useState, useRef, useEffect } from 'react'
 import { loadOrchs, saveOrchs, createOrch, updateOrch, deleteOrch, duplicateOrch, exportOrchs, importOrchs, loadRunState } from './useOrchStorage'
 import { useOrchRun } from './useOrchRun'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useI18n } from '../../context/I18nContext'
 import OrchBuilder from './OrchBuilder'
 import RunView from './RunView'
 
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleDateString('es', { day: '2-digit', month: 'short', year: '2-digit' })
-}
-
 export default function Orchestrations({ connection, session }) {
+  const { t, lang } = useI18n()
+
+  function formatDate(iso) {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    return d.toLocaleDateString(lang === 'en' ? 'en' : 'es', { day: '2-digit', month: 'short', year: '2-digit' })
+  }
   const connId = connection.id
 
   const [orchs, setOrchs]               = useState(() => loadOrchs(connId))
@@ -27,7 +29,7 @@ export default function Orchestrations({ connection, session }) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newOrchName, setNewOrchName]         = useState('')
   const [deleteTargetId, setDeleteTargetId]   = useState(null)
-  const [mobileView, setMobileView]           = useState('list') // 'list' | 'builder'
+  const [mobileView, setMobileView]           = useState('list')
   const fileRef = useRef(null)
   const isMobile = useIsMobile()
 
@@ -50,7 +52,6 @@ export default function Orchestrations({ connection, session }) {
     }
   }, [connId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Exit fullscreen + go back to list if selection cleared
   useEffect(() => {
     if (!selectedId) {
       setFullscreen(false)
@@ -132,7 +133,7 @@ export default function Orchestrations({ connection, session }) {
       try {
         const parsed = JSON.parse(ev.target.result)
         if (!parsed.orchestrations || !Array.isArray(parsed.orchestrations)) {
-          throw new Error('Formato de archivo inválido (falta "orchestrations")')
+          throw new Error(t('orch.invalidFormat'))
         }
         setImportParsed(parsed)
         setShowImportModal(true)
@@ -150,7 +151,7 @@ export default function Orchestrations({ connection, session }) {
     setOrchs(result)
     setShowImportModal(false)
     setImportParsed(null)
-    setImportSuccess(`Importadas: ${added} nuevas, ${replaced} reemplazadas, ${skipped} omitidas.`)
+    setImportSuccess(t('orch.importResult', { new: added, replaced, skipped }))
     setTimeout(() => setImportSuccess(''), 4000)
   }
 
@@ -158,7 +159,6 @@ export default function Orchestrations({ connection, session }) {
   const showBuilder = !showEmpty && selectedId && selected && mode === 'build'
   const showRun     = !showEmpty && selectedId && selected && mode === 'run'
 
-  // ── Shared builder element ───────────────────────────────────────────────────
   const builderEl = showBuilder ? (
     <OrchBuilder
       key={selected.id}
@@ -205,12 +205,12 @@ export default function Orchestrations({ connection, session }) {
           }}>
             {!sidebarCollapsed && (
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Orquestaciones
+                {t('orch.title')}
               </div>
             )}
             <button
               onClick={() => setSidebarCollapsed(c => !c)}
-              title={sidebarCollapsed ? 'Expandir panel' : 'Colapsar panel'}
+              title={sidebarCollapsed ? t('orch.expandPanel') : t('orch.collapsePanel')}
               style={{
                 background: 'none', border: '1px solid var(--border)', borderRadius: 5,
                 color: 'var(--text3)', fontSize: 11, cursor: 'pointer',
@@ -231,7 +231,6 @@ export default function Orchestrations({ connection, session }) {
                 <button
                   disabled={isRunning}
                   onClick={handleCreate}
-                  title={isRunning ? 'No se puede crear durante una ejecución activa' : undefined}
                   style={{
                     width: '100%', padding: '7px 0', borderRadius: 6,
                     border: '1px solid rgba(34,197,94,.35)', background: 'rgba(34,197,94,.07)',
@@ -241,7 +240,7 @@ export default function Orchestrations({ connection, session }) {
                     opacity: isRunning ? 0.45 : 1,
                   }}
                 >
-                  + Nueva orquestación
+                  {t('orch.newBtn')}
                 </button>
               </div>
 
@@ -249,11 +248,12 @@ export default function Orchestrations({ connection, session }) {
               <div style={{ flex: 1, overflow: 'auto' }}>
                 {orchs.length === 0 && (
                   <div style={{ padding: '16px 12px', fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>
-                    Sin orquestaciones. Crea la primera.
+                    {t('orch.empty')}
                   </div>
                 )}
                 {orchs.map(orch => {
                   const isActive = orch.id === selectedId
+                  const stepCount = (orch.steps || []).length
                   return (
                     <div
                       key={orch.id}
@@ -274,9 +274,7 @@ export default function Orchestrations({ connection, session }) {
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          display: 'flex', alignItems: 'center', gap: 6,
-                        }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {isRunning && isActive && (
                             <span style={{ flexShrink: 0, fontSize: 8, color: '#22c55e', animation: 'orchRunPulse 1.2s ease-in-out infinite' }}>●</span>
                           )}
@@ -289,7 +287,7 @@ export default function Orchestrations({ connection, session }) {
                           </span>
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>
-                          {(orch.steps || []).length} paso{(orch.steps || []).length !== 1 ? 's' : ''}
+                          {stepCount === 1 ? t('orch.step1') : t('orch.stepN', { n: stepCount })}
                           {' · '}{formatDate(orch.createdAt)}
                         </div>
                       </div>
@@ -297,7 +295,7 @@ export default function Orchestrations({ connection, session }) {
                         <>
                           <button
                             onClick={e => { e.stopPropagation(); handleDuplicate(orch.id) }}
-                            title="Duplicar"
+                            title={t('orch.duplicate')}
                             style={{
                               background: 'none', border: 'none', color: 'var(--text3)',
                               fontSize: 12, cursor: 'pointer', padding: '2px 4px', lineHeight: 1,
@@ -309,7 +307,7 @@ export default function Orchestrations({ connection, session }) {
                           >⧉</button>
                           <button
                             onClick={e => { e.stopPropagation(); handleDelete(orch.id) }}
-                            title="Eliminar"
+                            title={t('orch.deleteOrch')}
                             style={{
                               background: 'none', border: 'none', color: 'var(--text3)',
                               fontSize: 11, cursor: 'pointer', padding: '2px 4px', lineHeight: 1,
@@ -338,18 +336,17 @@ export default function Orchestrations({ connection, session }) {
                   <button
                     disabled={orchs.length === 0}
                     onClick={handleExport}
-                    title="Exportar todas como JSON"
+                    title={t('orch.exportAll')}
                     style={{
                       flex: 1, padding: '5px 0', borderRadius: 5,
                       border: '1px solid var(--border)', background: 'transparent',
                       color: 'var(--text2)', fontSize: 10, cursor: orchs.length > 0 ? 'pointer' : 'default',
                       opacity: orchs.length > 0 ? 1 : 0.4,
                     }}
-                  >↓ Exportar</button>
+                  >{t('orch.exportAll')}</button>
                   <button
                     disabled={isRunning}
                     onClick={() => !isRunning && fileRef.current?.click()}
-                    title={isRunning ? 'No se puede importar durante una ejecución activa' : 'Importar desde JSON'}
                     style={{
                       flex: 1, padding: '5px 0', borderRadius: 5,
                       border: '1px solid var(--border)', background: 'transparent',
@@ -357,18 +354,18 @@ export default function Orchestrations({ connection, session }) {
                       fontSize: 10, cursor: isRunning ? 'default' : 'pointer',
                       opacity: isRunning ? 0.45 : 1,
                     }}
-                  >↑ Importar</button>
+                  >{t('orch.importBtn')}</button>
                 </div>
                 {selected && (
                   <button
                     onClick={handleExportSingle}
-                    title="Exportar solo esta orquestación"
+                    title={t('orch.exportOne', { name: selected.name.slice(0, 20) + (selected.name.length > 20 ? '…' : '') })}
                     style={{
                       padding: '5px 0', borderRadius: 5,
                       border: '1px solid var(--border)', background: 'transparent',
                       color: 'var(--text3)', fontSize: 10, cursor: 'pointer',
                     }}
-                  >↓ Exportar "{selected.name.slice(0, 20)}{selected.name.length > 20 ? '…' : ''}"</button>
+                  >{t('orch.exportOne', { name: selected.name.slice(0, 20) + (selected.name.length > 20 ? '…' : '') })}</button>
                 )}
               </div>
             </>
@@ -379,7 +376,7 @@ export default function Orchestrations({ connection, session }) {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '10px 0' }}>
               <button
                 onClick={handleCreate}
-                title="Nueva orquestación"
+                title={t('orch.newBtn')}
                 style={{
                   background: 'rgba(34,197,94,.1)', border: '1px solid rgba(34,197,94,.3)',
                   borderRadius: 5, color: '#22c55e', fontSize: 14, cursor: 'pointer',
@@ -445,7 +442,7 @@ export default function Orchestrations({ connection, session }) {
                   borderRadius: 6, color: 'var(--text2)', fontSize: 12,
                   padding: '5px 12px', cursor: 'pointer',
                 }}
-              >← Volver</button>
+              >{t('orch.back')}</button>
               {selected && (
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {selected.name}
@@ -460,9 +457,9 @@ export default function Orchestrations({ connection, session }) {
               alignItems: 'center', justifyContent: 'center', gap: 14,
             }}>
               <div style={{ fontSize: 40, opacity: 0.15 }}>⊞</div>
-              <div style={{ fontSize: 14, color: 'var(--text2)', fontWeight: 600 }}>Orquestador de Jobs</div>
+              <div style={{ fontSize: 14, color: 'var(--text2)', fontWeight: 600 }}>{t('orch.builderTitle')}</div>
               <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', maxWidth: 320 }}>
-                Crea una orquestación para encadenar jobs en secuencia, definir condiciones de error y agrupar jobs en paralelo.
+                {t('orch.builderEmpty')}
               </div>
               <button
                 onClick={handleCreate}
@@ -472,7 +469,7 @@ export default function Orchestrations({ connection, session }) {
                   background: 'rgba(34,197,94,.08)',
                   color: '#22c55e', fontSize: 12, fontWeight: 700, cursor: 'pointer',
                 }}
-              >+ Nueva orquestación</button>
+              >{t('orch.newBtn')}</button>
             </div>
           )}
 
@@ -519,12 +516,12 @@ export default function Orchestrations({ connection, session }) {
             boxShadow: 'var(--shadow-lg)',
           }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
-              Importar orquestaciones
+              {t('orch.importModal.title')}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 16 }}>
-              Se encontraron <strong style={{ color: 'var(--text)' }}>{importParsed.orchestrations.length}</strong> orquestación(es) en el archivo.
+              {t('orch.importModal.found', { n: importParsed.orchestrations.length })}
               {importParsed.sourceConnection && (
-                <span style={{ color: 'var(--text3)' }}> (origen: {importParsed.sourceConnection})</span>
+                <span style={{ color: 'var(--text3)' }}> ({importParsed.sourceConnection})</span>
               )}
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 20 }}>
@@ -535,7 +532,7 @@ export default function Orchestrations({ connection, session }) {
                 style={{ width: 15, height: 15 }}
               />
               <span style={{ fontSize: 12, color: 'var(--text)' }}>
-                Reemplazar orquestaciones existentes con el mismo nombre
+                {t('orch.importModal.replaceCheck')}
               </span>
             </label>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -546,7 +543,7 @@ export default function Orchestrations({ connection, session }) {
                   border: '1px solid var(--border)', background: 'transparent',
                   color: 'var(--text2)', fontSize: 12, cursor: 'pointer',
                 }}
-              >Cancelar</button>
+              >{t('orch.importModal.cancel')}</button>
               <button
                 onClick={confirmImport}
                 style={{
@@ -555,7 +552,7 @@ export default function Orchestrations({ connection, session }) {
                   background: 'rgba(34,197,94,.1)',
                   color: '#22c55e', fontSize: 12, fontWeight: 700, cursor: 'pointer',
                 }}
-              >↑ Importar</button>
+              >{t('orch.importModal.importBtn')}</button>
             </div>
           </div>
         </>
@@ -579,14 +576,14 @@ export default function Orchestrations({ connection, session }) {
             boxShadow: 'var(--shadow-lg)',
           }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 16 }}>
-              Nueva orquestación
+              {t('orch.createModal.title')}
             </div>
             <input
               autoFocus
               value={newOrchName}
               onChange={e => setNewOrchName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') confirmCreate(); if (e.key === 'Escape') setShowCreateModal(false) }}
-              placeholder="Nombre de la orquestación…"
+              placeholder={t('orch.createModal.placeholder')}
               style={{
                 width: '100%', background: 'var(--bg)', border: '1px solid var(--border2)',
                 borderRadius: 7, color: 'var(--text)', fontSize: 13, fontWeight: 500,
@@ -603,7 +600,7 @@ export default function Orchestrations({ connection, session }) {
                   border: '1px solid var(--border)', background: 'transparent',
                   color: 'var(--text2)', fontSize: 12, cursor: 'pointer',
                 }}
-              >Cancelar</button>
+              >{t('orch.createModal.cancel')}</button>
               <button
                 onClick={confirmCreate}
                 disabled={!newOrchName.trim()}
@@ -615,7 +612,7 @@ export default function Orchestrations({ connection, session }) {
                   fontSize: 12, fontWeight: 700,
                   cursor: newOrchName.trim() ? 'pointer' : 'default',
                 }}
-              >Crear</button>
+              >{t('orch.createModal.createBtn')}</button>
             </div>
           </div>
         </>
@@ -636,9 +633,9 @@ export default function Orchestrations({ connection, session }) {
             borderRadius: 12, zIndex: 501, padding: 24,
             boxShadow: 'var(--shadow-lg)',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Eliminar orquestación</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>{t('orch.deleteModal.title')}</div>
             <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 20 }}>
-              Esta acción no se puede deshacer. ¿Confirmas?
+              {t('orch.deleteModal.confirm')}
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button
@@ -648,7 +645,7 @@ export default function Orchestrations({ connection, session }) {
                   border: '1px solid var(--border)', background: 'transparent',
                   color: 'var(--text2)', fontSize: 12, cursor: 'pointer',
                 }}
-              >Cancelar</button>
+              >{t('orch.deleteModal.cancel')}</button>
               <button
                 onClick={confirmDelete}
                 style={{
@@ -657,7 +654,7 @@ export default function Orchestrations({ connection, session }) {
                   background: 'rgba(255,107,107,.12)',
                   color: 'var(--red)', fontSize: 12, fontWeight: 700, cursor: 'pointer',
                 }}
-              >Eliminar</button>
+              >{t('orch.deleteModal.deleteBtn')}</button>
             </div>
           </div>
         </>

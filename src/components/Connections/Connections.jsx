@@ -1,31 +1,33 @@
 import { useState, useRef } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useI18n } from '../../context/I18nContext'
 import ConnectionForm from './ConnectionForm'
 import ConnectionAvatar from './ConnectionAvatar'
 import ImportConnectionsModal from './ImportConnectionsModal'
 import { remove } from '../../services/connectionStorage'
 import { getSapSystemUrl } from '../../utils/sapUrl'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const EXPORT_VERSION = '1.0'
 
-function parseImportText(text) {
+function parseImportText(text, t) {
   let raw
   try { raw = JSON.parse(text) }
-  catch { throw new Error('El archivo no es un JSON válido') }
+  catch { throw new Error(t('conn.errInvalidJson')) }
 
   const arr = Array.isArray(raw) ? raw : raw?.connections
-  if (!Array.isArray(arr)) throw new Error('El archivo no contiene un array de conexiones')
+  if (!Array.isArray(arr)) throw new Error(t('conn.errNotArray'))
 
   const valid = []
   const invalid = []
   arr.forEach((c, i) => {
     if (!c || typeof c !== 'object') {
-      invalid.push({ index: i, reason: 'no es un objeto' }); return
+      invalid.push({ index: i, reason: t('conn.errInvalidEntry') }); return
     }
     const name     = typeof c.name     === 'string' ? c.name.trim()     : ''
     const ambiente = typeof c.ambiente === 'string' ? c.ambiente.trim() : ''
     if (!name || !ambiente) {
-      invalid.push({ index: i, reason: 'faltan name o ambiente' }); return
+      invalid.push({ index: i, reason: t('conn.errMissingFields') }); return
     }
     valid.push({
       name,
@@ -68,6 +70,7 @@ function downloadConnectionsFile(connections) {
 }
 
 export default function Connections({ connections, onSaved, onDeleted, onSelect, onBulkImport }) {
+  const { t } = useI18n()
   const isMobile = useIsMobile()
   const [showForm, setShowForm]           = useState(false)
   const [editing, setEditing]             = useState(null)
@@ -93,7 +96,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
   }
 
   function handleDelete(id, name) {
-    if (!confirm(`¿Eliminar la conexión "${name}"?`)) return
+    if (!confirm(t('conn.deleteConfirm', { name }))) return
     remove(id)
     onDeleted(id)
   }
@@ -102,10 +105,11 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
     if (connections.length === 0) return
     try {
       downloadConnectionsFile(connections)
-      setFeedback({ kind: 'ok', text: `${connections.length} conexion${connections.length === 1 ? '' : 'es'} exportada${connections.length === 1 ? '' : 's'}` })
+      const n = connections.length
+      setFeedback({ kind: 'ok', text: n === 1 ? t('conn.msgExported1') : t('conn.msgExportedN', { n }) })
       setTimeout(() => setFeedback(null), 3500)
     } catch (e) {
-      setFeedback({ kind: 'error', text: `No se pudo exportar: ${e.message}` })
+      setFeedback({ kind: 'error', text: t('conn.errExport', { msg: e.message }) })
     }
   }
 
@@ -120,9 +124,9 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
     if (!file) return
     try {
       const text = await file.text()
-      const parsed = parseImportText(text)
+      const parsed = parseImportText(text, t)
       if (parsed.connections.length === 0 && parsed.invalid.length === 0) {
-        setFeedback({ kind: 'error', text: 'El archivo no contiene conexiones' })
+        setFeedback({ kind: 'error', text: t('conn.errEmpty') })
         return
       }
       setImportFileName(file.name)
@@ -137,10 +141,10 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
     setImportParsed(null)
     setImportFileName('')
     const parts = []
-    if (added)    parts.push(`${added} agregada${added === 1 ? '' : 's'}`)
-    if (replaced) parts.push(`${replaced} reemplazada${replaced === 1 ? '' : 's'}`)
-    if (skipped)  parts.push(`${skipped} omitida${skipped === 1 ? '' : 's'}`)
-    setFeedback({ kind: 'ok', text: parts.length ? parts.join(', ') : 'Sin cambios' })
+    if (added)    parts.push(added    === 1 ? t('conn.msgAdded1')    : t('conn.msgAddedN',    { n: added }))
+    if (replaced) parts.push(replaced === 1 ? t('conn.msgReplaced1') : t('conn.msgReplacedN', { n: replaced }))
+    if (skipped)  parts.push(skipped  === 1 ? t('conn.msgSkipped1')  : t('conn.msgSkippedN',  { n: skipped }))
+    setFeedback({ kind: 'ok', text: parts.length ? parts.join(', ') : t('conn.noChanges') })
     setTimeout(() => setFeedback(null), 4000)
   }
 
@@ -154,36 +158,36 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
       {/* Title */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Conexiones</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{t('conn.title')}</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 3 }}>
-            Tus conexiones SAP IBP, guardadas en este navegador
+            {t('conn.subtitle')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             onClick={handleImportClick}
-            title="Importar conexiones desde un archivo JSON"
+            title={t('conn.importTitle')}
             style={secondaryBtnStyle}
           >
-            Importar
+            {t('conn.import')}
           </button>
           <button
             onClick={handleExport}
             disabled={connections.length === 0}
-            title={connections.length === 0 ? 'No hay conexiones para exportar' : 'Descargar todas las conexiones como JSON'}
+            title={connections.length === 0 ? t('conn.exportDisabled') : t('conn.exportEnabled')}
             style={{
               ...secondaryBtnStyle,
               opacity: connections.length === 0 ? 0.5 : 1,
               cursor:  connections.length === 0 ? 'not-allowed' : 'pointer',
             }}
           >
-            Exportar
+            {t('conn.export')}
           </button>
           <button onClick={handleNew} style={{
             background: 'var(--accent)', border: 'none', borderRadius: 7,
             color: 'var(--text-on-accent)', fontWeight: 700, fontSize: 12, padding: '8px 18px', cursor: 'pointer',
           }}>
-            + Nueva conexión
+            {t('conn.newBtn')}
           </button>
           <input
             ref={fileInputRef}
@@ -231,16 +235,16 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
         }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>⚡</div>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
-            No hay conexiones configuradas
+            {t('conn.emptyLine1')}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 20 }}>
-            Agrega un sistema SAP IBP para empezar a gestionar jobs
+            {t('conn.emptySubtitle')}
           </div>
           <button onClick={handleNew} style={{
             background: 'var(--accent)', border: 'none', borderRadius: 7,
             color: 'var(--text-on-accent)', fontWeight: 700, fontSize: 12, padding: '8px 18px', cursor: 'pointer',
           }}>
-            + Nueva conexión
+            {t('conn.newBtn')}
           </button>
         </div>
       )}
@@ -256,7 +260,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
             <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={40} />
 
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{conn.name}</div>
+              <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connDisplayName(conn, t)}</div>
               {conn.com0326?.user && (
                 <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
                   {conn.com0326.user}
@@ -271,7 +275,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
                   onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                   onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
                 >
-                  Abrir en SAP IBP ↗
+                  {t('conn.openSap')}
                 </a>
               )}
             </div>
@@ -281,13 +285,13 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
               ...(isMobile && { width: '100%' }),
             }}>
               <button onClick={() => onSelect(conn.id)} style={{ ...btnStyle('var(--cyan)'), ...(isMobile && { flex: 1 }) }}>
-                Abrir
+                {t('conn.open')}
               </button>
               <button onClick={() => handleEdit(conn)} style={{ ...btnStyle('var(--text2)'), ...(isMobile && { flex: 1 }) }}>
-                Editar
+                {t('conn.edit')}
               </button>
-              <button onClick={() => handleDelete(conn.id, conn.name)} style={{ ...btnStyle('var(--red)'), ...(isMobile && { flex: 1 }) }}>
-                Eliminar
+              <button onClick={() => handleDelete(conn.id, connDisplayName(conn, t))} style={{ ...btnStyle('var(--red)'), ...(isMobile && { flex: 1 }) }}>
+                {t('conn.delete')}
               </button>
             </div>
           </div>

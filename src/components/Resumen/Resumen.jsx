@@ -12,9 +12,11 @@ import {
   toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
 } from '../../utils/dateUtils'
+import { useI18n } from '../../context/I18nContext'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const DEFAULT_HOURS = 24
-const REFRESH_MS = 5 * 60 * 1000 // 5 minutos
+const REFRESH_MS = 5 * 60 * 1000
 
 const STATUS_COLORS = {
   F: '#34d399', W: '#fbbf24', A: '#ff6b6b', U: '#f97316',
@@ -24,6 +26,7 @@ const STATUS_COLORS = {
 }
 
 export default function Resumen({ connection, session }) {
+  const { t } = useI18n()
   const isMobile = useIsMobile()
   const [rows, setRows]           = useState([])
   const [statuses, setStatuses]   = useState([])
@@ -87,7 +90,6 @@ export default function Resumen({ connection, session }) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code
   }
 
-  // Filter — siempre en UTC para coincidir con SAP
   const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
   const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
   const filtered = rows.filter(r => {
@@ -96,7 +98,6 @@ export default function Resumen({ connection, session }) {
     return true
   })
 
-  // KPIs
   const total    = filtered.length
   const running  = filtered.filter(r => r.JobStatus === 'R').length
   const scheduled= filtered.filter(r => ['S','P','Y'].includes(r.JobStatus)).length
@@ -105,25 +106,22 @@ export default function Resumen({ connection, session }) {
   const warned   = filtered.filter(r => r.JobStatus === 'W').length
   const successRate = total > 0 ? Math.round(((finished + warned) / total) * 100) : 0
 
-  // Donut
   const statusCount = {}
   filtered.forEach(r => { statusCount[r.JobStatus] = (statusCount[r.JobStatus] || 0) + 1 })
   const donutData = Object.entries(statusCount)
     .map(([code, count]) => ({ name: statusLabel(code), value: count, code }))
     .sort((a, b) => b.value - a.value)
 
-  // Bars
   const dayMap = {}
   filtered.forEach(r => {
     const d = dayLabel(r.JobPlannedStartDateTime, tzMode)
-    if (!dayMap[d]) dayMap[d] = { day: d, Finalizados: 0, Fallidos: 0, Otros: 0 }
-    if (r.JobStatus === 'F' || r.JobStatus === 'W') dayMap[d].Finalizados++
-    else if (r.JobStatus === 'A' || r.JobStatus === 'U') dayMap[d].Fallidos++
-    else dayMap[d].Otros++
+    if (!dayMap[d]) dayMap[d] = { day: d, finished: 0, failed: 0, others: 0 }
+    if (r.JobStatus === 'F' || r.JobStatus === 'W') dayMap[d].finished++
+    else if (r.JobStatus === 'A' || r.JobStatus === 'U') dayMap[d].failed++
+    else dayMap[d].others++
   })
   const barData = Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day)).slice(-14)
 
-  // Top jobs
   const tplMap = {}
   filtered.forEach(r => {
     const k = r.JobText || '—'
@@ -131,7 +129,6 @@ export default function Resumen({ connection, session }) {
   })
   const topTemplates = Object.entries(tplMap).sort((a,b) => b[1]-a[1]).slice(0,5)
 
-  // Top users
   const userMap = {}
   filtered.forEach(r => {
     const k = r.JobCreatedByFormattedName || r.JobCreatedBy || '—'
@@ -139,7 +136,6 @@ export default function Resumen({ connection, session }) {
   })
   const topUsers = Object.entries(userMap).sort((a,b) => b[1]-a[1]).slice(0,5)
 
-  // Top duration — delta end-start en jobs Finalizados
   const durationMap = {}
   filtered.forEach(r => {
     if (!['F','W'].includes(r.JobStatus)) return
@@ -153,7 +149,7 @@ export default function Resumen({ connection, session }) {
     durationMap[k].count += 1
   })
   const topDuration = Object.entries(durationMap)
-    .map(([name, { total, count }]) => ({ name, avg: total / count }))
+    .map(([name, { total: tot, count }]) => ({ name, avg: tot / count }))
     .sort((a, b) => b.avg - a.avg)
     .slice(0, 5)
 
@@ -165,7 +161,6 @@ export default function Resumen({ connection, session }) {
     return m > 0 ? `${h}h ${m}m` : `${h}h`
   }
 
-  // Recent failed
   const recentFailed = filtered
     .filter(r => ['A','U'].includes(r.JobStatus))
     .sort((a,b) => (b.JobPlannedStartDateTime||'').localeCompare(a.JobPlannedStartDateTime||''))
@@ -181,7 +176,7 @@ export default function Resumen({ connection, session }) {
   if (loading && rows.length === 0) return (
     <div style={{ padding: isMobile ? 16 : 32, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
       <ProgressBar loading />
-      Cargando resumen de {connection.name}…
+      {t('resumen.loading', { name: connDisplayName(connection, t) })}
     </div>
   )
 
@@ -198,9 +193,9 @@ export default function Resumen({ connection, session }) {
         marginBottom: 24, flexWrap: 'wrap', gap: 12,
       }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Resumen</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{t('resumen.title')}</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-            {total} jobs en el período
+            {t('resumen.jobsInPeriod', { n: total })}
             {lastRefresh && !loading && (
               <span style={{ marginLeft: 8, opacity: .6 }}>· {lastRefresh.toLocaleTimeString()}</span>
             )}
@@ -216,30 +211,30 @@ export default function Resumen({ connection, session }) {
           <button onClick={loadData} disabled={loading} style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '6px 12px', cursor: 'pointer',
-          }}>↺ Refresh</button>
+          }}>{t('resumen.refresh')}</button>
           {!isMobile && (
             <span style={{
               fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap',
               padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6,
-            }}>Auto-refresh cada 5 min</span>
+            }}>{t('resumen.autoRefresh')}</span>
           )}
         </div>
       </div>
 
       {/* KPI cards */}
       <div className="grid-kpi">
-        <KpiCard label="Total jobs"    value={total}        color="var(--text)" />
-        <KpiCard label="En ejecución"  value={running}      color="var(--cyan)" />
-        <KpiCard label="Programados"   value={scheduled}    color="var(--purple)" />
-        <KpiCard label="Finalizados"   value={finished}     color="var(--green)" />
-        <KpiCard label="Fallidos"      value={failed}       color="var(--red)" />
-        <KpiCard label="Tasa de éxito" value={`${successRate}%`} color={successRate >= 90 ? 'var(--green)' : successRate >= 70 ? 'var(--accent)' : 'var(--red)'} />
+        <KpiCard label={t('resumen.kpiTotal')}     value={total}        color="var(--text)" />
+        <KpiCard label={t('resumen.kpiRunning')}   value={running}      color="var(--cyan)" />
+        <KpiCard label={t('resumen.kpiScheduled')} value={scheduled}    color="var(--purple)" />
+        <KpiCard label={t('resumen.kpiFinished')}  value={finished}     color="var(--green)" />
+        <KpiCard label={t('resumen.kpiFailed')}    value={failed}       color="var(--red)" />
+        <KpiCard label={t('resumen.kpiRate')}      value={`${successRate}%`} color={successRate >= 90 ? 'var(--green)' : successRate >= 70 ? 'var(--accent)' : 'var(--red)'} />
       </div>
 
       {/* Charts row */}
       <div className="grid-charts">
         <div style={cardStyle}>
-          <div style={cardTitle}>Distribución por estado</div>
+          <div style={cardTitle}>{t('resumen.chartStatus')}</div>
           {donutData.length === 0 ? <Empty /> : (
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
@@ -267,7 +262,7 @@ export default function Resumen({ connection, session }) {
         </div>
 
         <div style={cardStyle}>
-          <div style={cardTitle}>Jobs por día</div>
+          <div style={cardTitle}>{t('resumen.chartByDay')}</div>
           {barData.length === 0 ? <Empty /> : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={barData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -276,9 +271,9 @@ export default function Resumen({ connection, session }) {
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text2)' }} allowDecimals={false} />
                 <Tooltip contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} />
                 <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text2)' }} />
-                <Bar dataKey="Finalizados" stackId="a" fill="var(--green)" radius={[0,0,0,0]} />
-                <Bar dataKey="Fallidos"    stackId="a" fill="var(--red)" radius={[0,0,0,0]} />
-                <Bar dataKey="Otros"       stackId="a" fill="var(--text3)" radius={[3,3,0,0]} />
+                <Bar dataKey="finished" name={t('resumen.chartFinished')} stackId="a" fill="var(--green)" radius={[0,0,0,0]} />
+                <Bar dataKey="failed"   name={t('resumen.chartFailed')}   stackId="a" fill="var(--red)"   radius={[0,0,0,0]} />
+                <Bar dataKey="others"   name={t('resumen.chartOthers')}   stackId="a" fill="var(--text3)" radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -288,21 +283,21 @@ export default function Resumen({ connection, session }) {
       {/* Bottom rows */}
       <div className="grid-stats">
         <div style={cardStyle}>
-          <div style={cardTitle}>Top jobs ejecutados</div>
+          <div style={cardTitle}>{t('resumen.topJobs')}</div>
           {topTemplates.length === 0 ? <Empty /> : topTemplates.map(([name, count], i) => (
             <RankRow key={i} rank={i+1} label={name} count={count} max={topTemplates[0][1]} color="var(--cyan)" />
           ))}
         </div>
 
         <div style={cardStyle}>
-          <div style={cardTitle}>Usuarios más activos</div>
+          <div style={cardTitle}>{t('resumen.topUsers')}</div>
           {topUsers.length === 0 ? <Empty /> : topUsers.map(([name, count], i) => (
             <RankRow key={i} rank={i+1} label={name} count={count} max={topUsers[0][1]} color="var(--purple)" />
           ))}
         </div>
 
         <div style={cardStyle}>
-          <div style={cardTitle}>Top jobs más lentos (prom.)</div>
+          <div style={cardTitle}>{t('resumen.topSlow')}</div>
           {topDuration.length === 0
             ? <Empty />
             : topDuration.map((d, i) => (
@@ -314,14 +309,14 @@ export default function Resumen({ connection, session }) {
             ))
           }
           <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 10 }}>
-            Solo jobs Finalizados con inicio y fin registrados
+            {t('resumen.topSlowNote')}
           </div>
         </div>
 
         <div style={cardStyle}>
-          <div style={cardTitle}>Últimos jobs fallidos</div>
+          <div style={cardTitle}>{t('resumen.recentFailed')}</div>
           {recentFailed.length === 0
-            ? <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 8 }}>✓ Sin fallos en el período</div>
+            ? <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 8 }}>{t('resumen.noFailed')}</div>
             : recentFailed.map((r, i) => (
               <div key={i} style={{ padding: '7px 0', borderBottom: i < recentFailed.length-1 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--red)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -374,7 +369,8 @@ function RankRow({ rank, label, count, max, color, suffix = '', rawValue }) {
 }
 
 function Empty() {
-  return <div style={{ fontSize: 12, color: 'var(--text3)', padding: '16px 0' }}>Sin datos en el período</div>
+  const { t } = useI18n()
+  return <div style={{ fontSize: 12, color: 'var(--text3)', padding: '16px 0' }}>{t('resumen.noData')}</div>
 }
 
 const cardStyle = {
@@ -388,11 +384,12 @@ const cardTitle = {
 }
 
 function TzToggle({ mode, onToggle }) {
+  const { t } = useI18n()
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6, padding: 2 }}>
       <button
         onClick={() => onToggle('utc')}
-        title="Mostrar horas en UTC (zona horaria de SAP IBP)"
+        title={t('resumen.tzUtcTitle')}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'utc' ? 'var(--border2)' : 'transparent',
@@ -401,7 +398,7 @@ function TzToggle({ mode, onToggle }) {
       >UTC</button>
       <button
         onClick={() => onToggle('local')}
-        title={`Convertir a hora local del navegador (${getTzLabel()})`}
+        title={t('resumen.tzLocalTitle', { tz: getTzLabel() })}
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', border: 'none',
           background: mode === 'local' ? 'var(--border2)' : 'transparent',

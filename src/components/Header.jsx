@@ -1,31 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { flushSync } from 'react-dom'
 import { useTheme } from '../hooks/useTheme'
-
-const REQUIREMENTS = [
-  {
-    title: 'Configuración base — aplica a todos los acuerdos',
-    detail: 'En SAP IBP → Settings → Communication Management: crear un Communication User, un Communication System (representa este sistema externo) y un Communication Arrangement con el escenario correspondiente. La URL del endpoint se obtiene de cada Communication Arrangement una vez creado.',
-  },
-  {
-    title: 'SAP_COM_0326 — Administración de Application Jobs',
-    detail: 'Escenario "Programador externo - Integración de administración de jobs de aplicación". Otorga acceso completo al servicio BC_EXT_APPJOB_MANAGEMENT: programar jobs para cualquier usuario de negocio, cancelar, reiniciar y supervisar jobs creados por cualquier usuario. Activa: Resumen · Job Templates · Job Monitor.',
-  },
-  {
-    title: 'SAP_COM_0068 — Supervisión de integración',
-    detail: 'Escenario "Planificación: Supervisión de integración". Expone consumo de recursos (/IBP/RES_CONS_STATS_API_SRV) con CPU y memoria del tenant en % con timestamps UTC a nivel de minuto, y supervisión de tareas de sistema (/IBP/TASKMON_EXT_SRV) con datos de los últimos 90 días. Activa: Resource Stats.',
-  },
-  {
-    title: 'SAP_COM_0924 — Integración de datos de telemetría',
-    detail: 'Escenario "Planning – Telemetry Data Integration". Expone la Telemetry Read API con datos de los últimos 90 días: uso del Excel Add-In (logons, planning views, key figures), Dashboards, Analytics Stories, Alert Monitor y apps Fiori por usuario y Planning Area. Procesa datos personales. Activa: Adopción · Excel Add-In · Dashboards.',
-  },
-  {
-    title: 'Autenticación — todos los acuerdos',
-    detail: 'HTTP Basic Authentication con el usuario y contraseña del Communication User de cada acuerdo. Las credenciales se solicitan al iniciar sesión y no se almacenan en el servidor.',
-  },
-]
+import { useI18n } from '../context/I18nContext'
 
 function ThemeToggle({ theme, onToggle }) {
+  const { t } = useI18n()
   const isLight = theme === 'light'
   const btnRef = useRef(null)
 
@@ -56,7 +35,7 @@ function ThemeToggle({ theme, onToggle }) {
       onClick={handleToggle}
       role="switch"
       aria-checked={isLight}
-      title={isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+      title={isLight ? t('header.themeToDark') : t('header.themeToLight')}
       style={{
         position: 'relative',
         width: 46, height: 24,
@@ -91,9 +70,18 @@ function ThemeToggle({ theme, onToggle }) {
 }
 
 export default function Header({ onMenuToggle }) {
+  const { t } = useI18n()
   const [showReqs, setShowReqs] = useState(false)
   const panelRef = useRef(null)
   const { theme, toggle } = useTheme()
+
+  const requirements = [
+    { title: t('header.req0title'), detail: t('header.req0detail') },
+    { title: t('header.req1title'), detail: t('header.req1detail') },
+    { title: t('header.req2title'), detail: t('header.req2detail') },
+    { title: t('header.req3title'), detail: t('header.req3detail') },
+    { title: t('header.req4title'), detail: t('header.req4detail') },
+  ]
 
   useEffect(() => {
     if (!showReqs) return
@@ -148,7 +136,7 @@ export default function Header({ onMenuToggle }) {
         </div>
       </div>
 
-      {/* Right cluster: theme toggle + Requisitos */}
+      {/* Right cluster: theme toggle + Requirements */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <ThemeToggle theme={theme} onToggle={toggle} />
 
@@ -163,7 +151,7 @@ export default function Header({ onMenuToggle }) {
               cursor: 'pointer', transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
-            <span style={{ fontSize: 14 }}>📋</span><span className="header-btn-label"> Requisitos Técnicos</span>
+            <span style={{ fontSize: 14 }}>📋</span><span className="header-btn-label"> {t('header.reqBtn')}</span>
           </button>
 
           {showReqs && (
@@ -174,10 +162,10 @@ export default function Header({ onMenuToggle }) {
               boxShadow: 'var(--shadow-lg)', padding: 20, zIndex: 300,
             }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>📋</span> Requisitos Técnicos de la API
+                <span>📋</span> {t('header.reqPanel')}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {REQUIREMENTS.map((r, i) => (
+                {requirements.map((r, i) => (
                   <div key={i} style={{
                     background: 'var(--surface-glass-soft)', borderRadius: 7,
                     border: '1px solid var(--border)', padding: '10px 14px',

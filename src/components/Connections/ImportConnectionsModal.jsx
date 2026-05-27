@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useI18n } from '../../context/I18nContext'
 
 function sameConn(a, b) {
   return (
@@ -8,6 +9,7 @@ function sameConn(a, b) {
 }
 
 export default function ImportConnectionsModal({ parsed, existing, fileName, onConfirm, onCancel }) {
+  const { t } = useI18n()
   const [replaceDuplicates, setReplaceDuplicates] = useState(false)
 
   const classified = useMemo(
@@ -33,7 +35,7 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
       }}>
         {/* Header */}
         <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Importar conexiones</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('import.title')}</div>
           {fileName && (
             <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4, fontFamily: 'var(--mono)' }}>
               {fileName}
@@ -43,17 +45,17 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
 
         {/* Summary pills */}
         <div style={{ padding: '14px 22px', display: 'flex', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <Pill color="#3b82f6" label={`${parsed.connections.length} en archivo`} />
-          <Pill color="#34d399" label={`${newCount} nuevas`} />
-          <Pill color="#fbbf24" label={`${dupCount} ya existen`} />
-          {hasInvalid && <Pill color="#ff6b6b" label={`${parsed.invalid.length} inválidas`} />}
+          <Pill color="#3b82f6" label={t('import.found', { n: parsed.connections.length })} />
+          <Pill color="#34d399" label={t('import.new', { n: newCount })} />
+          <Pill color="#fbbf24" label={t('import.exists', { n: dupCount })} />
+          {hasInvalid && <Pill color="#ff6b6b" label={t('import.invalid', { n: parsed.invalid.length })} />}
         </div>
 
         {/* List */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 22px' }}>
           {empty ? (
             <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>
-              El archivo no contiene conexiones válidas
+              {t('import.empty')}
             </div>
           ) : (
             classified.map((c, i) => (
@@ -74,7 +76,7 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
                     </div>
                   )}
                 </div>
-                <Tag dup={c._dup} willSkip={c._dup && !replaceDuplicates} />
+                <Tag dup={c._dup} willSkip={c._dup && !replaceDuplicates} t={t} />
               </div>
             ))
           )}
@@ -82,13 +84,13 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
           {hasInvalid && (
             <div style={{ marginTop: 12, padding: '8px 12px', background: 'color-mix(in srgb, var(--red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
               <div style={{ fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>
-                Entradas omitidas ({parsed.invalid.length})
+                {t('import.invalidSection', { n: parsed.invalid.length })}
               </div>
               {parsed.invalid.slice(0, 5).map((e, i) => (
                 <div key={i} style={{ fontSize: 10, color: 'var(--text3)' }}>#{e.index + 1}: {e.reason}</div>
               ))}
               {parsed.invalid.length > 5 && (
-                <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>…y {parsed.invalid.length - 5} más</div>
+                <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>…{t('import.invalid', { n: parsed.invalid.length - 5 })}</div>
               )}
             </div>
           )}
@@ -104,10 +106,10 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
                 onChange={e => setReplaceDuplicates(e.target.checked)}
                 style={{ accentColor: 'var(--accent)' }}
               />
-              Reemplazar las {dupCount} conexion{dupCount === 1 ? '' : 'es'} ya existente{dupCount === 1 ? '' : 's'} con los datos del archivo
+              {t('import.replaceConnCheck', { n: dupCount })}
             </label>
             <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4, paddingLeft: 22 }}>
-              Si está desmarcado, las duplicadas se omiten y se conservan las actuales
+              {t('import.skipHint')}
             </div>
           </div>
         )}
@@ -118,7 +120,7 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
             background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
             color: 'var(--text2)', fontSize: 12, fontWeight: 600, padding: '7px 18px', cursor: 'pointer',
           }}>
-            Cancelar
+            {t('import.cancel')}
           </button>
           <button
             onClick={() => onConfirm({ replaceDuplicates })}
@@ -131,7 +133,7 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
               cursor: willImport === 0 ? 'not-allowed' : 'pointer',
             }}
           >
-            Importar {willImport > 0 ? willImport : ''}
+            {willImport > 0 ? t('import.importBtn', { n: willImport }) : t('import.importBtn', { n: '' }).trim()}
           </button>
         </div>
       </div>
@@ -150,8 +152,8 @@ function Pill({ color, label }) {
   )
 }
 
-function Tag({ dup, willSkip }) {
-  if (!dup)      return <Pill color="#34d399" label="NUEVA" />
-  if (willSkip)  return <Pill color="#9ca3af" label="OMITIR" />
-  return               <Pill color="#fbbf24" label="REEMPLAZAR" />
+function Tag({ dup, willSkip, t }) {
+  if (!dup)      return <Pill color="#34d399" label={t('import.tagNew')} />
+  if (willSkip)  return <Pill color="#9ca3af" label={t('import.tagSkip')} />
+  return               <Pill color="#fbbf24" label={t('import.tagReplace')} />
 }

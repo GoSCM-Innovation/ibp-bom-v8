@@ -6,21 +6,10 @@ import {
 import { proxyCall } from '../../services/proxyCall'
 import { buildDateFilter, buildPath, parseV4 } from '../../services/metering'
 import { toInputDate, inputDateToDate, getTzMode } from '../../utils/dateUtils'
+import { useI18n } from '../../context/I18nContext'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const PRESETS = [
-  { id: 'today', label: 'Hoy'     },
-  { id: '7d',    label: '7 días'  },
-  { id: '30d',   label: '30 días' },
-  { id: '90d',   label: '90 días' },
-]
-
-const TABS = [
-  { id: 'general', label: 'Visión General' },
-  { id: 'excel',   label: 'Excel Add-In'  },
-  { id: 'apps',    label: 'Herramientas'  },
-]
+// PRESETS and TABS are defined inside their respective components (they use t())
 
 const COLORS = [
   '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6',
@@ -30,7 +19,7 @@ const COLORS = [
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function groupBy(arr, keyFn) {
-  const fn = typeof keyFn === 'string' ? (r => r[keyFn] ?? '(sin valor)') : keyFn
+  const fn = typeof keyFn === 'string' ? (r => r[keyFn] ?? '?') : keyFn
   return arr.reduce((acc, row) => {
     const k = fn(row)
     ;(acc[k] = acc[k] || []).push(row)
@@ -131,10 +120,11 @@ function Note({ text }) {
   )
 }
 
-function EmptyState({ msg = 'Sin datos para el período seleccionado' }) {
+function EmptyState({ msg }) {
+  const { t } = useI18n()
   return (
     <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>
-      {msg}
+      {msg ?? t('metering.noDataPeriod')}
     </div>
   )
 }
@@ -202,11 +192,20 @@ function DtField({ label, value, onChange }) {
 // ─── Filter bar ────────────────────────────────────────────────────────────────
 
 function FilterBar({ preset, onPreset, from, setFrom, to, setTo, loading, hasData }) {
+  const { t } = useI18n()
+
+  const PRESETS = [
+    { id: 'today', label: t('metering.presetToday') },
+    { id: '7d',    label: t('metering.preset7d')    },
+    { id: '30d',   label: t('metering.preset30d')   },
+    { id: '90d',   label: t('metering.preset90d')   },
+  ]
+
   return (
     <div style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)', padding: '14px 24px', flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.07em', marginRight: 6 }}>
-          Período
+          {t('metering.period')}
         </span>
         {PRESETS.map(p => {
           const active = preset === p.id
@@ -223,18 +222,18 @@ function FilterBar({ preset, onPreset, from, setFrom, to, setTo, loading, hasDat
           )
         })}
         {preset === 'custom' && (
-          <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic', marginLeft: 4 }}>Personalizado</span>
+          <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic', marginLeft: 4 }}>{t('metering.custom')}</span>
         )}
         {loading && hasData && (
           <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
             <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid var(--border2)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
-            Actualizando…
+            {t('metering.updating')}
           </span>
         )}
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <DtField label="Desde" value={from} onChange={v => { setFrom(v); onPreset('custom') }} />
-        <DtField label="Hasta"  value={to}   onChange={v => { setTo(v);   onPreset('custom') }} />
+        <DtField label={t('metering.from')} value={from} onChange={v => { setFrom(v); onPreset('custom') }} />
+        <DtField label={t('metering.to')}   value={to}   onChange={v => { setTo(v);   onPreset('custom') }} />
       </div>
     </div>
   )
@@ -243,6 +242,7 @@ function FilterBar({ preset, onPreset, from, setFrom, to, setTo, loading, hasDat
 // ─── Context selector ─────────────────────────────────────────────────────────
 
 function ContextSelector({ mode, value, onModeChange, onValueChange, users, planningAreas, userMap }) {
+  const { t } = useI18n()
   const [open,   setOpen]   = useState(null) // null | 'user' | 'pa'
   const [search, setSearch] = useState('')
   const ref = useRef(null)
@@ -277,7 +277,7 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
       padding: '8px 24px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative',
     }}>
       <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.07em', marginRight: 4 }}>
-        Contexto
+        {t('metering.context')}
       </span>
 
       <button onClick={() => { onModeChange('all'); onValueChange(''); setOpen(null) }} style={{
@@ -285,7 +285,7 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
         border: `1.5px solid ${mode === 'all' ? 'var(--accent)' : 'var(--border)'}`,
         background: mode === 'all' ? 'rgba(247,168,0,.10)' : 'transparent',
         color: mode === 'all' ? 'var(--accent)' : 'var(--text2)',
-      }}>Todos</button>
+      }}>{t('metering.all')}</button>
 
       <button onClick={() => openDropdown('user')} style={{
         ...btnBase,
@@ -294,7 +294,7 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
         color: mode === 'user' ? 'var(--cyan)' : 'var(--text2)',
         maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {mode === 'user' && value ? `Usuario · ${userMap[value] || value}` : 'Usuario ▾'}
+        {mode === 'user' && value ? t('metering.userSelected', { name: userMap[value] || value }) : t('metering.userBtn')}
       </button>
 
       <button onClick={() => openDropdown('pa')} style={{
@@ -304,7 +304,7 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
         color: mode === 'pa' ? 'var(--purple)' : 'var(--text2)',
         maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {mode === 'pa' && value ? `Planning Area · ${value}` : 'Planning Area ▾'}
+        {mode === 'pa' && value ? t('metering.paSelected', { pa: value }) : t('metering.paBtn')}
       </button>
 
       {open && (
@@ -317,7 +317,7 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
           <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
             <input
               autoFocus value={search} onChange={e => setSearch(e.target.value)}
-              placeholder={open === 'user' ? 'Buscar usuario…' : 'Buscar planning area…'}
+              placeholder={open === 'user' ? t('metering.searchUser') : t('metering.searchPA')}
               style={{
                 width: '100%', background: 'var(--bg)', border: '1px solid var(--border)',
                 borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '6px 10px', outline: 'none',
@@ -355,10 +355,10 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
               )
             })}
             {open === 'user' && !userList.length && (
-              <div style={{ padding: 12, fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>Sin usuarios</div>
+              <div style={{ padding: 12, fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>{t('metering.noUsers')}</div>
             )}
             {open === 'pa' && !paList.length && (
-              <div style={{ padding: 12, fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>Sin planning areas</div>
+              <div style={{ padding: 12, fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>{t('metering.noPAs')}</div>
             )}
           </div>
         </div>
@@ -370,6 +370,7 @@ function ContextSelector({ mode, value, onModeChange, onValueChange, users, plan
 // ─── User profile (sub-view of Tab General) ───────────────────────────────────
 
 function UserProfile({ uid, overview, planningViews, logons, fiori, dashboards, stories, alerts, userMap }) {
+  const { t } = useI18n()
   const name = userMap[uid] || uid
 
   const actByDay = useMemo(() => {
@@ -378,7 +379,7 @@ function UserProfile({ uid, overview, planningViews, logons, fiori, dashboards, 
       const d = dayKey(r.TimestampStart)
       byDay[d] = (byDay[d] || 0) + 1
     })
-    return Object.entries(byDay).map(([day, n]) => ({ day, Ventanas: n })).sort((a, b) => a.day.localeCompare(b.day))
+    return Object.entries(byDay).map(([day, n]) => ({ day, windows: n })).sort((a, b) => a.day.localeCompare(b.day))
   }, [overview])
 
   const uniquePAs = useMemo(() =>
@@ -426,34 +427,34 @@ function UserProfile({ uid, overview, planningViews, logons, fiori, dashboards, 
           <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 2 }}>{uid}</div>
           {firstSeen !== '—' && (
             <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6 }}>
-              Primera actividad: {firstSeen} · Última: {lastSeen}
+              {t('metering.profileFirstLast', { first: firstSeen, last: lastSeen })}
             </div>
           )}
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-        <KpiCard label="Ventanas abiertas" value={overview.length} color="var(--accent)" />
+        <KpiCard label={t('metering.windowsOpened')} value={overview.length} color="var(--accent)" />
         <KpiCard label="Planning Areas"    value={uniquePAs.length} />
         {excelRate !== null && <>
-          <KpiCard label="Ops Excel" value={planningViews.length} />
-          <KpiCard label="Éxito Excel" value={`${excelRate}%`}
+          <KpiCard label={t('metering.excelOps')} value={planningViews.length} />
+          <KpiCard label={t('metering.excelSuccess')} value={`${excelRate}%`}
             color={excelRate >= 90 ? '#10b981' : excelRate >= 70 ? '#f59e0b' : '#ef4444'}
             warning={excelRate < 70}
           />
-          <KpiCard label="Duración prom." value={formatDuration(avgDur, unit)} />
+          <KpiCard label={t('metering.avgDuration')} value={formatDuration(avgDur, unit)} />
         </>}
       </div>
 
       {actByDay.length > 1 && (
-        <ChartCard title="Actividad diaria (ventanas)" style={{ marginBottom: 24 }}>
+        <ChartCard title={t('metering.dailyActivity')} style={{ marginBottom: 24 }}>
           <ResponsiveContainer width="100%" height={150}>
             <BarChart data={actByDay} margin={{ left: 0, right: 8, top: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="day" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
               <YAxis tick={{ fill: 'var(--text2)', fontSize: 10 }} allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="Ventanas" fill="var(--cyan)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="windows" name={t('metering.chartWindows')} fill="var(--cyan)" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -476,11 +477,11 @@ function UserProfile({ uid, overview, planningViews, logons, fiori, dashboards, 
         )}
         {toolsUsed.length > 0 && (
           <div>
-            <BlockTitle text="Herramientas utilizadas" />
+            <BlockTitle text={t('metering.toolsUsed')} />
             <DataTable
               columns={[
-                { key: 'name',  label: 'Herramienta' },
-                { key: 'count', label: 'Acciones', align: 'right', mono: true },
+                { key: 'name',  label: t('metering.colTool') },
+                { key: 'count', label: t('metering.colActions'), align: 'right', mono: true },
               ]}
               rows={toolsUsed}
             />
@@ -488,7 +489,7 @@ function UserProfile({ uid, overview, planningViews, logons, fiori, dashboards, 
         )}
       </div>
 
-      {overview.length === 0 && <EmptyState msg="Este usuario no tuvo actividad en el período seleccionado" />}
+      {overview.length === 0 && <EmptyState msg={t('metering.noActivityUser')} />}
     </div>
   )
 }
@@ -496,6 +497,8 @@ function UserProfile({ uid, overview, planningViews, logons, fiori, dashboards, 
 // ─── PA profile (sub-view of Tab General) ─────────────────────────────────────
 
 function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) {
+  const { t } = useI18n()
+
   const activeUsers = useMemo(() => {
     const all = [...overview, ...planningViews, ...fiori, ...dashboards]
     return [...new Set(all.map(r => r.UserID).filter(Boolean))]
@@ -504,7 +507,7 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
   const topUsers = useMemo(() => {
     const combined = [...overview, ...planningViews, ...fiori, ...dashboards]
     return Object.entries(groupBy(combined, 'UserID'))
-      .filter(([uid]) => uid && uid !== '(sin valor)')
+      .filter(([uid]) => uid && uid !== '?')
       .map(([uid, rows]) => ({ uid, name: userMap[uid] || uid, acts: rows.length }))
       .sort((a, b) => b.acts - a.acts)
       .slice(0, 15)
@@ -515,7 +518,7 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
     return Object.entries(byDay)
       .map(([day, rows]) => {
         const ok = rows.filter(r => r.SuccessfullyCompleted).length
-        return { day, Operaciones: rows.length, 'Éxito %': Math.round(ok / rows.length * 100) }
+        return { day, ops: rows.length, successPct: Math.round(ok / rows.length * 100) }
       })
       .sort((a, b) => a.day.localeCompare(b.day))
   }, [planningViews])
@@ -545,26 +548,26 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-        <KpiCard label="Usuarios activos" value={activeUsers.length} color="var(--accent)" />
+        <KpiCard label={t('metering.activeUsers')} value={activeUsers.length} color="var(--accent)" />
         {excelRate !== null && <>
-          <KpiCard label="Ops Excel" value={planningViews.length} />
-          <KpiCard label="Éxito Excel" value={`${excelRate}%`}
+          <KpiCard label={t('metering.excelOps')} value={planningViews.length} />
+          <KpiCard label={t('metering.excelSuccess')} value={`${excelRate}%`}
             color={excelRate >= 90 ? '#10b981' : excelRate >= 70 ? '#f59e0b' : '#ef4444'}
             warning={excelRate < 70}
           />
-          <KpiCard label="Duración prom." value={formatDuration(avgDur, unit)} />
+          <KpiCard label={t('metering.avgDuration')} value={formatDuration(avgDur, unit)} />
         </>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {topUsers.length > 0 && (
           <div>
-            <BlockTitle text="Usuarios activos en esta PA" />
+            <BlockTitle text={t('metering.activeUsersInPA')} />
             <DataTable
               columns={[
-                { key: 'name', label: 'Usuario' },
+                { key: 'name', label: t('metering.colUser') },
                 { key: 'uid',  label: 'ID', mono: true, color: () => 'var(--text3)' },
-                { key: 'acts', label: 'Acciones', align: 'right', mono: true },
+                { key: 'acts', label: t('metering.colActions'), align: 'right', mono: true },
               ]}
               rows={topUsers} maxRows={10}
             />
@@ -572,7 +575,7 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
         )}
         {excelByDay.length > 1 && (
           <div>
-            <BlockTitle text="Excel — tendencia diaria" />
+            <BlockTitle text={t('metering.excelTrend')} />
             <ChartCard>
               <ResponsiveContainer width="100%" height={200}>
                 <ComposedChart data={excelByDay} margin={{ left: 0, right: 32, top: 0, bottom: 0 }}>
@@ -580,10 +583,10 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
                   <XAxis dataKey="day" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
                   <YAxis yAxisId="ops" tick={{ fill: 'var(--text2)', fontSize: 10 }} allowDecimals={false} />
                   <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                  <Tooltip formatter={(v, n) => n === 'Éxito %' ? `${v}%` : v} />
+                  <Tooltip formatter={(v, n, p) => p.dataKey === 'successPct' ? `${v}%` : v} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar  yAxisId="ops" dataKey="Operaciones" fill={COLORS[0]} radius={[3, 3, 0, 0]} />
-                  <Line yAxisId="pct" dataKey="Éxito %"     stroke={COLORS[1]} strokeWidth={2} dot={false} />
+                  <Bar  yAxisId="ops" dataKey="ops"        name={t('metering.chartOps')}        fill={COLORS[0]} radius={[3, 3, 0, 0]} />
+                  <Line yAxisId="pct" dataKey="successPct" name={t('metering.chartSuccessPct')} stroke={COLORS[1]} strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -591,7 +594,7 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
         )}
       </div>
 
-      {activeUsers.length === 0 && <EmptyState msg="Sin actividad en esta Planning Area para el período seleccionado" />}
+      {activeUsers.length === 0 && <EmptyState msg={t('metering.noActivityPA')} />}
     </div>
   )
 }
@@ -600,6 +603,7 @@ function PAProfile({ pa, overview, planningViews, fiori, dashboards, userMap }) 
 
 function TabGeneral({ overview, planningViews, logons, fiori, dashboards, stories, alerts, users, userMap, componentMap, contextMode, contextValue }) {
   // ALL hooks must be declared before any conditional return
+  const { t } = useI18n()
   const [search, setSearch] = useState('')
 
   const activeUserIds = useMemo(() =>
@@ -614,7 +618,7 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
       if (row.UserID) byDay[d].add(row.UserID)
     })
     return Object.entries(byDay)
-      .map(([day, s]) => ({ day, Usuarios: s.size }))
+      .map(([day, s]) => ({ day, users: s.size }))
       .sort((a, b) => a.day.localeCompare(b.day))
   }, [overview])
 
@@ -660,7 +664,7 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
 
   const topActiveUsers = useMemo(() => {
     return Object.entries(groupBy(overview, 'UserID'))
-      .filter(([uid]) => uid && uid !== '(sin valor)')
+      .filter(([uid]) => uid && uid !== '?')
       .map(([uid, rows]) => {
         const last = rows.map(r => r.TimestampStart).filter(Boolean).sort().reverse()[0]
         const pas  = [...new Set(rows.map(r => r.PlanningAreaID).filter(Boolean))]
@@ -683,15 +687,15 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
     const items = []
     const ic = users.filter(u => u.UserID && !activeUserIds.has(u.UserID)).length
     if (ic > 0)
-      items.push({ type: 'warn', msg: `${ic} usuario${ic > 1 ? 's' : ''} licenciado${ic > 1 ? 's' : ''} sin actividad en el período` })
+      items.push({ type: 'warn', msg: ic > 1 ? t('metering.attentionNoActivityN', { n: ic }) : t('metering.attentionNoActivity1', { n: ic }) })
     const pvByPA = groupBy(planningViews.filter(r => r.PlanningAreaID), 'PlanningAreaID')
     Object.entries(pvByPA).forEach(([pa, rows]) => {
       const errRate = rows.filter(r => !r.SuccessfullyCompleted).length / rows.length * 100
       if (errRate > 30 && rows.length >= 5)
-        items.push({ type: 'error', msg: `PA ${pa}: ${Math.round(errRate)}% de errores en Excel (${rows.length} ops)` })
+        items.push({ type: 'error', msg: t('metering.attentionPAError', { pa, rate: Math.round(errRate), count: rows.length }) })
     })
     return items
-  }, [users, activeUserIds, planningViews])
+  }, [users, activeUserIds, planningViews, t])
 
   // Derived (no hooks)
   const totalLicensed = users.length
@@ -739,33 +743,33 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
       )}
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-        <KpiCard label="Tasa de adopción" value={`${adoptionRate}%`}
-          sub={`${totalActive} activos de ${totalLicensed} licenciados`}
+        <KpiCard label={t('metering.adoptionRate')} value={`${adoptionRate}%`}
+          sub={t('metering.adoptionSub', { active: totalActive, total: totalLicensed })}
           color={rateColor} warning={adoptionRate < 40} />
-        <KpiCard label="Usuarios activos"       value={totalActive}   color="var(--accent)" />
-        <KpiCard label="Total licenciados"       value={totalLicensed} />
-        <KpiCard label="Sin actividad"           value={inactiveCount}
-          sub={inactiveCount > 0 ? 'Licencias sin uso en el período' : undefined}
+        <KpiCard label={t('metering.activeUsers')}   value={totalActive}   color="var(--accent)" />
+        <KpiCard label={t('metering.totalLicensed')} value={totalLicensed} />
+        <KpiCard label={t('metering.noActivity')}    value={inactiveCount}
+          sub={inactiveCount > 0 ? t('metering.unusedLicenses') : undefined}
           color={inactiveCount > 0 ? '#ef4444' : 'var(--text)'} warning={inactiveCount > 0} />
-        <KpiCard label="Planning Areas activas" value={uniquePAs} />
+        <KpiCard label={t('metering.activePAs')} value={uniquePAs} />
       </div>
 
       {dauData.length > 1 && (
-        <ChartCard title="Usuarios únicos por día" style={{ marginBottom: 24 }}>
+        <ChartCard title={t('metering.dauChart')} style={{ marginBottom: 24 }}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={dauData} margin={{ left: 0, right: 8, top: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="day" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
               <YAxis tick={{ fill: 'var(--text2)', fontSize: 10 }} allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="Usuarios" fill={COLORS[0]} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="users" name={t('metering.chartUsers')} fill={COLORS[0]} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
       )}
 
       {componentNames.length > 0 && componentChartData.length > 1 && (
-        <ChartCard title="Actividad por componente (acciones por día)" style={{ marginBottom: 24 }}>
+        <ChartCard title={t('metering.componentChart')} style={{ marginBottom: 24 }}>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={componentChartData} margin={{ left: 0, right: 8, top: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -784,13 +788,13 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
 
       {featureRows.length > 0 && (
         <div style={{ marginBottom: 24 }}>
-          <BlockTitle text="Adopción por herramienta" />
+          <BlockTitle text={t('metering.featureAdoption')} />
           <DataTable
             columns={[
-              { key: 'name',     label: 'Herramienta' },
-              { key: 'users',    label: 'Usuarios únicos', align: 'right', mono: true,
+              { key: 'name',     label: t('metering.colTool') },
+              { key: 'users',    label: t('metering.colUniqueUsers'), align: 'right', mono: true,
                 render: r => r.users.toLocaleString() },
-              { key: 'pct',      label: '% usuarios activos', align: 'right',
+              { key: 'pct',      label: t('metering.colActivePct'), align: 'right',
                 render: r => totalActive > 0 ? `${Math.round(r.users / totalActive * 100)}%` : '—',
                 color: r => {
                   if (!totalActive) return 'var(--text2)'
@@ -798,7 +802,7 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
                   return p >= 50 ? '#10b981' : p >= 20 ? '#f59e0b' : 'var(--text2)'
                 },
               },
-              { key: 'sessions', label: 'Sesiones / Acciones', align: 'right', mono: true,
+              { key: 'sessions', label: t('metering.colSessionsActions'), align: 'right', mono: true,
                 render: r => r.sessions.toLocaleString() },
             ]}
             rows={featureRows}
@@ -809,28 +813,28 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {topActiveUsers.length > 0 && (
           <div>
-            <BlockTitle text="Usuarios más activos" />
+            <BlockTitle text={t('metering.topActiveUsers')} />
             <DataTable
               columns={[
-                { key: 'name', label: 'Usuario' },
-                { key: 'acts', label: 'Ventanas',      align: 'right', mono: true },
-                { key: 'last', label: 'Último',        mono: true, nowrap: true },
-                { key: 'pas',  label: 'Planning Areas', color: () => 'var(--text2)' },
+                { key: 'name', label: t('metering.colUser') },
+                { key: 'acts', label: t('metering.colWindows'),      align: 'right', mono: true },
+                { key: 'last', label: t('metering.colLast'),         mono: true, nowrap: true },
+                { key: 'pas',  label: t('metering.colPAs'),          color: () => 'var(--text2)' },
               ]}
               rows={topActiveUsers} maxRows={10}
             />
           </div>
         )}
         <div>
-          <BlockTitle text="Sin actividad en el período" count={inactiveCount} />
+          <BlockTitle text={t('metering.inactiveInPeriod')} count={inactiveCount} />
           {inactiveCount === 0 ? (
             <div style={{ padding: '14px 0', fontSize: 12, color: '#10b981' }}>
-              ✓ Todos los usuarios licenciados tuvieron actividad
+              {t('metering.allActive')}
             </div>
           ) : (
             <>
               <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar usuario…"
+                placeholder={t('metering.searchUser')}
                 style={{
                   background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
                   color: 'var(--text)', fontSize: 12, padding: '6px 10px', outline: 'none',
@@ -841,8 +845,8 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
               />
               <DataTable
                 columns={[
-                  { key: 'uid',  label: 'Usuario', mono: true },
-                  { key: 'name', label: 'Nombre',  color: () => 'var(--text2)' },
+                  { key: 'uid',  label: t('metering.colID'),   mono: true },
+                  { key: 'name', label: t('metering.colName'), color: () => 'var(--text2)' },
                 ]}
                 rows={inactiveUsers} maxRows={20}
               />
@@ -857,6 +861,7 @@ function TabGeneral({ overview, planningViews, logons, fiori, dashboards, storie
 // ─── Tab 2: Excel Add-In ───────────────────────────────────────────────────────
 
 function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
+  const { t } = useI18n()
   const [subtab, setSubtab] = useState('slow')
 
   const total   = planningViews.length
@@ -887,7 +892,7 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
       .map(([day, rows]) => {
         const ok  = rows.filter(r => r.SuccessfullyCompleted).length
         const avg = toSecs(avgField(rows, 'TotalDuration'), unit)
-        return { day, 'Éxito %': Math.round(ok / rows.length * 100), 'Duración (s)': parseFloat(avg.toFixed(1)) }
+        return { day, successPct: Math.round(ok / rows.length * 100), durationS: parseFloat(avg.toFixed(1)) }
       })
       .sort((a, b) => a.day.localeCompare(b.day))
   }, [planningViews, unit])
@@ -922,23 +927,23 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
     [planningViews])
 
   const pvCols = [
-    { key: 'user',      label: 'Usuario',        render: r => userMap[r.UserID] || r.UserID || '—' },
-    { key: 'pa',        label: 'PA',             render: r => r.PlanningAreaID || '—', mono: true },
-    { key: 'template',  label: 'Template',       render: r => r.TemplateName || r.FavoriteName || r.WorksheetName || '—', color: () => 'var(--text2)' },
-    { key: 'dur',       label: 'Tiempo total',   nowrap: true, mono: true,
+    { key: 'user',      label: t('metering.colUser'),      render: r => userMap[r.UserID] || r.UserID || '—' },
+    { key: 'pa',        label: t('metering.colPA'),        render: r => r.PlanningAreaID || '—', mono: true },
+    { key: 'template',  label: t('metering.colTemplate'),  render: r => r.TemplateName || r.FavoriteName || r.WorksheetName || '—', color: () => 'var(--text2)' },
+    { key: 'dur',       label: t('metering.colTotalTime'), nowrap: true, mono: true,
       render: r => formatDuration(r.TotalDuration, r.DurationUnit),
       color: r => { const s = toSecs(r.TotalDuration, r.DurationUnit); return s > 120 ? '#ef4444' : s > 60 ? '#f59e0b' : '#10b981' } },
-    { key: 'sap',       label: 'Tiempo SAP',     nowrap: true, mono: true,
+    { key: 'sap',       label: t('metering.colSapTime'),   nowrap: true, mono: true,
       render: r => formatDuration(r.DurationWithoutUserInteraction, r.DurationUnit),
       color: () => 'var(--text3)' },
-    { key: 'usr',       label: 'Tiempo usuario', nowrap: true, mono: true,
+    { key: 'usr',       label: t('metering.colUserTime'),  nowrap: true, mono: true,
       render: r => {
-        const total = Number(r.TotalDuration) || 0
-        const sap   = Number(r.DurationWithoutUserInteraction) || 0
-        return formatDuration(Math.max(0, total - sap), r.DurationUnit)
+        const tot = Number(r.TotalDuration) || 0
+        const sap = Number(r.DurationWithoutUserInteraction) || 0
+        return formatDuration(Math.max(0, tot - sap), r.DurationUnit)
       },
       color: () => 'var(--text2)' },
-    { key: 'cells',     label: 'Celdas',         align: 'right', mono: true,
+    { key: 'cells',     label: t('metering.colCells'),     align: 'right', mono: true,
       render: r => Number(r.PlanningViewCells).toLocaleString() },
   ]
 
@@ -947,33 +952,33 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
       {total === 0 ? <EmptyState /> : (
         <>
           <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-            <KpiCard label="Operaciones"       value={total.toLocaleString()} />
-            <KpiCard label="Tasa de éxito"     value={`${rate}%`}            color={rateColor} warning={rate < 70} />
-            <KpiCard label="Errores"           value={failed}                color={failed > 0 ? '#ef4444' : 'var(--text)'} warning={failed > 0} />
-            <KpiCard label="Duración promedio" value={formatDuration(avgDur, unit)} color={durColor} />
-            <KpiCard label="Celdas procesadas" value={cells.toLocaleString()} />
+            <KpiCard label={t('metering.excelOperations')}  value={total.toLocaleString()} />
+            <KpiCard label={t('metering.excelSuccessRate')} value={`${rate}%`}            color={rateColor} warning={rate < 70} />
+            <KpiCard label={t('metering.excelErrors')}      value={failed}                color={failed > 0 ? '#ef4444' : 'var(--text)'} warning={failed > 0} />
+            <KpiCard label={t('metering.excelAvgDuration')} value={formatDuration(avgDur, unit)} color={durColor} />
+            <KpiCard label={t('metering.excelCells')}       value={cells.toLocaleString()} />
             {logons.length > 0 && (
-              <KpiCard label="Logons Excel" value={logons.length} sub={`Prom: ${formatDuration(avgLogonDur, logonUnit)}`} />
+              <KpiCard label={t('metering.excelLogons')} value={logons.length} sub={t('metering.excelLogonAvg', { dur: formatDuration(avgLogonDur, logonUnit) })} />
             )}
           </div>
 
-          <Note text="Tiempo total = duración completa de la operación. Tiempo SAP = procesamiento puro del servidor. Tiempo usuario = interacción / espera del usuario." />
+          <Note text={t('metering.excelNote')} />
 
           {actTypeData.length > 1 && (
             <div style={{ marginBottom: 24 }}>
-              <BlockTitle text="Distribución por tipo de operación" />
+              <BlockTitle text={t('metering.actTypeDistribution')} />
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {actTypeData.map((t, i) => (
-                  <div key={t.tipo} style={{
+                {actTypeData.map((item, i) => (
+                  <div key={item.tipo} style={{
                     background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
                     padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 140,
                   }}>
                     <div style={{ fontSize: 18, fontWeight: 800, color: COLORS[i % COLORS.length], fontVariantNumeric: 'tabular-nums' }}>
-                      {t.pct}%
+                      {item.pct}%
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t.tipo}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{item.tipo}</div>
                     <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
-                      {t.count.toLocaleString()} ops
+                      {item.count.toLocaleString()} ops
                     </div>
                   </div>
                 ))}
@@ -982,33 +987,33 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
           )}
 
           {trendData.length > 1 && (
-            <ChartCard title="Tendencia diaria — éxito y duración" style={{ marginBottom: 24 }}>
+            <ChartCard title={t('metering.excelTrendChart')} style={{ marginBottom: 24 }}>
               <ResponsiveContainer width="100%" height={200}>
                 <ComposedChart data={trendData} margin={{ left: 0, right: 32, top: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="day" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
                   <YAxis yAxisId="pct" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
                   <YAxis yAxisId="dur" orientation="right" tickFormatter={v => `${v}s`} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                  <Tooltip formatter={(v, n) => n === 'Éxito %' ? `${v}%` : `${v}s`} />
+                  <Tooltip formatter={(v, n, p) => p.dataKey === 'successPct' ? `${v}%` : `${v}s`} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar  yAxisId="dur" dataKey="Duración (s)" fill={COLORS[2]} opacity={0.65} radius={[3, 3, 0, 0]} />
-                  <Line yAxisId="pct" dataKey="Éxito %"      stroke={COLORS[1]} strokeWidth={2} dot={false} />
+                  <Bar  yAxisId="dur" dataKey="durationS"  name={t('metering.chartDurationS')}  fill={COLORS[2]} opacity={0.65} radius={[3, 3, 0, 0]} />
+                  <Line yAxisId="pct" dataKey="successPct" name={t('metering.chartSuccessPct')} stroke={COLORS[1]} strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartCard>
           )}
 
           {paPerf.length > 0 && (
-            <ChartCard title="Rendimiento por Planning Area (top 10)" style={{ marginBottom: 24 }}>
+            <ChartCard title={t('metering.paPerformance')} style={{ marginBottom: 24 }}>
               <ResponsiveContainer width="100%" height={Math.max(160, paPerf.length * 30)}>
                 <BarChart data={paPerf} layout="vertical" margin={{ left: 4, right: 56, top: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                   <XAxis type="number" tick={{ fill: 'var(--text2)', fontSize: 10 }} />
                   <YAxis type="category" dataKey="pa" width={90} tick={{ fill: 'var(--text2)', fontSize: 10 }} />
-                  <Tooltip formatter={(v, n) => n === 'Éxito %' ? `${v}%` : n === 'Dur. prom (s)' ? `${v}s` : v} />
+                  <Tooltip formatter={(v, n, p) => p.dataKey === 'rate' ? `${v}%` : p.dataKey === 'avgDur' ? `${v}s` : v} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="total"  fill={COLORS[0]} name="Operaciones"   radius={[0, 3, 3, 0]} />
-                  <Bar dataKey="avgDur" fill={COLORS[2]} name="Dur. prom (s)" radius={[0, 3, 3, 0]} />
+                  <Bar dataKey="total"  fill={COLORS[0]} name={t('metering.chartOps')}       radius={[0, 3, 3, 0]} />
+                  <Bar dataKey="avgDur" fill={COLORS[2]} name={t('metering.chartDurationS')} radius={[0, 3, 3, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -1016,12 +1021,12 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
 
           {topChgKF.length > 0 && (
             <div style={{ marginBottom: 24 }}>
-              <BlockTitle text="Key figures más modificados" count={topChgKF.length} />
+              <BlockTitle text={t('metering.topKeyFigures')} count={topChgKF.length} />
               <DataTable
                 columns={[
-                  { key: 'kf',       label: 'Key Figure',      mono: true },
-                  { key: 'cambios',  label: 'Cambios totales', align: 'right', mono: true, render: r => r.cambios.toLocaleString() },
-                  { key: 'usuarios', label: 'Usuarios',        align: 'right', mono: true },
+                  { key: 'kf',       label: t('metering.colKeyFigure'),    mono: true },
+                  { key: 'cambios',  label: t('metering.colTotalChanges'), align: 'right', mono: true, render: r => r.cambios.toLocaleString() },
+                  { key: 'usuarios', label: t('metering.colUser'),         align: 'right', mono: true },
                 ]}
                 rows={topChgKF}
               />
@@ -1029,7 +1034,7 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
           )}
 
           <div style={{ display: 'flex', gap: 0, marginBottom: 12 }}>
-            {[['slow', `Más lentas (${slowRows.length})`], ['errors', `Errores (${failRows.length})`]].map(([id, label]) => (
+            {[['slow', t('metering.slowest', { n: slowRows.length })], ['errors', t('metering.errorsTab', { n: failRows.length })]].map(([id, label]) => (
               <button key={id} onClick={() => setSubtab(id)} style={{
                 padding: '6px 16px', fontSize: 11, background: 'none', border: 'none',
                 borderBottom: subtab === id ? '2px solid var(--accent)' : '2px solid transparent',
@@ -1042,7 +1047,7 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
           {subtab === 'slow' && <DataTable columns={pvCols} rows={slowRows} />}
           {subtab === 'errors' && (
             failRows.length === 0
-              ? <div style={{ padding: '14px 0', fontSize: 12, color: '#10b981' }}>✓ Sin errores en el período</div>
+              ? <div style={{ padding: '14px 0', fontSize: 12, color: '#10b981' }}>{t('metering.noErrors')}</div>
               : <DataTable columns={pvCols} rows={failRows} />
           )}
         </>
@@ -1054,6 +1059,8 @@ function TabExcel({ planningViews, logons, chgKeyFig, userMap }) {
 // ─── Tab 3: Herramientas ───────────────────────────────────────────────────────
 
 function TabApps({ fiori, dashboards, stories, alerts, userMap }) {
+  const { t } = useI18n()
+
   const fioriOtros = useMemo(() =>
     fiori.filter(r => !r.FioriProjectID?.startsWith('tl.ibp.excel.addin.')),
     [fiori])
@@ -1100,12 +1107,12 @@ function TabApps({ fiori, dashboards, stories, alerts, userMap }) {
 
           {fioriApps.length > 0 && (
             <div>
-              <BlockTitle text="Apps Fiori" />
+              <BlockTitle text={t('metering.fioriApps')} />
               <DataTable
                 columns={[
-                  { key: 'name',     label: 'Aplicación' },
-                  { key: 'usuarios', label: 'Usuarios únicos', align: 'right', mono: true },
-                  { key: 'usos',     label: 'Usos',            align: 'right', mono: true, render: r => r.usos.toLocaleString() },
+                  { key: 'name',     label: t('metering.colApp') },
+                  { key: 'usuarios', label: t('metering.colUniqueUsers'), align: 'right', mono: true },
+                  { key: 'usos',     label: t('metering.colUses'),        align: 'right', mono: true, render: r => r.usos.toLocaleString() },
                 ]}
                 rows={fioriApps}
               />
@@ -1114,13 +1121,13 @@ function TabApps({ fiori, dashboards, stories, alerts, userMap }) {
 
           {dashPorUsuario.length > 0 && (
             <div>
-              <BlockTitle text={`Sesiones de Dashboard (${dashboards.length} total)`} />
-              <Note text="La API no incluye el nombre del dashboard en los registros de actividad." />
+              <BlockTitle text={t('metering.dashSessions', { n: dashboards.length })} />
+              <Note text={t('metering.dashNote')} />
               <DataTable
                 columns={[
-                  { key: 'usuario',  label: 'Usuario' },
-                  { key: 'pa',       label: 'Planning Area(s)', color: () => 'var(--text2)' },
-                  { key: 'sesiones', label: 'Sesiones', align: 'right', mono: true },
+                  { key: 'usuario',  label: t('metering.colUser') },
+                  { key: 'pa',       label: t('metering.colPAList'), color: () => 'var(--text2)' },
+                  { key: 'sesiones', label: t('metering.colSessionsActions'), align: 'right', mono: true },
                 ]}
                 rows={dashPorUsuario}
               />
@@ -1129,13 +1136,13 @@ function TabApps({ fiori, dashboards, stories, alerts, userMap }) {
 
           {alertPorUsuario.length > 0 && (
             <div>
-              <BlockTitle text="Alert Monitor — aperturas de la app" />
-              <Note text="La API registra apertura de la app (ALTMON_APP_LOAD). Las acciones dentro de alertas no tienen datos en este tenant." />
+              <BlockTitle text={t('metering.alertMonitor')} />
+              <Note text={t('metering.alertNote')} />
               <DataTable
                 columns={[
-                  { key: 'usuario',   label: 'Usuario' },
-                  { key: 'aperturas', label: 'Aperturas', align: 'right', mono: true },
-                  { key: 'ultima',    label: 'Última',    mono: true, nowrap: true },
+                  { key: 'usuario',   label: t('metering.colUser') },
+                  { key: 'aperturas', label: t('metering.colOpenings'), align: 'right', mono: true },
+                  { key: 'ultima',    label: t('metering.colLastDate'), mono: true, nowrap: true },
                 ]}
                 rows={alertPorUsuario}
               />
@@ -1144,12 +1151,12 @@ function TabApps({ fiori, dashboards, stories, alerts, userMap }) {
 
           {storyRows.length > 0 && (
             <div>
-              <BlockTitle text="Analytics Stories" />
+              <BlockTitle text={t('metering.analyticStories')} />
               <DataTable
                 columns={[
-                  { key: 'name',     label: 'Story' },
-                  { key: 'usuarios', label: 'Usuarios únicos', align: 'right', mono: true },
-                  { key: 'vistas',   label: 'Vistas',          align: 'right', mono: true },
+                  { key: 'name',     label: t('metering.colStory') },
+                  { key: 'usuarios', label: t('metering.colUniqueUsers'), align: 'right', mono: true },
+                  { key: 'vistas',   label: t('metering.colViews'),       align: 'right', mono: true },
                 ]}
                 rows={storyRows}
               />
@@ -1165,6 +1172,7 @@ function TabApps({ fiori, dashboards, stories, alerts, userMap }) {
 // ─── Main export ───────────────────────────────────────────────────────────────
 
 export default function Metering({ connection, session }) {
+  const { t } = useI18n()
   const [preset,       setPreset]       = useState('7d')
   const [from,         setFrom]         = useState(() => { const [s] = presetDates('7d'); return toInputDate(s, getTzMode()) })
   const [to,           setTo]           = useState(() => { const [, e] = presetDates('7d'); return toInputDate(e, getTzMode()) })
@@ -1183,6 +1191,12 @@ export default function Metering({ connection, session }) {
 
   fromRef.current = from
   toRef.current   = to
+
+  const TABS = [
+    { id: 'general', label: t('metering.tabGeneral') },
+    { id: 'excel',   label: t('metering.tabExcel')   },
+    { id: 'apps',    label: t('metering.tabApps')    },
+  ]
 
   async function loadData() {
     setLoading(true)
@@ -1220,8 +1234,8 @@ export default function Metering({ connection, session }) {
       setData({ overview, planningViews, logons, fiori, dashboards, stories, alerts, users, components, chgKeyFig })
     } catch (e) {
       setError(e.message === '401'
-        ? 'Credenciales incorrectas. Cierra sesión y vuelve a ingresar.'
-        : `Error al cargar datos: ${e.message}`)
+        ? t('metering.errCredentials')
+        : t('metering.errLoad', { msg: e.message }))
     }
     setLoading(false)
   }
@@ -1317,13 +1331,13 @@ export default function Metering({ connection, session }) {
       )}
 
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg2)', padding: '0 24px', flexShrink: 0 }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+        {TABS.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
             padding: '8px 18px', fontSize: 11, background: 'none', border: 'none',
-            borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-            color: activeTab === t.id ? 'var(--text)' : 'var(--text2)',
-            fontWeight: activeTab === t.id ? 600 : 400, cursor: 'pointer', transition: 'all .15s',
-          }}>{t.label}</button>
+            borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
+            color: activeTab === tab.id ? 'var(--text)' : 'var(--text2)',
+            fontWeight: activeTab === tab.id ? 600 : 400, cursor: 'pointer', transition: 'all .15s',
+          }}>{tab.label}</button>
         ))}
       </div>
 
@@ -1336,12 +1350,12 @@ export default function Metering({ connection, session }) {
       <div style={{ flex: 1, overflowY: 'auto', opacity: loading && data ? 0.55 : 1, transition: 'opacity .2s' }}>
         {!data && loading && (
           <div style={{ padding: 56, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
-            Cargando datos de telemetría…
+            {t('metering.loadingData')}
           </div>
         )}
         {!data && !loading && !error && (
           <div style={{ padding: 56, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>
-            Selecciona un período para comenzar
+            {t('metering.selectPeriod')}
           </div>
         )}
         {data && (

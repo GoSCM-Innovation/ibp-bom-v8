@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useI18n } from '../context/I18nContext'
 
 /**
  * Collapsible panel that displays technical API logs.
@@ -18,6 +19,7 @@ export function useTechLogs() {
 }
 
 export default function TechLogs({ logs = [] }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
 
   return (
@@ -34,7 +36,7 @@ export default function TechLogs({ logs = [] }) {
         }}
       >
         <span style={{ fontSize: 12 }}>{open ? '▾' : '▸'}</span>
-        Ver logs técnicos
+        {t('logs.toggle')}
         {logs.length > 0 && (
           <span style={{
             background: open ? 'rgba(139,92,246,.2)' : 'var(--border)',
@@ -50,18 +52,18 @@ export default function TechLogs({ logs = [] }) {
         }}>
           {logs.length === 0 ? (
             <div style={{ padding: 16, fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>
-              Sin llamadas API registradas aún
+              {t('logs.empty')}
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
               <thead>
                 <tr style={{ background: 'var(--bg3)', position: 'sticky', top: 0 }}>
-                  <th style={thStyle}>Hora</th>
-                  <th style={thStyle}>Método</th>
-                  <th style={thStyle}>Endpoint</th>
-                  <th style={thStyle}>Status</th>
-                  <th style={thStyle}>Duración</th>
-                  <th style={thStyle}>Detalle</th>
+                  <th style={thStyle}>{t('logs.colTime')}</th>
+                  <th style={thStyle}>{t('logs.colMethod')}</th>
+                  <th style={thStyle}>{t('logs.colEndpoint')}</th>
+                  <th style={thStyle}>{t('logs.colStatus')}</th>
+                  <th style={thStyle}>{t('logs.colDuration')}</th>
+                  <th style={thStyle}>{t('logs.colDetail')}</th>
                 </tr>
               </thead>
               <tbody>
