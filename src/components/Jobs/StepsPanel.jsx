@@ -448,7 +448,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                         } />
                         <DetailRow label={t('steps.start')} value={formatSapTs(step.StepStartDateTime, tzMode)} />
                         {dur && <DetailRow label={t('steps.duration')} value={dur} />}
-                        <DetailRow label={t('steps.results')} value={step.StepHasResults ? '✓ Sí' : '—'} />
+                        <DetailRow label={t('steps.results')} value={step.StepHasResults ? t('steps.yes') : '—'} />
                       </div>
                     </div>
 
@@ -568,7 +568,7 @@ export default function StepsPanel({ job, connection, session, statuses, tzMode,
                               {params.loading && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('common.loading')}</div>}
                               {params.error && isAuthErr && (
                                 <div style={{ fontSize: 11, color: '#fbbf24', lineHeight: 1.5 }}>
-                                  ⚠ Sin acceso — se requiere el rol <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>SAP_BCG_APPLICATION_JOB_DISP</code> para leer parámetros de jobs de otros usuarios.
+                                  ⚠ {t('steps.authErrPre')} <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>SAP_BCG_APPLICATION_JOB_DISP</code> {t('steps.authErrPost')}
                                 </div>
                               )}
                               {params.error && !isAuthErr && <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {params.error}</div>}

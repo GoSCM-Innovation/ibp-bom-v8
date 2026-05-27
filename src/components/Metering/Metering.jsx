@@ -120,10 +120,11 @@ function Note({ text }) {
   )
 }
 
-function EmptyState({ msg = 'Sin datos para el período seleccionado' }) {
+function EmptyState({ msg }) {
+  const { t } = useI18n()
   return (
     <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>
-      {msg}
+      {msg ?? t('metering.noDataPeriod')}
     </div>
   )
 }

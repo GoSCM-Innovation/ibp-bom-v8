@@ -25,16 +25,17 @@ const STATUS_COLORS = {
   X: '#374151', k: '#6b7280',
 }
 
-const STATUS_LABELS = {
-  F: 'Finished', W: 'Warning', A: 'Failed', U: 'User Error',
-  R: 'In Process', S: 'Scheduled', P: 'Released', Y: 'Ready',
-  C: 'Canceled', D: 'Deleted', K: 'Skipped', X: 'Unknown',
-}
-
 const CONN_COLORS = ['#3b82f6', '#34d399', '#f97316', '#8b5cf6', '#06b6d4', '#ff6b6b', '#fbbf24', '#a78bfa']
 
 export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
   const { t } = useI18n()
+
+  const STATUS_LABELS = {
+    F: t('global.jobStatusF'), W: t('global.jobStatusW'), A: t('global.jobStatusA'),
+    U: t('global.jobStatusU'), R: t('global.jobStatusR'), S: t('global.jobStatusS'),
+    P: t('global.jobStatusP'), Y: t('global.jobStatusY'), C: t('global.jobStatusC'),
+    D: t('global.jobStatusD'), K: t('global.jobStatusK'), X: t('global.jobStatusX'),
+  }
   const isMobile = useIsMobile()
   const [connData, setConnData] = useState({})
   const [lastRefresh, setLastRefresh] = useState(null)

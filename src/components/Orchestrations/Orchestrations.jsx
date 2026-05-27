@@ -6,14 +6,14 @@ import { useI18n } from '../../context/I18nContext'
 import OrchBuilder from './OrchBuilder'
 import RunView from './RunView'
 
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleDateString('es', { day: '2-digit', month: 'short', year: '2-digit' })
-}
-
 export default function Orchestrations({ connection, session }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+
+  function formatDate(iso) {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    return d.toLocaleDateString(lang === 'en' ? 'en' : 'es', { day: '2-digit', month: 'short', year: '2-digit' })
+  }
   const connId = connection.id
 
   const [orchs, setOrchs]               = useState(() => loadOrchs(connId))

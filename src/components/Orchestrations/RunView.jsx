@@ -124,7 +124,7 @@ function NodeRow({ ns, label, techName, indent = 0, isChild = false, connection,
                 padding: '2px 7px', display: 'inline-flex', alignItems: 'center', gap: 4,
               }}
             >
-              {sapExpanded ? '▲' : '▼'} Steps SAP
+              {sapExpanded ? '▲' : '▼'} {t('runview.sapSteps')}
             </button>
           )}
         </div>

@@ -22,12 +22,12 @@ function parseImportText(text, t) {
   const invalid = []
   arr.forEach((c, i) => {
     if (!c || typeof c !== 'object') {
-      invalid.push({ index: i, reason: 'no es un objeto' }); return
+      invalid.push({ index: i, reason: t('conn.errInvalidEntry') }); return
     }
     const name     = typeof c.name     === 'string' ? c.name.trim()     : ''
     const ambiente = typeof c.ambiente === 'string' ? c.ambiente.trim() : ''
     if (!name || !ambiente) {
-      invalid.push({ index: i, reason: 'faltan name o ambiente' }); return
+      invalid.push({ index: i, reason: t('conn.errMissingFields') }); return
     }
     valid.push({
       name,
