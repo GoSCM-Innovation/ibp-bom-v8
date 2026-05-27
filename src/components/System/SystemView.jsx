@@ -9,6 +9,7 @@ import Metering from '../Metering/Metering'
 import Orchestrations from '../Orchestrations/Orchestrations'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getSapSystemUrl } from '../../utils/sapUrl'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 export default function SystemView({ connection, session, onLogout }) {
   const { t } = useI18n()
@@ -46,7 +47,7 @@ export default function SystemView({ connection, session, onLogout }) {
       }}>
         <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connection.name}</div>
+          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connDisplayName(connection, t)}</div>
           {getSapSystemUrl(connection.com0326?.url) && (
             <a
               href={getSapSystemUrl(connection.com0326?.url)}

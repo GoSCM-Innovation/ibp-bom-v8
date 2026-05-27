@@ -142,7 +142,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
 
       {form.name && form.ambiente && (
         <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text2)' }}>
-          {t('form.finalName')} <strong style={{ color: 'var(--text)' }}>{form.name} ({form.ambiente})</strong>
+          {t('form.finalName')} <strong style={{ color: 'var(--text)' }}>
+            {form.name} ({AMBIENTES.find(o => o.value === form.ambiente)?.label || form.ambiente})
+          </strong>
         </div>
       )}
       {error && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--red)' }}>✕ {error}</div>}

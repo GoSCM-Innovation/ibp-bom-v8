@@ -6,6 +6,7 @@ import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
 import ScheduleModal from './ScheduleModal'
 import TruncText from '../ui/TruncText'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const JOB_PATH    = '/JobTemplateSet'
 const VISIBLE_COLS = ['JobTemplateName', 'JobTemplateText']
@@ -87,7 +88,7 @@ export default function Jobs({ connection, session }) {
   if (loading) return (
     <div style={{ padding: isMobile ? 14 : 28, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
       <ProgressBar loading />
-      {t('jobs.loading', { name: connection.name })}
+      {t('jobs.loading', { name: connDisplayName(connection, t) })}
     </div>
   )
 

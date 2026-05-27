@@ -13,6 +13,7 @@ import {
   getTzMode, setTzMode as saveTzMode, getTzLabel,
 } from '../../utils/dateUtils'
 import { useI18n } from '../../context/I18nContext'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const DEFAULT_HOURS = 24
 const REFRESH_MS = 5 * 60 * 1000
@@ -175,7 +176,7 @@ export default function Resumen({ connection, session }) {
   if (loading && rows.length === 0) return (
     <div style={{ padding: isMobile ? 16 : 32, color: 'var(--text2)', fontSize: 13, position: 'relative' }}>
       <ProgressBar loading />
-      {t('resumen.loading', { name: connection.name })}
+      {t('resumen.loading', { name: connDisplayName(connection, t) })}
     </div>
   )
 

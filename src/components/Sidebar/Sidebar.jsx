@@ -1,16 +1,7 @@
 import { useI18n } from '../../context/I18nContext'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const W = 220
-
-const ENV_KEY_MAP = { 'Calidad': 'form.envQuality', 'Producción': 'form.envProduction' }
-function connDisplayName(c, t) {
-  if (!c.ambiente) return c.name
-  const key = ENV_KEY_MAP[c.ambiente]
-  if (!key) return c.name
-  const translated = t(key)
-  if (translated === c.ambiente) return c.name
-  return c.name.replace(`(${c.ambiente})`, `(${translated})`)
-}
 const W_MIN = 52
 
 const AVATAR_COLORS = [

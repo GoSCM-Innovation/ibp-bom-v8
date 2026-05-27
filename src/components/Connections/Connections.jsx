@@ -6,18 +6,9 @@ import ConnectionAvatar from './ConnectionAvatar'
 import ImportConnectionsModal from './ImportConnectionsModal'
 import { remove } from '../../services/connectionStorage'
 import { getSapSystemUrl } from '../../utils/sapUrl'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const EXPORT_VERSION = '1.0'
-
-const ENV_KEY_MAP = { 'Calidad': 'form.envQuality', 'Producción': 'form.envProduction' }
-function connDisplayName(c, t) {
-  if (!c.ambiente) return c.name
-  const key = ENV_KEY_MAP[c.ambiente]
-  if (!key) return c.name
-  const translated = t(key)
-  if (translated === c.ambiente) return c.name
-  return c.name.replace(`(${c.ambiente})`, `(${translated})`)
-}
 
 function parseImportText(text, t) {
   let raw
@@ -299,7 +290,7 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
               <button onClick={() => handleEdit(conn)} style={{ ...btnStyle('var(--text2)'), ...(isMobile && { flex: 1 }) }}>
                 {t('conn.edit')}
               </button>
-              <button onClick={() => handleDelete(conn.id, conn.name)} style={{ ...btnStyle('var(--red)'), ...(isMobile && { flex: 1 }) }}>
+              <button onClick={() => handleDelete(conn.id, connDisplayName(conn, t))} style={{ ...btnStyle('var(--red)'), ...(isMobile && { flex: 1 }) }}>
                 {t('conn.delete')}
               </button>
             </div>

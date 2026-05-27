@@ -13,6 +13,7 @@ import {
   getTzMode, setTzMode as saveTzMode, getTzLabel,
 } from '../../utils/dateUtils'
 import { useI18n } from '../../context/I18nContext'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const REFRESH_MS = 5 * 60 * 1000
 const DEFAULT_HOURS = 24
@@ -146,7 +147,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
   const connBarData = connSummaries
     .filter(c => !c.error)
     .map(c => ({
-      name: c.conn.name.length > 20 ? c.conn.name.slice(0, 18) + '…' : c.conn.name,
+      name: (() => { const n = connDisplayName(c.conn, t); return n.length > 20 ? n.slice(0, 18) + '…' : n })(),
       finished: c.finished + (c.warned || 0),
       failed: c.failed,
       others: c.total - c.finished - (c.warned || 0) - c.failed,
@@ -158,7 +159,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     if (!d || d.error) return
     filterRows(d.rows)
       .filter(r => ['A','U'].includes(r.JobStatus))
-      .forEach(r => allFailures.push({ ...r, _connName: conn.name }))
+      .forEach(r => allFailures.push({ ...r, _connName: connDisplayName(conn, t) }))
   })
   allFailures.sort((a, b) => (b.JobPlannedStartDateTime || '').localeCompare(a.JobPlannedStartDateTime || ''))
   const recentFailures = allFailures.slice(0, 8)
@@ -304,7 +305,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                     }}>{cs.idx + 1}</span>
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 160 }}>
-                    <TruncText text={cs.conn.name} style={{ fontWeight: 600, color: 'var(--text)' }} />
+                    <TruncText text={connDisplayName(cs.conn, t)} style={{ fontWeight: 600, color: 'var(--text)' }} />
                   </td>
                   <td style={tdStyle}>
                     {cs.noSession ? (
@@ -380,7 +381,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                     <span style={{
                       width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0,
                     }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cs.conn.name}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{connDisplayName(cs.conn, t)}</span>
                   </div>
                   <span style={{ fontSize: 11, fontWeight: 700, color, flexShrink: 0, marginLeft: 8 }}>
                     {cs.error ? t('global.statusError') : `${cs.successRate}%`}

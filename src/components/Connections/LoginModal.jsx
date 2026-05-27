@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import ConnectionAvatar from './ConnectionAvatar'
 import { useI18n } from '../../context/I18nContext'
+import { connDisplayName } from '../../utils/connDisplayName'
 
 const ALL_AGREEMENTS = ['com0326', 'com0068', 'com0924']
 
@@ -97,7 +98,7 @@ export default function LoginModal({ conn, existingSession, onLogin, onCancel })
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <ConnectionAvatar name={conn.name} logoUrl={conn.logoUrl} size={36} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{conn.name}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{connDisplayName(conn, t)}</div>
             <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{t('login.title')}</div>
           </div>
         </div>
