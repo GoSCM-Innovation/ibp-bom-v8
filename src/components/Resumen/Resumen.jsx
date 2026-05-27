@@ -102,9 +102,11 @@ export default function Resumen({ connection, session }) {
   const running  = filtered.filter(r => r.JobStatus === 'R').length
   const scheduled= filtered.filter(r => ['S','P','Y'].includes(r.JobStatus)).length
   const finished = filtered.filter(r => r.JobStatus === 'F').length
-  const failed   = filtered.filter(r => ['A','U'].includes(r.JobStatus)).length
+  const failed   = filtered.filter(r => r.JobStatus === 'A').length
   const warned   = filtered.filter(r => r.JobStatus === 'W').length
-  const successRate = total > 0 ? Math.round(((finished + warned) / total) * 100) : 0
+  const errored     = filtered.filter(r => ['A','U'].includes(r.JobStatus)).length
+  const executed    = finished + warned + errored
+  const successRate = executed > 0 ? Math.round(((finished + warned) / executed) * 100) : 0
 
   const statusCount = {}
   filtered.forEach(r => { statusCount[r.JobStatus] = (statusCount[r.JobStatus] || 0) + 1 })
