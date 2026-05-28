@@ -42,7 +42,7 @@ export default function App() {
   }
 
   function sessionIsComplete(conn, session) {
-    const needed = ['com0326', 'com0068', 'com0924'].filter(k => conn[k]?.url)
+    const needed = ['com0326', 'com0068', 'com0924', 'com0720'].filter(k => conn[k]?.url)
     if (needed.length === 0) return true
     return needed.every(k => session?.[k]?.password)
   }
