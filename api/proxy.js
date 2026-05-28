@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { url, serviceRoot, user, password, method = 'GET', body } = req.body
+  const { url, serviceRoot, user, password, method = 'GET', body, timeout = 30000 } = req.body
 
   if (!url || !user || !password) return res.status(400).json({ error: 'Missing url, user or password' })
 
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
         ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
         ...(sessionCookies ? { 'Cookie': sessionCookies } : {}),
       },
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(timeout),
     }
     if (body && method !== 'GET') opts.body = JSON.stringify(body)
 

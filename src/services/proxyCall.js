@@ -1,4 +1,4 @@
-export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser }) {
+export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout }) {
   const comKey = `com${com}`
   const agreement = connection[comKey]
   const serviceRoot = agreement?.url || ''
@@ -20,6 +20,7 @@ export async function proxyCall({ connection, session, com = '0326', path, metho
       password: sessionCreds.password || '',
       method,
       ...(body !== undefined && { body }),
+      ...(timeout !== undefined && { timeout }),
     }),
   })
 }

@@ -99,7 +99,8 @@ export async function getTransactionId(conn, session, { transactionName, version
     '$format=json',
   ].join('&')
 
-  const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}` })
+  // GetTransactionID can take 60+ seconds on some IBP tenants — pass an explicit 90 s timeout.
+  const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}`, timeout: 90000 })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status) }
   const data = await resp.json()
   const txId = data?.d?.Value
