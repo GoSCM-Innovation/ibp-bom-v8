@@ -168,9 +168,10 @@ export async function readMessages(conn, session, name, transactionId) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function buildFilter(planningArea, versionId) {
+  const esc  = v => v.replace(/'/g, "''")  // OData: single quote → doubled
   const parts = []
-  if (planningArea) parts.push(`PlanningAreaID eq '${planningArea}'`)
-  if (versionId)    parts.push(`VersionID eq '${versionId}'`)
+  if (planningArea) parts.push(`PlanningAreaID eq '${esc(planningArea)}'`)
+  if (versionId)    parts.push(`VersionID eq '${esc(versionId)}'`)
   return parts.join(' and ')
 }
 

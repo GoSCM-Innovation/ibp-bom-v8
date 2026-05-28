@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { getAll } from '../../services/connectionStorage'
-import { getSession } from '../../services/sessionStorage'
+import { getSession, setSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog,
   fetchCount, readEntityPage,
@@ -100,6 +100,13 @@ export default function Migration({ connection, session }) {
     getAll().filter(c => c.id !== connection.id && c.com0720?.url && c.com0720?.user),
     [connection.id]
   )
+
+  // All connections by ID — for resolving names in history even after rename
+  const connById = useMemo(() => {
+    const m = {}
+    getAll().forEach(c => { m[c.id] = c })
+    return m
+  }, [])
 
   // ── Source state ──
   const [srcConnId, setSrcConnId]     = useState(null)
@@ -204,7 +211,8 @@ export default function Migration({ connection, session }) {
   // ── Source inline login ──
   async function handleSrcLogin(e) {
     e.preventDefault()
-    if (!srcLoginForm.user || !srcLoginForm.password) return
+    if (!srcLoginForm.user)     { setSrcLoginError(t('login.errUserRequired', { name: 'SAP_COM_0720' })); return }
+    if (!srcLoginForm.password) { setSrcLoginError(t('login.errPwdRequired',  { name: 'SAP_COM_0720' })); return }
     setSrcLoginLoading(true)
     setSrcLoginError('')
     try {
@@ -222,7 +230,11 @@ export default function Migration({ connection, session }) {
       })
       if (resp.status === 401) { setSrcLoginError(t('mig.srcLoginErr401')); return }
       if (!resp.ok)            { setSrcLoginError(t('mig.srcLoginErrNetwork')); return }
-      setSrcTempCreds({ user: srcLoginForm.user, password: srcLoginForm.password })
+      const creds = { user: srcLoginForm.user, password: srcLoginForm.password }
+      setSrcTempCreds(creds)
+      // Persist so re-opening the tab doesn't require re-login
+      const existing = getSession(srcConnId) || {}
+      setSession(srcConnId, { ...existing, com0720: creds })
     } catch {
       setSrcLoginError(t('mig.srcLoginErrNetwork'))
     } finally {
@@ -368,13 +380,14 @@ export default function Migration({ connection, session }) {
         : allResults.some(r => r.status === 'error') ? 'error' : 'ok'
       const entry = {
         date: new Date().toISOString(),
+        srcConnId:   srcConn?.id   || '',
         srcConnName: srcConn?.name || '',
         srcPa, srcVersion, dstPa, dstVersion,
         mdts: mdtList,
         totalRows: totalRowsMigrated,
         status: overallStatus,
       }
-      const updated = [entry, ...loadHistory(connection.id)]
+      const updated = [entry, ...loadHistory(connection.id)].slice(0, 50)
       saveHistory(connection.id, updated)
       setHistory(updated)
     }
@@ -404,7 +417,7 @@ export default function Migration({ connection, session }) {
       <div style={SECTION}>
         <div style={SECTION_HDR}>{t('mig.sectionConfig')}</div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
 
           {/* Source */}
           <div>
@@ -547,7 +560,7 @@ export default function Migration({ connection, session }) {
 
       {/* ── MDT selector ── */}
       {srcPa && dstPa && (
-        <div style={SECTION}>
+        <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <div style={SECTION_HDR}>{t('mig.mdtTitle')}</div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -609,7 +622,7 @@ export default function Migration({ connection, session }) {
 
       {/* ── Options ── */}
       {srcPa && dstPa && selectedMdts.size > 0 && (
-        <div style={SECTION}>
+        <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
           <div style={SECTION_HDR}>{t('mig.sectionOptions')}</div>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
             <input type="checkbox" checked={deleteEntries} onChange={e => setDeleteEntries(e.target.checked)} style={{ marginTop: 2 }} />
@@ -725,18 +738,21 @@ export default function Migration({ connection, session }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((h, i) => (
-                    <tr key={i}>
-                      <td style={td({ color: 'var(--text3)', fontSize: 11 })}>{new Date(h.date).toLocaleString()}</td>
-                      <td style={td({ color: 'var(--text2)' })}>{h.srcConnName ? `${h.srcConnName} / ${h.srcPa}` : h.srcPa}</td>
-                      <td style={td({ color: 'var(--text2)' })}>{connection.name} / {h.dstPa}</td>
-                      <td style={td({ color: 'var(--text2)' })}>{h.mdts?.length || 0}</td>
-                      <td style={td({ color: 'var(--text2)' })}>{(h.totalRows || 0).toLocaleString()}</td>
-                      <td style={td({ fontWeight: 600, color: h.status === 'ok' ? 'var(--green)' : h.status === 'error' ? 'var(--red)' : 'var(--text3)' })}>
-                        {h.status === 'ok' ? t('mig.statusOk') : h.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled')}
-                      </td>
-                    </tr>
-                  ))}
+                  {history.map((h, i) => {
+                    const srcName = (h.srcConnId && connById[h.srcConnId]?.name) || h.srcConnName || h.srcConnId || '—'
+                    return (
+                      <tr key={i}>
+                        <td style={td({ color: 'var(--text3)', fontSize: 11 })}>{new Date(h.date).toLocaleString()}</td>
+                        <td style={td({ color: 'var(--text2)' })}>{srcName} / {h.srcPa}</td>
+                        <td style={td({ color: 'var(--text2)' })}>{connection.name} / {h.dstPa}</td>
+                        <td style={td({ color: 'var(--text2)' })}>{h.mdts?.length || 0}</td>
+                        <td style={td({ color: 'var(--text2)' })}>{(h.totalRows || 0).toLocaleString()}</td>
+                        <td style={td({ fontWeight: 600, color: h.status === 'ok' ? 'var(--green)' : h.status === 'error' ? 'var(--red)' : 'var(--text3)' })}>
+                          {h.status === 'ok' ? t('mig.statusOk') : h.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled')}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
