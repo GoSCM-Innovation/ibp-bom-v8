@@ -26,7 +26,8 @@ export default async function handler(req, res) {
       const csrfResp = await fetch(csrfUrl, {
         method: 'GET',
         headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' },
-        signal: AbortSignal.timeout(9000),
+        // CSRF fetch: some IBP tenants take 60+ s on the first POST after a heavy operation.
+        signal: AbortSignal.timeout(90000),
       })
       csrfToken = csrfResp.headers.get('x-csrf-token')
       const setCookies = csrfResp.headers.getSetCookie?.() ?? []

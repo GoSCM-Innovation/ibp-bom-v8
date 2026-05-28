@@ -335,12 +335,14 @@ export default function Migration({ connection, session }) {
             masterDataTypeId: mdt,
             planningArea: dstPa,
           })
-          // Best-effort: enable server-side parallel processing. Silently skipped if unsupported.
-          await initiateParallelProcess(connection, session, txId)
         } catch (e) {
           allResults.push({ mdt, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
           continue
         }
+
+        // Best-effort: enable server-side parallel processing.
+        // Isolated from the main try-catch — a timeout or 4xx here must NOT abort the migration.
+        try { await initiateParallelProcess(connection, session, txId) } catch { /* ignore */ }
 
         setProgress(p => ({ ...p, totalRows }))
 
