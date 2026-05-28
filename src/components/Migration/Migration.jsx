@@ -1019,7 +1019,7 @@ export default function Migration({ connection, session }) {
                       {t('mig.previewTitle', { name: previewData.name })}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
-                      {t('mig.previewCount', { count: previewData.count.toLocaleString() })}
+                      {t('mig.previewCount', { count: previewData.count.toLocaleString(), shown: previewData.rows.length })}
                     </div>
                     {previewData.error && (
                       <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>✕ {previewData.error}</div>

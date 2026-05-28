@@ -570,7 +570,7 @@
   "mig.histToggleOpen": "View history ▾",
   "mig.histToggleClose": "Hide history ▴",
   "mig.previewTitle": "Preview: {name}",
-  "mig.previewCount": "{count} total records in source",
+  "mig.previewCount": "{count} records in source · showing first {shown} · no order applied",
   "mig.previewClose": "Close",
   "mig.confirmTitle": "Confirm migration to Production",
   "mig.confirmMsg": "The destination \"{name}\" is marked as Production. This will overwrite master data. Are you sure?",

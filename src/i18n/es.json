@@ -576,7 +576,7 @@
   "mig.histDst": "Destino",
   "mig.histDatasets": "Datasets",
   "mig.previewTitle": "Vista previa: {name}",
-  "mig.previewCount": "{count} registros totales en origen",
+  "mig.previewCount": "{count} registros en origen · mostrando primeros {shown} · sin orden aplicado",
   "mig.previewLoading": "Cargando vista previa…",
   "mig.confirmTitle": "Confirmar migración a Producción",
   "mig.confirmMsg": "El destino \"{name}\" está marcado como Producción. Los datos se sobreescribirán. ¿Continuar?",
