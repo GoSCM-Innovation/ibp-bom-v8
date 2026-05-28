@@ -42,7 +42,7 @@ export default async function handler(req, res) {
         ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
         ...(sessionCookies ? { 'Cookie': sessionCookies } : {}),
       },
-      signal: AbortSignal.timeout(9000),
+      signal: AbortSignal.timeout(55000),
     }
     if (body && method !== 'GET') opts.body = JSON.stringify(body)
 
