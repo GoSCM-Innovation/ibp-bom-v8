@@ -111,13 +111,36 @@ export async function getTransactionId(conn, session, { transactionName, version
 // Step 2: POST a chunk of rows via deep-insert to <NAME>Trans(id)/Nav<NAME>.
 // deleteEntries=true should only be set on the FIRST chunk of a migration run
 // to clear existing destination data before loading.
+//
+// SAP IBP ignores Nav* rows when DeleteEntries=true is set in the same request.
+// So when deleteEntries is requested we send TWO calls:
+//   1. DeleteEntries=true  + empty Nav* → stages the delete
+//   2. DeleteEntries=false + actual rows → stages the insert
 export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false } = {}) {
   const cleanRows = stripReadonlyFields(rows)
   const attrs = cleanRows.length ? Object.keys(cleanRows[0]).join(',') : ''
-  const body  = {
+
+  if (deleteEntries) {
+    // Phase 1: stage delete-only (empty rows)
+    const deleteBody = {
+      TransactionID:       transactionId,
+      DoCommit:            false,
+      DeleteEntries:       true,
+      RequestedAttributes: attrs,
+      [`Nav${name}`]:      { results: [] },
+    }
+    const delResp = await proxyCall({
+      connection: conn, session, com: COM,
+      path: `/${name}Trans`, method: 'POST', body: deleteBody,
+    })
+    if (!delResp.ok) { const e = await delResp.json().catch(() => ({})); throw new Error(e.detail || e.error || delResp.status) }
+  }
+
+  // Phase 2: stage the actual rows (always, even after delete)
+  const body = {
     TransactionID:       transactionId,
     DoCommit:            false,
-    DeleteEntries:       deleteEntries,
+    DeleteEntries:       false,
     RequestedAttributes: attrs,
     [`Nav${name}`]:      { results: cleanRows },
   }
