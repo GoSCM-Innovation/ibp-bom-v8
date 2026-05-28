@@ -605,5 +605,6 @@
   "mig.cancelConfirmBack": "Continue",
   "mig.baseWarning": "⚠ Base version selected — some types may not be listed",
   "mig.extraMdtLabel": "Additional types (comma-separated)",
-  "mig.extraMdtPlaceholder": "MDT1, MDT2, …"
+  "mig.extraMdtPlaceholder": "MDT1, MDT2, …",
+  "mig.orderTitle": "Migration order"
 }

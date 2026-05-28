@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useI18n } from '../../context/I18nContext'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import {
@@ -101,7 +102,8 @@ function td(extra) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Migration({ connection, session }) {
-  const { t } = useI18n()
+  const { t }      = useI18n()
+  const isMobile   = useIsMobile()
 
   // Refresh trigger — increment to force allConns/connById to re-read localStorage
   const [connsTick, setConnsTick] = useState(0)
@@ -151,9 +153,13 @@ export default function Migration({ connection, session }) {
   const [dstPa, setDstPa]         = useState('')
   const [dstVersion, setDstVersion] = useState('')
 
-  // ── MDT selection ──
-  const [mdtSearch, setMdtSearch]     = useState('')
-  const [selectedMdts, setSelectedMdts] = useState(new Set())
+  // ── MDT selection & order ──
+  const [mdtSearch, setMdtSearch] = useState('')
+  const [mdtOrder, setMdtOrder]   = useState([])   // ordered array; replaces selectedMdts Set
+
+  // ── Drag-and-drop (order panel) ──
+  const dragId  = useRef(null)
+  const [dragOver, setDragOver] = useState(null)
 
   // ── Options ──
   const [deleteEntries, setDeleteEntries] = useState(true)
@@ -211,9 +217,9 @@ export default function Migration({ connection, session }) {
   }, [srcConnId, srcTempCreds?.user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset selectors when catalogs change
-  useEffect(() => { setSrcPa(''); setSrcVersion(''); setSelectedMdts(new Set()) }, [srcCatalog])
-  useEffect(() => { setDstPa(''); setDstVersion(''); setSelectedMdts(new Set()) }, [dstCatalog])
-  useEffect(() => { setSelectedMdts(new Set()) }, [srcPa, srcVersion, dstPa, dstVersion])
+  useEffect(() => { setSrcPa(''); setSrcVersion(''); setMdtOrder([]) }, [srcCatalog])
+  useEffect(() => { setDstPa(''); setDstVersion(''); setMdtOrder([]) }, [dstCatalog])
+  useEffect(() => { setMdtOrder([]) }, [srcPa, srcVersion, dstPa, dstVersion])
 
   // ── Available MDTs (intersection) ──
   const srcMdts = useMemo(() => getMdts(srcCatalog, srcPa, srcVersion), [srcCatalog, srcPa, srcVersion])
@@ -298,7 +304,7 @@ export default function Migration({ connection, session }) {
     setResults(null)
     cancelledRef.current = false
 
-    const mdtList = [...selectedMdts].sort()
+    const mdtList = [...mdtOrder]
     const allResults = []
 
     try {
@@ -430,11 +436,11 @@ export default function Migration({ connection, session }) {
       saveHistory(connection.id, updated)
       setHistory(updated)
     }
-  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, selectedMdts, deleteEntries, connection, session])
+  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, deleteEntries, connection, session])
 
   // ── Derived ──
-  const canMigrate = !running && !!srcConn && !!srcSession && !!srcPa && !!dstPa && selectedMdts.size > 0
-  const oneSel     = !running && selectedMdts.size === 1
+  const canMigrate = !running && !!srcConn && !!srcSession && !!srcPa && !!dstPa && mdtOrder.length > 0
+  const oneSel     = !running && mdtOrder.length === 1
 
   const PHASE_LABEL = {
     reading:    t('mig.phaseReading'),
@@ -612,17 +618,17 @@ export default function Migration({ connection, session }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <div style={SECTION_HDR}>{t('mig.mdtTitle')}</div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              {selectedMdts.size > 0 && (
+              {mdtOrder.length > 0 && (
                 <span style={{ fontSize: 11, color: 'var(--text2)' }}>
-                  {t('mig.mdtCountSelected', { n: selectedMdts.size })}
+                  {t('mig.mdtCountSelected', { n: mdtOrder.length })}
                 </span>
               )}
               <button style={{ ...BTN_SEC, padding: '4px 10px', fontSize: 11 }}
-                onClick={() => setSelectedMdts(new Set(availableMdts))}>
+                onClick={() => setMdtOrder([...availableMdts])}>
                 {t('mig.mdtSelectAll')}
               </button>
               <button style={{ ...BTN_SEC, padding: '4px 10px', fontSize: 11 }}
-                onClick={() => setSelectedMdts(new Set())}>
+                onClick={() => setMdtOrder([])}>
                 {t('mig.mdtNone')}
               </button>
             </div>
@@ -666,15 +672,13 @@ export default function Migration({ connection, session }) {
                 <label key={mdt} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 2px' }}>
                   <input
                     type="checkbox"
-                    checked={selectedMdts.has(mdt)}
-                    onChange={e => setSelectedMdts(prev => {
-                      const n = new Set(prev)
-                      e.target.checked ? n.add(mdt) : n.delete(mdt)
-                      return n
-                    })}
+                    checked={mdtOrder.includes(mdt)}
+                    onChange={e => setMdtOrder(prev =>
+                      e.target.checked ? [...prev, mdt] : prev.filter(m => m !== mdt)
+                    )}
                   />
                   <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'var(--mono)', flex: 1 }}>{mdt}</span>
-                  {oneSel && selectedMdts.has(mdt) && (
+                  {oneSel && mdtOrder.includes(mdt) && (
                     <button
                       style={{ ...BTN_SEC, padding: '2px 8px', fontSize: 10, marginLeft: 4, flexShrink: 0 }}
                       onClick={e => { e.preventDefault(); handlePreview(mdt) }}
@@ -686,11 +690,107 @@ export default function Migration({ connection, session }) {
               ))}
             </div>
           )}
+
+          {/* ── Orden de migración ── */}
+          {mdtOrder.length > 0 && (
+            <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <div style={{ ...SECTION_HDR, marginBottom: 8 }}>{t('mig.orderTitle')}</div>
+              {mdtOrder.map((mdt, idx) => {
+                const isOver  = dragOver?.id === mdt
+                const overPos = isOver ? dragOver.pos : null
+                return (
+                  <div
+                    key={mdt}
+                    draggable={!isMobile}
+                    onDragStart={e => { dragId.current = mdt; e.dataTransfer.effectAllowed = 'move' }}
+                    onDragEnd={() => setDragOver(null)}
+                    onDragOver={e => {
+                      e.preventDefault()
+                      if (!dragId.current || dragId.current === mdt) { setDragOver(null); return }
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const pos  = (e.clientY - rect.top) < rect.height / 2 ? 'top' : 'bottom'
+                      setDragOver({ id: mdt, pos })
+                    }}
+                    onDragLeave={() => setDragOver(null)}
+                    onDrop={e => {
+                      e.preventDefault()
+                      const from = dragId.current
+                      dragId.current = null
+                      setDragOver(null)
+                      if (!from || from === mdt) return
+                      setMdtOrder(prev => {
+                        const fromIdx = prev.indexOf(from)
+                        const toIdx   = prev.indexOf(mdt)
+                        if (fromIdx < 0 || toIdx < 0) return prev
+                        const pos = dragOver?.pos ?? 'bottom'
+                        const insertIdx = pos === 'top'
+                          ? (fromIdx < toIdx ? toIdx - 1 : toIdx)
+                          : (fromIdx < toIdx ? toIdx : toIdx + 1)
+                        const next = [...prev]
+                        const [moved] = next.splice(fromIdx, 1)
+                        next.splice(insertIdx, 0, moved)
+                        return next
+                      })
+                    }}
+                    style={{
+                      position: 'relative',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '5px 8px', marginBottom: 4,
+                      background: 'var(--bg)', border: '1px solid var(--border)',
+                      borderRadius: 7,
+                      cursor: isMobile ? 'default' : 'grab',
+                      transition: 'opacity .15s',
+                    }}
+                  >
+                    {/* Línea de destino */}
+                    {isOver && (
+                      <div style={{
+                        position: 'absolute', left: 0, right: 0, height: 3, borderRadius: 2,
+                        background: 'rgba(34,197,94,.8)', pointerEvents: 'none',
+                        top:    overPos === 'top'    ? -2 : undefined,
+                        bottom: overPos === 'bottom' ? -2 : undefined,
+                      }} />
+                    )}
+                    {/* Handle (solo desktop) */}
+                    {!isMobile && (
+                      <span style={{ color: 'var(--text3)', opacity: 0.45, fontSize: 14, userSelect: 'none', flexShrink: 0 }}>⠿</span>
+                    )}
+                    {/* Número */}
+                    <div style={{
+                      width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 9, fontWeight: 700, color: 'var(--text2)',
+                      background: 'var(--bg2)', border: '1px solid var(--border)',
+                    }}>
+                      {idx + 1}
+                    </div>
+                    {/* Nombre */}
+                    <span style={{ flex: 1, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)' }}>{mdt}</span>
+                    {/* ↑ ↓ */}
+                    <button
+                      disabled={idx === 0}
+                      onClick={() => setMdtOrder(prev => {
+                        const a = [...prev];[a[idx], a[idx - 1]] = [a[idx - 1], a[idx]]; return a
+                      })}
+                      style={{ ...BTN_SEC, padding: '2px 7px', fontSize: 10, opacity: idx === 0 ? 0.25 : 1 }}
+                    >↑</button>
+                    <button
+                      disabled={idx === mdtOrder.length - 1}
+                      onClick={() => setMdtOrder(prev => {
+                        const a = [...prev];[a[idx], a[idx + 1]] = [a[idx + 1], a[idx]]; return a
+                      })}
+                      style={{ ...BTN_SEC, padding: '2px 7px', fontSize: 10, opacity: idx === mdtOrder.length - 1 ? 0.25 : 1 }}
+                    >↓</button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
       {/* ── Options ── */}
-      {srcPa && dstPa && selectedMdts.size > 0 && (
+      {srcPa && dstPa && mdtOrder.length > 0 && (
         <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
           <div style={SECTION_HDR}>{t('mig.sectionOptions')}</div>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
