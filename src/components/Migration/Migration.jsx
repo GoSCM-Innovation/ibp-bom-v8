@@ -5,9 +5,17 @@ import { getSession, setSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog,
   fetchCount, readEntityPage,
-  getTransactionId, initiateParallelProcess, postTransChunk, commitTransaction, readMessages,
+  getTransactionId, initiateParallelProcess, postTransChunk,
+  commitTransaction, getExportResult, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W,
 } from '../../services/masterDataApi'
+
+// Parse a count that may arrive as string or number; returns null if invalid.
+function parseCount(v) {
+  if (v == null) return null
+  const n = parseInt(v, 10)
+  return isNaN(n) ? null : n
+}
 
 // ── History persistence ───────────────────────────────────────────────────────
 
@@ -148,7 +156,8 @@ export default function Migration({ connection, session }) {
   const [deleteEntries, setDeleteEntries] = useState(true)
 
   // ── Run state ──
-  const cancelledRef = useRef(false)
+  const cancelledRef          = useRef(false)
+  const lastProgressUpdateRef = useRef(0)       // throttle: ms timestamp of last row-count update
   const [running, setRunning]   = useState(false)
   const [progress, setProgress] = useState(null)
   const [results, setResults]   = useState(null)
@@ -343,7 +352,13 @@ export default function Migration({ connection, session }) {
             }
 
             loadedRows += batchRows.length
-            setProgress(p => ({ ...p, rows: loadedRows }))
+            // Throttle row-count re-renders to 500 ms; always update on the last page batch.
+            const isLastBatch = pageOffset + PARALLEL_R >= pages
+            const now = Date.now()
+            if (isLastBatch || now - lastProgressUpdateRef.current >= 500) {
+              lastProgressUpdateRef.current = now
+              setProgress(p => ({ ...p, rows: loadedRows }))
+            }
           }
 
           if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
@@ -352,15 +367,23 @@ export default function Migration({ connection, session }) {
           await commitTransaction(connection, session, txId)
 
           setProgress(p => ({ ...p, phase: 'messages' }))
-          const messages = await readMessages(connection, session, mdt, txId)
+          // GetExportResult: server-side aggregate counts (best-effort, null if unsupported)
+          const exportResult = await getExportResult(connection, session, txId)
+          const serverTotal  = parseCount(exportResult?.TotalCount   ?? exportResult?.RecordsTotal)
+          const serverOk     = parseCount(exportResult?.SuccessCount ?? exportResult?.RecordsSuccessful)
+          const serverErrors = parseCount(exportResult?.ErrorCount   ?? exportResult?.RecordsError)
+
+          const messages  = await readMessages(connection, session, mdt, txId)
           const errorMsgs = messages.filter(m => ['E', 'A'].includes(m.Severity))
 
+          const resolvedErrors = serverErrors ?? errorMsgs.length
           allResults.push({
             mdt, txId,
-            status: errorMsgs.length > 0 ? 'error' : 'ok',
-            total: totalRows,
-            ok: totalRows - errorMsgs.length,
-            errors: errorMsgs.length,
+            status:   resolvedErrors > 0 ? 'error' : 'ok',
+            total:    serverTotal  ?? totalRows,
+            ok:       serverOk     ?? (totalRows - errorMsgs.length),
+            errors:   resolvedErrors,
+            messages: errorMsgs,   // kept for detail panel (Commit 5)
           })
         } catch (e) {
           if (e.isCancelled) {

@@ -155,6 +155,21 @@ export async function initiateParallelProcess(conn, session, transactionId) {
   return resp.json().catch(() => ({}))
 }
 
+// Step 3c (optional): retrieve aggregate import result (TotalCount, SuccessCount, ErrorCount).
+// Returns null when the endpoint is not available (4xx) so callers can fall back to readMessages.
+export async function getExportResult(conn, session, transactionId) {
+  const resp = await proxyCall({
+    connection: conn, session, com: COM,
+    path: `/GetExportResult?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
+  })
+  if (!resp.ok) {
+    if (resp.status >= 400 && resp.status < 500) return null
+    const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status)
+  }
+  const data = await resp.json().catch(() => ({}))
+  return data?.d ?? null
+}
+
 // Step 4: read per-row error/info messages after commit.
 export async function readMessages(conn, session, name, transactionId) {
   const filter = `TransactionID eq %27${encodeURIComponent(transactionId)}%27`
