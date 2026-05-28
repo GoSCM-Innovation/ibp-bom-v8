@@ -5,7 +5,7 @@ import { getSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog,
   fetchCount, readEntityPage,
-  getTransactionId, postTransChunk, commitTransaction, readMessages,
+  getTransactionId, initiateParallelProcess, postTransChunk, commitTransaction, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W,
 } from '../../services/masterDataApi'
 
@@ -282,6 +282,8 @@ export default function Migration({ connection, session }) {
             masterDataTypeId: mdt,
             planningArea: dstPa,
           })
+          // Best-effort: enable server-side parallel processing. Silently skipped if unsupported.
+          await initiateParallelProcess(connection, session, txId)
         } catch (e) {
           allResults.push({ mdt, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
           continue
@@ -323,7 +325,7 @@ export default function Migration({ connection, session }) {
               const writeBatch = chunks.slice(ci, ci + PARALLEL_W)
               await Promise.all(writeBatch.map((chunk, bi) =>
                 postTransChunk(connection, session, mdt, txId, chunk, {
-                  deleteEntries: deleteEntries && di === 0 && pageOffset === 0 && ci === 0 && bi === 0,
+                  deleteEntries: deleteEntries && pageOffset === 0 && ci === 0 && bi === 0,
                 })
               ))
             }

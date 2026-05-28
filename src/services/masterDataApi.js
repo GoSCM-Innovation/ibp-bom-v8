@@ -138,6 +138,23 @@ export async function commitTransaction(conn, session, transactionId) {
   return resp.json().catch(() => ({}))
 }
 
+// Step 3b (optional): enable server-side parallel processing for this transaction.
+// Call after GetTransactionID and before the first postTransChunk.
+// Returns null and does NOT throw when the endpoint is unsupported (HTTP 4xx) so callers
+// can treat it as a best-effort optimisation.
+export async function initiateParallelProcess(conn, session, transactionId) {
+  const resp = await proxyCall({
+    connection: conn, session, com: COM,
+    path: `/InitiateParallelProcess?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
+    method: 'POST',
+  })
+  if (!resp.ok) {
+    if (resp.status >= 400 && resp.status < 500) return null
+    const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status)
+  }
+  return resp.json().catch(() => ({}))
+}
+
 // Step 4: read per-row error/info messages after commit.
 export async function readMessages(conn, session, name, transactionId) {
   const filter = `TransactionID eq %27${encodeURIComponent(transactionId)}%27`
