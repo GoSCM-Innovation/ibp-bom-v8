@@ -99,6 +99,16 @@ function td(extra) {
   return { padding: '6px 8px', borderBottom: '1px solid var(--border)', ...extra }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Converts OData v2 date strings like /Date(1764247462000+0000)/ to locale format.
+function formatCell(val) {
+  if (typeof val !== 'string') return val ?? ''
+  const m = val.match(/^\/Date\((\d+)([+-]\d{4})?\)\/$/)
+  if (m) return new Date(parseInt(m[1], 10)).toLocaleString()
+  return val
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Migration({ connection, session }) {
@@ -1036,7 +1046,7 @@ export default function Migration({ connection, session }) {
                             <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'var(--bg)' }}>
                               {cols.map(c => (
                                 <td key={c} style={{ padding: '4px 10px', borderBottom: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'var(--mono)' }}>
-                                  {row[c] ?? ''}
+                                  {formatCell(row[c])}
                                 </td>
                               ))}
                             </tr>
