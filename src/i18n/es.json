@@ -591,5 +591,19 @@
   "mig.srcLoginErrNetwork": "No se pudo contactar el sistema origen.",
   "mig.histRows": "Filas",
   "mig.histStatus": "Estado",
-  "mig.histMdts": "Tipos"
+  "mig.histMdts": "Tipos",
+  "mig.errDetail": "▸ Ver errores ({n})",
+  "mig.errDetailHide": "▾ Ocultar detalle",
+  "mig.colMsgSev": "Sev.",
+  "mig.colMsgText": "Mensaje",
+  "mig.colMsgKey": "Clave de registro",
+  "mig.noErrDetail": "Sin detalle de mensajes disponible.",
+  "mig.refreshConns": "↺ Actualizar",
+  "mig.cancelConfirmTitle": "¿Detener migración?",
+  "mig.cancelConfirmMsg": "La transacción actual no se confirmará. Los datos ya enviados serán descartados.",
+  "mig.cancelConfirmStop": "Detener",
+  "mig.cancelConfirmBack": "Continuar",
+  "mig.baseWarning": "⚠ Versión Base seleccionada — puede haber tipos no listados",
+  "mig.extraMdtLabel": "Tipos adicionales (separados por coma)",
+  "mig.extraMdtPlaceholder": "MDT1, MDT2, …"
 }

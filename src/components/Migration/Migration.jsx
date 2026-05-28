@@ -162,6 +162,9 @@ export default function Migration({ connection, session }) {
   const [progress, setProgress] = useState(null)
   const [results, setResults]   = useState(null)
 
+  // ── Error detail expand ──
+  const [expandedMdt, setExpandedMdt] = useState(null)
+
   // ── Preview ──
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewData, setPreviewData]       = useState(null)
@@ -714,18 +717,68 @@ export default function Migration({ connection, session }) {
               </tr>
             </thead>
             <tbody>
-              {results.map(r => (
-                <tr key={r.mdt}>
-                  <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text)' })}>{r.mdt}</td>
-                  <td style={td({ fontWeight: 600, color: r.status === 'ok' ? 'var(--green)' : r.status === 'error' ? 'var(--red)' : 'var(--text3)' })}>
-                    {r.status === 'ok' ? t('mig.statusOk') : r.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled')}
-                  </td>
-                  <td style={td({ color: 'var(--text2)' })}>{(r.total || 0).toLocaleString()}</td>
-                  <td style={td({ color: 'var(--text2)' })}>{(r.ok || 0).toLocaleString()}</td>
-                  <td style={td({ color: r.errors > 0 ? 'var(--red)' : 'var(--text3)' })}>{(r.errors || 0).toLocaleString()}</td>
-                  <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text3)', fontSize: 10 })}>{r.txId || '—'}</td>
-                </tr>
-              ))}
+              {results.map(r => {
+                const isExpanded = expandedMdt === r.mdt
+                const detailMsgs = r.messages || []
+                const msgCols    = detailMsgs.length > 0
+                  ? Object.keys(detailMsgs[0]).filter(k => k !== '__metadata')
+                  : []
+                return (
+                  <>
+                    <tr key={r.mdt}>
+                      <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text)' })}>{r.mdt}</td>
+                      <td style={td({ fontWeight: 600, color: r.status === 'ok' ? 'var(--green)' : r.status === 'error' ? 'var(--red)' : 'var(--text3)' })}>
+                        {r.status === 'ok' ? t('mig.statusOk') : r.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled')}
+                      </td>
+                      <td style={td({ color: 'var(--text2)' })}>{(r.total || 0).toLocaleString()}</td>
+                      <td style={td({ color: 'var(--text2)' })}>{(r.ok || 0).toLocaleString()}</td>
+                      <td style={td({ color: r.errors > 0 ? 'var(--red)' : 'var(--text3)' })}>
+                        {r.errors > 0 ? (
+                          <button
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 11, fontWeight: 600, padding: 0 }}
+                            onClick={() => setExpandedMdt(isExpanded ? null : r.mdt)}
+                          >
+                            {isExpanded ? t('mig.errDetailHide') : t('mig.errDetail', { n: r.errors })}
+                          </button>
+                        ) : (r.errors || 0).toLocaleString()}
+                      </td>
+                      <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text3)', fontSize: 10 })}>{r.txId || '—'}</td>
+                    </tr>
+                    {isExpanded && (
+                      <tr key={`${r.mdt}-detail`}>
+                        <td colSpan={6} style={{ padding: '0 0 8px 24px', borderBottom: '1px solid var(--border)' }}>
+                          {detailMsgs.length === 0 ? (
+                            <div style={{ fontSize: 11, color: 'var(--text3)', padding: '6px 0' }}>{t('mig.noErrDetail')}</div>
+                          ) : (
+                            <div style={{ overflowX: 'auto' }}>
+                              <table style={{ borderCollapse: 'collapse', fontSize: 11, marginTop: 6 }}>
+                                <thead>
+                                  <tr>
+                                    {msgCols.map(c => (
+                                      <th key={c} style={{ ...TH, fontSize: 9 }}>{c}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {detailMsgs.map((msg, mi) => (
+                                    <tr key={mi}>
+                                      {msgCols.map(c => (
+                                        <td key={c} style={{ padding: '3px 8px', borderBottom: '1px solid var(--border)', color: msg.Severity === 'E' || msg.Severity === 'A' ? 'var(--red)' : 'var(--text2)', fontFamily: 'var(--mono)' }}>
+                                          {msg[c] ?? ''}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                )
+              })}
             </tbody>
           </table>
           {results.some(r => r.errorMsg) && (

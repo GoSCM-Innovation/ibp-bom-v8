@@ -591,5 +591,19 @@
   "mig.sectionOptions": "Options and actions",
   "mig.selectVersion": "Select version…",
   "mig.histDatasets": "Datasets",
-  "mig.previewLoading": "Loading preview…"
+  "mig.previewLoading": "Loading preview…",
+  "mig.errDetail": "▸ View errors ({n})",
+  "mig.errDetailHide": "▾ Hide detail",
+  "mig.colMsgSev": "Sev.",
+  "mig.colMsgText": "Message",
+  "mig.colMsgKey": "Record key",
+  "mig.noErrDetail": "No message detail available.",
+  "mig.refreshConns": "↺ Refresh",
+  "mig.cancelConfirmTitle": "Stop migration?",
+  "mig.cancelConfirmMsg": "The current transaction will not be committed. Data already sent will be discarded.",
+  "mig.cancelConfirmStop": "Stop",
+  "mig.cancelConfirmBack": "Continue",
+  "mig.baseWarning": "⚠ Base version selected — some types may not be listed",
+  "mig.extraMdtLabel": "Additional types (comma-separated)",
+  "mig.extraMdtPlaceholder": "MDT1, MDT2, …"
 }
