@@ -7,6 +7,7 @@ import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
 import Metering from '../Metering/Metering'
 import Orchestrations from '../Orchestrations/Orchestrations'
+import Migration from '../Migration/Migration'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getSapSystemUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
@@ -14,9 +15,10 @@ import { connDisplayName } from '../../utils/connDisplayName'
 export default function SystemView({ connection, session, onLogout }) {
   const { t } = useI18n()
   const isMobile = useIsMobile()
-  const has0326    = !!(connection.com0326?.url    && connection.com0326?.user)
-  const has0068    = !!(connection.com0068?.url    && connection.com0068?.user)
+  const has0326    = !!(connection.com0326?.url && connection.com0326?.user)
+  const has0068    = !!(connection.com0068?.url && connection.com0068?.user)
   const hasMetering = !!(connection.com0924?.url && connection.com0924?.user)
+  const has0720    = !!(connection.com0720?.url && connection.com0720?.user)
 
   const APPS = [
     ...(has0326 ? [
@@ -30,6 +32,9 @@ export default function SystemView({ connection, session, onLogout }) {
     ] : []),
     ...(hasMetering ? [
       { id: 'metering', label: t('system.tabMetering') },
+    ] : []),
+    ...(has0720 ? [
+      { id: 'migration', label: t('system.tabMigration') },
     ] : []),
   ]
 
@@ -109,6 +114,7 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'orquestador'  && <Orchestrations connection={connection} session={session} />}
         {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
         {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
+        {activeApp === 'migration'    && <Migration      connection={connection} session={session} />}
       </div>
     </div>
   )

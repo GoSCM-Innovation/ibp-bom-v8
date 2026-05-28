@@ -90,6 +90,8 @@
   "form.agree0068Subtitle": "Resource Stats",
   "form.agree0924Title": "SAP_COM_0924 — Metering Activity",
   "form.agree0924Subtitle": "Telemetry · Adoption · Excel Add-In · Dashboards (optional)",
+  "form.agree0720Title": "SAP_COM_0720 — Master Data Integration",
+  "form.agree0720Subtitle": "Master data migration between systems and planning areas",
   "form.agreeUrlLabel": "API URL",
 
   "login.title": "Sign in",
@@ -305,6 +307,7 @@
   "system.tabOrch": "Orchestrator",
   "system.tabStats": "Resource Stats",
   "system.tabMetering": "Telemetry",
+  "system.tabMigration": "Migration",
 
   "logs.toggle": "View technical logs",
   "logs.colTime": "Time",

@@ -3,12 +3,13 @@ import ConnectionAvatar from './ConnectionAvatar'
 import { useI18n } from '../../context/I18nContext'
 import { connDisplayName } from '../../utils/connDisplayName'
 
-const ALL_AGREEMENTS = ['com0326', 'com0068', 'com0924']
+const ALL_AGREEMENTS = ['com0326', 'com0068', 'com0924', 'com0720']
 
 const COM_META = {
   com0326: { name: 'SAP_COM_0326', desc: 'Application Jobs' },
   com0068: { name: 'SAP_COM_0068', desc: 'Resource Stats' },
   com0924: { name: 'SAP_COM_0924', desc: 'Metering Activity' },
+  com0720: { name: 'SAP_COM_0720', desc: 'Master Data' },
 }
 
 async function verifyCredentials(conn, comKey, userCred) {
