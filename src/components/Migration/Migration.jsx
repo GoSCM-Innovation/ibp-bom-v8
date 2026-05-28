@@ -342,7 +342,7 @@ export default function Migration({ connection, session }) {
 
         // Best-effort: enable server-side parallel processing.
         // Isolated from the main try-catch — a timeout or 4xx here must NOT abort the migration.
-        try { await initiateParallelProcess(connection, session, txId) } catch { /* ignore */ }
+        try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: mdt }) } catch { /* ignore */ }
 
         setProgress(p => ({ ...p, totalRows }))
 
@@ -381,6 +381,8 @@ export default function Migration({ connection, session }) {
               await Promise.all(writeBatch.map((chunk, bi) =>
                 postTransChunk(connection, session, mdt, txId, chunk, {
                   deleteEntries: deleteEntries && pageOffset === 0 && ci === 0 && bi === 0,
+                  planningArea: dstPa,
+                  versionId: dstVersion,
                 })
               ))
             }

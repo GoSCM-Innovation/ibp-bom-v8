@@ -116,14 +116,27 @@ export async function getTransactionId(conn, session, { transactionName, version
 // So when deleteEntries is requested we send TWO calls:
 //   1. DeleteEntries=true  + empty Nav* → stages the delete
 //   2. DeleteEntries=false + actual rows → stages the insert
-export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false } = {}) {
+//
+// planningArea + versionId must be top-level fields in the POST body to tell
+// SAP IBP which version to write to (per official API documentation).
+// Omitting them causes SAP IBP to default to __BASELINE regardless of the
+// VersionID passed to GetTransactionID.
+export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false, planningArea, versionId } = {}) {
   const cleanRows = stripReadonlyFields(rows)
   const attrs = cleanRows.length ? Object.keys(cleanRows[0]).join(',') : ''
+
+  // Version context: include PlanningAreaID + VersionID only when provided.
+  // Omitting VersionID (or passing __BASELINE) writes to the base version.
+  const versionCtx = {
+    ...(planningArea ? { PlanningAreaID: planningArea } : {}),
+    ...(versionId    ? { VersionID:      versionId    } : {}),
+  }
 
   if (deleteEntries) {
     // Phase 1: stage delete-only (empty rows)
     const deleteBody = {
       TransactionID:       transactionId,
+      ...versionCtx,
       DoCommit:            false,
       DeleteEntries:       true,
       RequestedAttributes: attrs,
@@ -139,6 +152,7 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
   // Phase 2: stage the actual rows (always, even after delete)
   const body = {
     TransactionID:       transactionId,
+    ...versionCtx,
     DoCommit:            false,
     DeleteEntries:       false,
     RequestedAttributes: attrs,
@@ -167,10 +181,17 @@ export async function commitTransaction(conn, session, transactionId) {
 // Call after GetTransactionID and before the first postTransChunk.
 // Returns null and does NOT throw when the endpoint is unsupported (HTTP 4xx) so callers
 // can treat it as a best-effort optimisation.
-export async function initiateParallelProcess(conn, session, transactionId) {
+// masterDataTypeId is required by the API; planningArea + versionId are optional
+// but needed for version-specific parallel imports (per SAP documentation).
+export async function initiateParallelProcess(conn, session, transactionId, { planningArea, versionId, masterDataTypeId } = {}) {
+  const enc = v => `%27${encodeURIComponent(v)}%27`
+  let path = `/InitiateParallelProcess?P_TransactionID=${enc(transactionId)}`
+  if (masterDataTypeId) path += `&P_MasterDataTypeID=${enc(masterDataTypeId)}`
+  if (planningArea)     path += `&P_PlanningAreaID=${enc(planningArea)}`
+  if (versionId)        path += `&P_VersionID=${enc(versionId)}`
   const resp = await proxyCall({
     connection: conn, session, com: COM,
-    path: `/InitiateParallelProcess?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
+    path,
     method: 'POST',
   })
   if (!resp.ok) {
