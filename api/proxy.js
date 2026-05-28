@@ -54,9 +54,11 @@ export default async function handler(req, res) {
       let detail = text.substring(0, 800)
       try {
         const j = JSON.parse(text)
-        const msg = j?.error?.message?.value ?? j?.error?.message
+        // SAP can return message as a plain string OR as { lang, value }
+        const rawMsg = j?.error?.message
+        const msg = typeof rawMsg === 'string' ? rawMsg : (rawMsg?.value ?? null)
         const code = j?.error?.code
-        if (msg) detail = code ? `[${code}] ${msg}` : msg
+        if (msg != null) detail = String(code ? `[${code}] ${msg}` : msg)
       } catch {
         // XML: extraer <code> y <message>
         const code = text.match(/<code>([^<]*)<\/code>/)?.[1]

@@ -22,7 +22,7 @@ export async function fetchVsmt(conn, session) {
     path: '/VersionSpecificMasterDataTypes?$format=json' +
           '&$select=PlanningAreaID,VersionID,MasterDataTypeID,PlanningAreaDescr,VersionName',
   })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status) }
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data  = await resp.json()
   const rows  = data?.d?.results ?? []
 
@@ -62,7 +62,7 @@ export async function fetchCount(conn, session, name, { planningArea, versionId 
   let path = `/${name}?$format=json&$top=0&$inlinecount=allpages`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
   const resp = await proxyCall({ connection: conn, session, com: COM, path })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status) }
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data = await resp.json()
   return parseInt(data?.d?.__count ?? '0', 10)
 }
@@ -74,7 +74,7 @@ export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE
   let path = `/${name}?$format=json&$top=${top}&$skip=${skip}`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
   const resp = await proxyCall({ connection: conn, session, com: COM, path })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status) }
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data = await resp.json()
   return (data?.d?.results ?? []).map(stripMeta)
 }
@@ -101,7 +101,7 @@ export async function getTransactionId(conn, session, { transactionName, version
 
   // GetTransactionID can take 60+ seconds on some IBP tenants — pass an explicit 90 s timeout.
   const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}`, timeout: 90000 })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status) }
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data = await resp.json()
   const txId = data?.d?.Value
   if (!txId) throw new Error('GetTransactionID did not return a TransactionID')
@@ -133,7 +133,7 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
       connection: conn, session, com: COM,
       path: `/${name}Trans`, method: 'POST', body: deleteBody,
     })
-    if (!delResp.ok) { const e = await delResp.json().catch(() => ({})); throw new Error(e.detail || e.error || delResp.status) }
+    if (!delResp.ok) { const e = await delResp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || delResp.status)) }
   }
 
   // Phase 2: stage the actual rows (always, even after delete)
@@ -148,7 +148,7 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
     connection: conn, session, com: COM,
     path: `/${name}Trans`, method: 'POST', body,
   })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status) }
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   return resp.json().catch(() => ({}))
 }
 
@@ -159,7 +159,7 @@ export async function commitTransaction(conn, session, transactionId) {
     path: `/Commit?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
     method: 'POST',
   })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status) }
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   return resp.json().catch(() => ({}))
 }
 
@@ -175,7 +175,7 @@ export async function initiateParallelProcess(conn, session, transactionId) {
   })
   if (!resp.ok) {
     if (resp.status >= 400 && resp.status < 500) return null
-    const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status)
+    const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status))
   }
   return resp.json().catch(() => ({}))
 }
@@ -189,7 +189,7 @@ export async function getExportResult(conn, session, transactionId) {
   })
   if (!resp.ok) {
     if (resp.status >= 400 && resp.status < 500) return null
-    const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || resp.status)
+    const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status))
   }
   const data = await resp.json().catch(() => ({}))
   return data?.d ?? null
