@@ -23,7 +23,11 @@ export default async function handler(req, res) {
     let sessionCookies = ''
     if (method !== 'GET') {
       const csrfUrl = serviceRoot || url.split('?')[0]
-      const csrfResp = await fetch(csrfUrl, { method: 'GET', headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' } })
+      const csrfResp = await fetch(csrfUrl, {
+        method: 'GET',
+        headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' },
+        signal: AbortSignal.timeout(9000),
+      })
       csrfToken = csrfResp.headers.get('x-csrf-token')
       const setCookies = csrfResp.headers.getSetCookie?.() ?? []
       if (setCookies.length > 0) {
@@ -38,6 +42,7 @@ export default async function handler(req, res) {
         ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
         ...(sessionCookies ? { 'Cookie': sessionCookies } : {}),
       },
+      signal: AbortSignal.timeout(9000),
     }
     if (body && method !== 'GET') opts.body = JSON.stringify(body)
 

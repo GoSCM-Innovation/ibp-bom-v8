@@ -6,19 +6,22 @@ import { connDisplayName } from '../../utils/connDisplayName'
 const ALL_AGREEMENTS = ['com0326', 'com0068', 'com0924', 'com0720']
 
 const COM_META = {
-  com0326: { name: 'SAP_COM_0326', desc: 'Application Jobs' },
-  com0068: { name: 'SAP_COM_0068', desc: 'Resource Stats' },
-  com0924: { name: 'SAP_COM_0924', desc: 'Metering Activity' },
-  com0720: { name: 'SAP_COM_0720', desc: 'Master Data' },
+  com0326: { name: 'SAP_COM_0326', desc: 'Application Jobs',   verifyPath: '/$metadata' },
+  com0068: { name: 'SAP_COM_0068', desc: 'Resource Stats',     verifyPath: '/$metadata' },
+  com0924: { name: 'SAP_COM_0924', desc: 'Metering Activity',  verifyPath: '/$metadata' },
+  // MASTER_DATA_API_SRV/$metadata is ~4.8 MB — exceeds Vercel's response limit.
+  // Use a minimal entity query instead (returns 20 bytes, same 401 on bad creds).
+  com0720: { name: 'SAP_COM_0720', desc: 'Master Data',        verifyPath: '/VersionSpecificMasterDataTypes?$format=json&$top=0' },
 }
 
 async function verifyCredentials(conn, comKey, userCred) {
-  const serviceRoot = conn[comKey]?.url || ''
+  const serviceRoot  = conn[comKey]?.url || ''
+  const verifyPath   = COM_META[comKey]?.verifyPath ?? '/$metadata'
   const resp = await fetch('/api/proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      url: serviceRoot + '/$metadata',
+      url: serviceRoot + verifyPath,
       serviceRoot,
       user: userCred.user,
       password: userCred.password,

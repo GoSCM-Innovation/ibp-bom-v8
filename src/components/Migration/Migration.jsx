@@ -240,11 +240,13 @@ export default function Migration({ connection, session }) {
     setSrcLoginError('')
     try {
       const serviceRoot = srcConn.com0720.url
+      // Use a lightweight endpoint — MASTER_DATA_API_SRV/$metadata is ~4.8 MB
+      // and exceeds Vercel's serverless response limit causing a silent hang.
       const resp = await fetch('/api/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: serviceRoot + '/$metadata',
+          url: serviceRoot + '/VersionSpecificMasterDataTypes?$format=json&$top=0',
           serviceRoot,
           user: srcLoginForm.user,
           password: srcLoginForm.password,
