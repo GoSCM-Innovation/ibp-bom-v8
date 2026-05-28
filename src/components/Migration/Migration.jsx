@@ -103,10 +103,13 @@ function td(extra) {
 export default function Migration({ connection, session }) {
   const { t } = useI18n()
 
+  // Refresh trigger — increment to force allConns/connById to re-read localStorage
+  const [connsTick, setConnsTick] = useState(0)
+
   // Other connections with SAP_COM_0720 (potential sources)
   const allConns = useMemo(() =>
     getAll().filter(c => c.id !== connection.id && c.com0720?.url && c.com0720?.user),
-    [connection.id]
+    [connection.id, connsTick] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   // All connections by ID — for resolving names in history even after rename
@@ -114,7 +117,7 @@ export default function Migration({ connection, session }) {
     const m = {}
     getAll().forEach(c => { m[c.id] = c })
     return m
-  }, [])
+  }, [connsTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Source state ──
   const [srcConnId, setSrcConnId]     = useState(null)
@@ -172,6 +175,12 @@ export default function Migration({ connection, session }) {
   // ── Production confirmation ──
   const [showConfirm, setShowConfirm] = useState(false)
 
+  // ── Cancel confirmation (mid-run) ──
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+
+  // ── Extra MDTs (comma-separated, for types only in __BASE) ──
+  const [extraMdts, setExtraMdts] = useState('')
+
   // ── History ──
   const [history, setHistory]         = useState(() => loadHistory(connection.id))
   const [showHistory, setShowHistory] = useState(false)
@@ -212,8 +221,10 @@ export default function Migration({ connection, session }) {
   const availableMdts = useMemo(() => {
     if (!srcPa || !dstPa) return []
     const dstSet = new Set(dstMdts)
-    return srcMdts.filter(m => dstSet.has(m))
-  }, [srcMdts, dstMdts, srcPa, dstPa])
+    const base  = srcMdts.filter(m => dstSet.has(m))
+    const extra = extraMdts.split(',').map(s => s.trim()).filter(s => s && !base.includes(s))
+    return [...new Set([...base, ...extra])].sort()
+  }, [srcMdts, dstMdts, srcPa, dstPa, extraMdts])
 
   const filteredMdts = useMemo(() =>
     availableMdts.filter(m => !mdtSearch || m.toLowerCase().includes(mdtSearch.toLowerCase())),
@@ -447,7 +458,16 @@ export default function Migration({ connection, session }) {
 
           {/* Source */}
           <div>
-            <label style={LABEL}>{t('mig.srcLabel')}</label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+              <label style={{ ...LABEL, marginBottom: 0 }}>{t('mig.srcLabel')}</label>
+              <button
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text3)', padding: '0 2px' }}
+                onClick={() => setConnsTick(n => n + 1)}
+                title={t('mig.refreshConns')}
+              >
+                {t('mig.refreshConns')}
+              </button>
+            </div>
 
             {allConns.length === 0 ? (
               <div style={{ fontSize: 12, color: 'var(--text3)', padding: '6px 0' }}>
@@ -613,6 +633,27 @@ export default function Migration({ connection, session }) {
             onChange={e => setMdtSearch(e.target.value)}
           />
 
+          {(!srcVersion || !dstVersion) && (
+            <div style={{
+              fontSize: 11, color: 'var(--yellow, #e6a817)',
+              background: 'color-mix(in srgb, var(--yellow, #e6a817) 10%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--yellow, #e6a817) 30%, transparent)',
+              borderRadius: 6, padding: '5px 10px', marginBottom: 10,
+            }}>
+              {t('mig.baseWarning')}
+            </div>
+          )}
+
+          <div style={{ marginBottom: 10 }}>
+            <label style={LABEL}>{t('mig.extraMdtLabel')}</label>
+            <input
+              style={INPUT}
+              placeholder={t('mig.extraMdtPlaceholder')}
+              value={extraMdts}
+              onChange={e => setExtraMdts(e.target.value)}
+            />
+          </div>
+
           {availableMdts.length === 0 ? (
             <div style={{ fontSize: 12, color: 'var(--text3)', padding: '6px 0' }}>
               {t('mig.mdtNoIntersection')}
@@ -664,7 +705,7 @@ export default function Migration({ connection, session }) {
       {srcPa && dstPa && (
         <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
           {running ? (
-            <button style={BTN_DANGER} onClick={() => { cancelledRef.current = true }}>
+            <button style={BTN_DANGER} onClick={() => setShowCancelConfirm(true)}>
               {t('mig.cancelBtn')}
             </button>
           ) : (
@@ -905,6 +946,39 @@ export default function Migration({ connection, session }) {
                 })()}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Cancel confirmation modal ── */}
+      {showCancelConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1001,
+          background: 'var(--overlay)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'var(--bg2)', border: '1px solid var(--border2)',
+            borderRadius: 12, padding: 28, width: 400, maxWidth: '90vw',
+            boxShadow: 'var(--shadow-lg)',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>
+              {t('mig.cancelConfirmTitle')}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 22 }}>
+              {t('mig.cancelConfirmMsg')}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button style={BTN_SEC} onClick={() => setShowCancelConfirm(false)}>
+                {t('mig.cancelConfirmBack')}
+              </button>
+              <button
+                style={{ ...btnPrimary(false), background: 'var(--red)', color: '#fff' }}
+                onClick={() => { cancelledRef.current = true; setShowCancelConfirm(false) }}
+              >
+                {t('mig.cancelConfirmStop')}
+              </button>
+            </div>
           </div>
         </div>
       )}
