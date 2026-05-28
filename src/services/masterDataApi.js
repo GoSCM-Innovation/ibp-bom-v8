@@ -112,13 +112,14 @@ export async function getTransactionId(conn, session, { transactionName, version
 // deleteEntries=true should only be set on the FIRST chunk of a migration run
 // to clear existing destination data before loading.
 export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false } = {}) {
-  const attrs = rows.length ? Object.keys(rows[0]).join(',') : ''
+  const cleanRows = stripReadonlyFields(rows)
+  const attrs = cleanRows.length ? Object.keys(cleanRows[0]).join(',') : ''
   const body  = {
     TransactionID:       transactionId,
     DoCommit:            false,
     DeleteEntries:       deleteEntries,
     RequestedAttributes: attrs,
-    [`Nav${name}`]:      { results: rows },
+    [`Nav${name}`]:      { results: cleanRows },
   }
   const resp = await proxyCall({
     connection: conn, session, com: COM,
@@ -182,6 +183,22 @@ export async function readMessages(conn, session, name, transactionId) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Fields that SAP IBP returns on GET but rejects on POST via the *Trans endpoint.
+// PlanningAreaID / VersionID are already encoded in the TransactionID context.
+// CREATEDDATE / LASTMODIFIEDDATE are server-managed audit fields.
+const READONLY_FIELDS = new Set([
+  'PlanningAreaID', 'VersionID',
+  'CREATEDDATE', 'LASTMODIFIEDDATE',
+])
+
+function stripReadonlyFields(rows) {
+  return rows.map(row => {
+    const clean = { ...row }
+    READONLY_FIELDS.forEach(k => delete clean[k])
+    return clean
+  })
+}
 
 function buildFilter(planningArea, versionId) {
   const esc  = v => v.replace(/'/g, "''")  // OData: single quote → doubled
