@@ -163,7 +163,11 @@ export default function Migration({ connection, session }) {
 
   // ── MDT selection & order ──
   const [mdtSearch, setMdtSearch] = useState('')
-  const [mdtOrder, setMdtOrder]   = useState([])   // ordered array; replaces selectedMdts Set
+  const [mdtOrder, setMdtOrder]   = useState([])   // ordered array of SOURCE mdt names
+  // Source→destination table mapping for tables named differently across systems.
+  // Empty in phase 1 (destination = source); populated by the pairing UI in phase 2.
+  const [mdtMapping, setMdtMapping] = useState({})  // { [srcName]: dstName }
+  const dstNameFor = src => mdtMapping[src] || src
 
   // ── Drag-and-drop (order panel) ──
   const dragId  = useRef(null)
@@ -347,18 +351,19 @@ export default function Migration({ connection, session }) {
   async function analyzeFields() {
     const clean = arr => (arr ? arr.filter(f => !READONLY_FIELDS.has(f)) : null)
     const byMdt = {}
-    for (const mdt of mdtOrder) {
+    for (const srcName of mdtOrder) {
+      const dstName = mdtMapping[srcName] || srcName
       let srcFields = null, dstFields = null
-      try { srcFields = await fetchFieldNames(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion }) } catch { /* ignore */ }
-      try { dstFields = await fetchFieldNames(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion }) } catch { /* ignore */ }
+      try { srcFields = await fetchFieldNames(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion }) } catch { /* ignore */ }
+      try { dstFields = await fetchFieldNames(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion }) } catch { /* ignore */ }
       const s = clean(srcFields), d = clean(dstFields)
       if (!s || !d) {
         // Couldn't infer schema on one side (empty entity) → send all source fields.
-        byMdt[mdt] = { verifiable: false, common: null, omitted: [], unfilled: [] }
+        byMdt[srcName] = { verifiable: false, common: null, omitted: [], unfilled: [] }
         continue
       }
       const dSet = new Set(d), sSet = new Set(s)
-      byMdt[mdt] = {
+      byMdt[srcName] = {
         verifiable: true,
         common:   s.filter(f => dSet.has(f)),
         omitted:  s.filter(f => !dSet.has(f)),   // only in source → dropped
@@ -409,23 +414,25 @@ export default function Migration({ connection, session }) {
     try {
       for (let di = 0; di < mdtList.length; di++) {
         if (cancelledRef.current) break
-        const mdt = mdtList[di]
+        const srcName = mdtList[di]
+        const dstName = mdtMapping[srcName] || srcName
+        const label   = srcName === dstName ? srcName : `${srcName} → ${dstName}`
 
-        setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: mdt, rows: 0, totalRows: 0, phase: 'reading' })
+        setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading' })
 
         let totalRows = 0
         let dstBefore = null
 
         try {
-          totalRows = await fetchCount(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion, signal })
+          totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal })
         } catch (e) {
-          allResults.push({ mdt, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
+          allResults.push({ mdt: srcName, dstName, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
           continue
         }
 
         // Count destination rows in the TARGET version BEFORE writing (verification baseline).
         try {
-          dstBefore = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID, signal })
+          dstBefore = await fetchCount(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID, signal })
         } catch { /* ignore */ }
 
         let txId = null
@@ -435,16 +442,16 @@ export default function Migration({ connection, session }) {
           // delete runs as a separate committed transaction before the load.
           if (deleteEntries) {
             setProgress(p => ({ ...p, phase: 'deleting' }))
-            const { keyNames, rows: keyRows } = await readKeyRows(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion, signal })
+            const { keyNames, rows: keyRows } = await readKeyRows(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion, signal })
             if (keyRows.length > 0 && keyNames.length > 0) {
               const txDel = await getTransactionId(connection, session, {
                 transactionName: 'ibp-bom-migration-del',
                 versionId: dstVersion || BASE_VERSION_ID,
-                masterDataTypeId: mdt, planningArea: dstPa, signal,
+                masterDataTypeId: dstName, planningArea: dstPa, signal,
               })
               for (let c = 0; c < keyRows.length; c += CHUNK_SIZE) {
                 if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                await postTransChunk(connection, session, mdt, txDel, keyRows.slice(c, c + CHUNK_SIZE), {
+                await postTransChunk(connection, session, dstName, txDel, keyRows.slice(c, c + CHUNK_SIZE), {
                   deleteEntries: true, planningArea: dstPa, versionId: dstVersion, signal,
                 })
               }
@@ -459,11 +466,11 @@ export default function Migration({ connection, session }) {
           txId = await getTransactionId(connection, session, {
             transactionName: 'ibp-bom-migration',
             versionId: dstVersion || BASE_VERSION_ID,
-            masterDataTypeId: mdt, planningArea: dstPa, signal,
+            masterDataTypeId: dstName, planningArea: dstPa, signal,
           })
 
           // Best-effort: enable server-side parallel processing (must not abort the run).
-          try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: mdt, signal }) } catch { /* ignore */ }
+          try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
 
           setProgress(p => ({ ...p, totalRows }))
           const pages = Math.ceil(totalRows / PAGE_SIZE) || 1
@@ -472,10 +479,10 @@ export default function Migration({ connection, session }) {
           for (let pageOffset = 0; pageOffset < pages; pageOffset += PARALLEL_R) {
             if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
-            // Read up to PARALLEL_R pages simultaneously
+            // Read up to PARALLEL_R pages simultaneously (from the SOURCE table)
             const batchPageCount = Math.min(PARALLEL_R, pages - pageOffset)
             const readBatch = Array.from({ length: batchPageCount }, (_, i) =>
-              readEntityPage(srcConn, srcSession, mdt, {
+              readEntityPage(srcConn, srcSession, srcName, {
                 skip: (pageOffset + i) * PAGE_SIZE,
                 top: PAGE_SIZE,
                 planningArea: srcPa,
@@ -490,7 +497,7 @@ export default function Migration({ connection, session }) {
 
             // Project to common fields (field mapping A): drop fields the destination
             // doesn't have, so SAP won't reject the POST with "Property X is invalid".
-            const projected = batchRows.map(r => projectRow(mdt, r))
+            const projected = batchRows.map(r => projectRow(srcName, r))
 
             // Split into CHUNK_SIZE chunks, write PARALLEL_W at a time
             const chunks = []
@@ -503,7 +510,7 @@ export default function Migration({ connection, session }) {
               if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
               const writeBatch = chunks.slice(ci, ci + PARALLEL_W)
               await Promise.all(writeBatch.map(chunk =>
-                postTransChunk(connection, session, mdt, txId, chunk, {
+                postTransChunk(connection, session, dstName, txId, chunk, {
                   deleteEntries: false,
                   planningArea: dstPa,
                   versionId: dstVersion,
@@ -533,7 +540,7 @@ export default function Migration({ connection, session }) {
           const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: 60000, signal })
 
           setProgress(p => ({ ...p, phase: 'messages' }))
-          const messages  = await readMessages(connection, session, mdt, txId, { signal })
+          const messages  = await readMessages(connection, session, dstName, txId, { signal })
           const errorMsgs = messages.filter(m => ['E', 'A'].includes(m.Severity))
 
           // Count destination AFTER processing. If the status wasn't confirmed
@@ -543,13 +550,13 @@ export default function Migration({ connection, session }) {
           for (let a = 0; a < attempts; a++) {
             if (a > 0) await new Promise(r => setTimeout(r, 2500))
             try {
-              dstAfter = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID, signal })
+              dstAfter = await fetchCount(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID, signal })
             } catch { dstAfter = null }
             if (dstAfter != null) break
           }
 
           allResults.push({
-            mdt, txId,
+            mdt: srcName, dstName, txId,
             status:   errorMsgs.length > 0 ? 'error' : 'ok',
             total:    totalRows,
             ok:       totalRows - errorMsgs.length,
@@ -560,10 +567,10 @@ export default function Migration({ connection, session }) {
         } catch (e) {
           // Cancellation: explicit flag, an aborted request, or the cancel ref set.
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
-            allResults.push({ mdt, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
+            allResults.push({ mdt: srcName, dstName, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
             break
           }
-          allResults.push({ mdt, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: e.message, dstBefore, dstAfter: null })
+          allResults.push({ mdt: srcName, dstName, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: e.message, dstBefore, dstAfter: null })
         }
       }
     } finally {
@@ -587,7 +594,7 @@ export default function Migration({ connection, session }) {
       saveHistory(connection.id, updated)
       setHistory(updated)
     }
-  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, deleteEntries, connection, session])
+  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, mdtMapping, deleteEntries, connection, session])
 
   // ── Derived ──
   const canMigrate = !running && !!srcConn && !!srcSession && !!srcPa && !!dstPa && mdtOrder.length > 0
