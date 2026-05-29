@@ -606,8 +606,6 @@
   "mig.cancelConfirmStop": "Stop",
   "mig.cancelConfirmBack": "Continue",
   "mig.baseWarning": "⚠ Base version selected — some types may not be listed",
-  "mig.extraMdtLabel": "Additional types (comma-separated)",
-  "mig.extraMdtPlaceholder": "MDT1, MDT2, …",
   "mig.orderTitle": "Migration order",
   "mig.colDst": "Destination (before→after)",
   "mig.versionIndepWarning": "⚠ These types are not version-specific in the destination version and will be written to the base version: {mdts}"

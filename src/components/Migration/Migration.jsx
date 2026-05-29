@@ -191,9 +191,6 @@ export default function Migration({ connection, session }) {
   // ── Cancel confirmation (mid-run) ──
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
 
-  // ── Extra MDTs (comma-separated, for types only in __BASE) ──
-  const [extraMdts, setExtraMdts] = useState('')
-
   // ── History ──
   const [history, setHistory]         = useState(() => loadHistory(connection.id))
   const [showHistory, setShowHistory] = useState(false)
@@ -240,20 +237,37 @@ export default function Migration({ connection, session }) {
   useEffect(() => { setDstPa(''); setDstVersion(''); setMdtOrder([]) }, [dstCatalog])
   useEffect(() => { setMdtOrder([]) }, [srcPa, srcVersion, dstPa, dstVersion])
 
-  // ── Available MDTs (intersection) ──
+  // Every MDT that appears in SOME version of either catalog (i.e. version-specific).
+  // Used to detect version-independent MDTs (importable but absent from any VSMT).
+  const versionedMdts = useMemo(() => {
+    const s = new Set()
+    for (const cat of [srcCatalog, dstCatalog]) {
+      if (!cat) continue
+      for (const pa of Object.values(cat)) {
+        for (const v of pa.versions) v.mdts.forEach(m => s.add(m))
+      }
+    }
+    return s
+  }, [srcCatalog, dstCatalog])
+
+  // ── Available MDTs ──
   const srcMdts = useMemo(() => getMdts(srcCatalog, srcPa, srcVersion), [srcCatalog, srcPa, srcVersion])
   const dstMdts = useMemo(() => getMdts(dstCatalog, dstPa, dstVersion), [dstCatalog, dstPa, dstVersion])
   const availableMdts = useMemo(() => {
     if (!srcPa || !dstPa) return []
+    // Version-specific: MDTs shared by source and destination for the chosen PA/version.
     const dstSet = new Set(dstMdts)
-    const base  = srcMdts.filter(m => dstSet.has(m))
-    const extra = extraMdts.split(',').map(s => s.trim()).filter(s => s && !base.includes(s))
-    let all = [...new Set([...base, ...extra])]
-    // Hide reference/virtual MDTs that cannot be imported (no <MDT>Trans).
-    // When importableSet hasn't loaded yet (null), show everything.
-    if (importableSet) all = all.filter(m => importableSet.has(m))
+    let all = srcMdts.filter(m => dstSet.has(m))
+    if (importableSet) {
+      // Add version-independent importables (in the service document but in no VSMT) —
+      // these are the "base-only" types the old manual field used to cover.
+      const versionIndependent = [...importableSet].filter(m => !versionedMdts.has(m))
+      all = [...new Set([...all, ...versionIndependent])]
+      // Hide reference/virtual MDTs that cannot be imported (no <MDT>Trans).
+      all = all.filter(m => importableSet.has(m))
+    }
     return all.sort()
-  }, [srcMdts, dstMdts, srcPa, dstPa, extraMdts, importableSet])
+  }, [srcMdts, dstMdts, srcPa, dstPa, importableSet, versionedMdts])
 
   const filteredMdts = useMemo(() =>
     availableMdts.filter(m => !mdtSearch || m.toLowerCase().includes(mdtSearch.toLowerCase())),
@@ -729,16 +743,6 @@ export default function Migration({ connection, session }) {
               {t('mig.baseWarning')}
             </div>
           )}
-
-          <div style={{ marginBottom: 10 }}>
-            <label style={LABEL}>{t('mig.extraMdtLabel')}</label>
-            <input
-              style={INPUT}
-              placeholder={t('mig.extraMdtPlaceholder')}
-              value={extraMdts}
-              onChange={e => setExtraMdts(e.target.value)}
-            />
-          </div>
 
           {availableMdts.length === 0 ? (
             <div style={{ fontSize: 12, color: 'var(--text3)', padding: '6px 0' }}>
