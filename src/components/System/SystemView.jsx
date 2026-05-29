@@ -11,6 +11,7 @@ import Migration from '../Migration/Migration'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getSapSystemUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
+import { confirmLeaveMigration } from '../../services/migrationGuard'
 
 export default function SystemView({ connection, session, onLogout }) {
   const { t } = useI18n()
@@ -39,6 +40,13 @@ export default function SystemView({ connection, session, onLogout }) {
   ]
 
   const [activeApp, setActiveApp] = useState(APPS[0]?.id || null)
+
+  // Switching sub-tab leaves the Migration view (unmount cancels the run) — confirm first.
+  function selectApp(id) {
+    if (id === activeApp) return
+    if (activeApp === 'migration' && !confirmLeaveMigration()) return
+    setActiveApp(id)
+  }
 
   const emptyStateLines = t('system.emptyState').split('\n')
 
@@ -87,7 +95,7 @@ export default function SystemView({ connection, session, onLogout }) {
           background: 'var(--bg2)', padding: isMobile ? '0 12px' : '0 24px', flexShrink: 0,
         }}>
           {APPS.map(app => (
-            <button key={app.id} onClick={() => setActiveApp(app.id)} style={{
+            <button key={app.id} onClick={() => selectApp(app.id)} style={{
               padding: isMobile ? '10px 14px' : '10px 20px',
               fontSize: 12, background: 'none', border: 'none',
               borderBottom: activeApp === app.id ? '2px solid var(--accent)' : '2px solid transparent',

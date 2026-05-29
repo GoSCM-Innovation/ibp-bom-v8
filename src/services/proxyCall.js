@@ -1,4 +1,4 @@
-export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout }) {
+export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout, signal }) {
   const comKey = `com${com}`
   const agreement = connection[comKey]
   const serviceRoot = agreement?.url || ''
@@ -22,5 +22,7 @@ export async function proxyCall({ connection, session, com = '0326', path, metho
       ...(body !== undefined && { body }),
       ...(timeout !== undefined && { timeout }),
     }),
+    // Caller-provided AbortSignal lets a cancelled migration cut requests in flight.
+    ...(signal ? { signal } : {}),
   })
 }

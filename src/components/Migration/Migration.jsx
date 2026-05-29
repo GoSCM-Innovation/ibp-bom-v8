@@ -10,6 +10,7 @@ import {
   commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID,
 } from '../../services/masterDataApi'
+import { setMigrationGuard } from '../../services/migrationGuard'
 
 // ── History persistence ───────────────────────────────────────────────────────
 
@@ -173,6 +174,7 @@ export default function Migration({ connection, session }) {
 
   // ── Run state ──
   const cancelledRef          = useRef(false)
+  const abortRef              = useRef(null)    // AbortController for the active run (cuts requests in flight)
   const lastProgressUpdateRef = useRef(0)       // throttle: ms timestamp of last row-count update
   const [running, setRunning]   = useState(false)
   const [progress, setProgress] = useState(null)
@@ -218,6 +220,24 @@ export default function Migration({ connection, session }) {
       .catch(()  => { if (alive) setImportableSet(null) })
     return () => { alive = false }
   }, [connection.id, session?.com0720?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Leave guard: warn before navigating away while a migration is running ──
+  // Tells the navigation guard (consulted by SystemView/App) that leaving will
+  // cancel the run. Also blocks browser reload/close via beforeunload.
+  useEffect(() => {
+    setMigrationGuard(running, t('mig.leaveWarning'))
+    return () => setMigrationGuard(false)
+  }, [running, t])
+
+  useEffect(() => {
+    if (!running) return
+    const handler = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [running])
+
+  // On unmount (e.g. user confirmed leaving the tab/connection), abort the run.
+  useEffect(() => () => { cancelledRef.current = true; abortRef.current?.abort() }, [])
 
   // ── Load source catalog when source + session become available ──
   useEffect(() => {
@@ -330,6 +350,8 @@ export default function Migration({ connection, session }) {
     setRunning(true)
     setResults(null)
     cancelledRef.current = false
+    abortRef.current = new AbortController()
+    const signal = abortRef.current.signal
 
     const mdtList = [...mdtOrder]
     const allResults = []
@@ -345,7 +367,7 @@ export default function Migration({ connection, session }) {
         let dstBefore = null
 
         try {
-          totalRows = await fetchCount(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion })
+          totalRows = await fetchCount(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion, signal })
         } catch (e) {
           allResults.push({ mdt, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
           continue
@@ -353,7 +375,7 @@ export default function Migration({ connection, session }) {
 
         // Count destination rows in the TARGET version BEFORE writing (verification baseline).
         try {
-          dstBefore = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID })
+          dstBefore = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID, signal })
         } catch { /* ignore */ }
 
         let txId = null
@@ -363,21 +385,21 @@ export default function Migration({ connection, session }) {
           // delete runs as a separate committed transaction before the load.
           if (deleteEntries) {
             setProgress(p => ({ ...p, phase: 'deleting' }))
-            const { keyNames, rows: keyRows } = await readKeyRows(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion })
+            const { keyNames, rows: keyRows } = await readKeyRows(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion, signal })
             if (keyRows.length > 0 && keyNames.length > 0) {
               const txDel = await getTransactionId(connection, session, {
                 transactionName: 'ibp-bom-migration-del',
                 versionId: dstVersion || BASE_VERSION_ID,
-                masterDataTypeId: mdt, planningArea: dstPa,
+                masterDataTypeId: mdt, planningArea: dstPa, signal,
               })
               for (let c = 0; c < keyRows.length; c += CHUNK_SIZE) {
                 if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                 await postTransChunk(connection, session, mdt, txDel, keyRows.slice(c, c + CHUNK_SIZE), {
-                  deleteEntries: true, planningArea: dstPa, versionId: dstVersion,
+                  deleteEntries: true, planningArea: dstPa, versionId: dstVersion, signal,
                 })
               }
-              await commitTransaction(connection, session, txDel)
-              await waitForProcessed(connection, session, txDel, { timeoutMs: 60000 })
+              await commitTransaction(connection, session, txDel, { signal })
+              await waitForProcessed(connection, session, txDel, { timeoutMs: 60000, signal })
             }
           }
 
@@ -387,11 +409,11 @@ export default function Migration({ connection, session }) {
           txId = await getTransactionId(connection, session, {
             transactionName: 'ibp-bom-migration',
             versionId: dstVersion || BASE_VERSION_ID,
-            masterDataTypeId: mdt, planningArea: dstPa,
+            masterDataTypeId: mdt, planningArea: dstPa, signal,
           })
 
           // Best-effort: enable server-side parallel processing (must not abort the run).
-          try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: mdt }) } catch { /* ignore */ }
+          try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: mdt, signal }) } catch { /* ignore */ }
 
           setProgress(p => ({ ...p, totalRows }))
           const pages = Math.ceil(totalRows / PAGE_SIZE) || 1
@@ -408,6 +430,7 @@ export default function Migration({ connection, session }) {
                 top: PAGE_SIZE,
                 planningArea: srcPa,
                 versionId: srcVersion,
+                signal,
               })
             )
             setProgress(p => ({ ...p, phase: 'reading' }))
@@ -430,6 +453,7 @@ export default function Migration({ connection, session }) {
                   deleteEntries: false,
                   planningArea: dstPa,
                   versionId: dstVersion,
+                  signal,
                 })
               ))
             }
@@ -447,15 +471,15 @@ export default function Migration({ connection, session }) {
           if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
           setProgress(p => ({ ...p, phase: 'committing' }))
-          await commitTransaction(connection, session, txId)
+          await commitTransaction(connection, session, txId, { signal })
 
           // SAP commits asynchronously — wait until it finishes applying before
           // reading messages or counting, otherwise we'd see stale data.
           setProgress(p => ({ ...p, phase: 'processing' }))
-          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: 60000 })
+          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: 60000, signal })
 
           setProgress(p => ({ ...p, phase: 'messages' }))
-          const messages  = await readMessages(connection, session, mdt, txId)
+          const messages  = await readMessages(connection, session, mdt, txId, { signal })
           const errorMsgs = messages.filter(m => ['E', 'A'].includes(m.Severity))
 
           // Count destination AFTER processing. If the status wasn't confirmed
@@ -465,7 +489,7 @@ export default function Migration({ connection, session }) {
           for (let a = 0; a < attempts; a++) {
             if (a > 0) await new Promise(r => setTimeout(r, 2500))
             try {
-              dstAfter = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID })
+              dstAfter = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID, signal })
             } catch { dstAfter = null }
             if (dstAfter != null) break
           }
@@ -480,7 +504,8 @@ export default function Migration({ connection, session }) {
             dstBefore, dstAfter,
           })
         } catch (e) {
-          if (e.isCancelled) {
+          // Cancellation: explicit flag, an aborted request, or the cancel ref set.
+          if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
             allResults.push({ mdt, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
             break
           }
@@ -1171,7 +1196,7 @@ export default function Migration({ connection, session }) {
               </button>
               <button
                 style={{ ...btnPrimary(false), background: 'var(--red)', color: '#fff' }}
-                onClick={() => { cancelledRef.current = true; setShowCancelConfirm(false) }}
+                onClick={() => { cancelledRef.current = true; abortRef.current?.abort(); setShowCancelConfirm(false) }}
               >
                 {t('mig.cancelConfirmStop')}
               </button>

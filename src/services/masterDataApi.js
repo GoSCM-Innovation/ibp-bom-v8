@@ -92,11 +92,11 @@ export function buildCatalog(vsmt) {
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
 // Returns total record count using $inlinecount (no extra $count endpoint needed).
-export async function fetchCount(conn, session, name, { planningArea, versionId } = {}) {
+export async function fetchCount(conn, session, name, { planningArea, versionId, signal } = {}) {
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=0&$inlinecount=allpages`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path })
+  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data = await resp.json()
   return parseInt(data?.d?.__count ?? '0', 10)
@@ -104,11 +104,11 @@ export async function fetchCount(conn, session, name, { planningArea, versionId 
 
 // Fetches one page of rows (2 000 by default). Uses explicit $skip — this tenant
 // never returns __next, so the caller drives pagination manually.
-export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE_SIZE, planningArea, versionId } = {}) {
+export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE_SIZE, planningArea, versionId, signal } = {}) {
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=${top}&$skip=${skip}`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path })
+  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data = await resp.json()
   return (data?.d?.results ?? []).map(stripMeta)
@@ -126,7 +126,7 @@ export async function previewEntity(conn, session, name, { planningArea, version
 // identifier for the base version in /IBP/MASTER_DATA_API_SRV.
 export const BASE_VERSION_ID = '__BASELINE'
 
-export async function getTransactionId(conn, session, { transactionName, versionId, masterDataTypeId, planningArea }) {
+export async function getTransactionId(conn, session, { transactionName, versionId, masterDataTypeId, planningArea, signal }) {
   const encStr = v => `%27${encodeURIComponent(v)}%27`
   const params = [
     `TransactionName=${encStr(transactionName || 'ibp-bom-migration')}`,
@@ -138,7 +138,7 @@ export async function getTransactionId(conn, session, { transactionName, version
   ].join('&')
 
   // GetTransactionID can take 60+ seconds on some IBP tenants — pass an explicit 90 s timeout.
-  const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}`, timeout: 90000 })
+  const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}`, timeout: 90000, signal })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data = await resp.json()
   const txId = data?.d?.Value
@@ -162,7 +162,7 @@ export async function getTransactionId(conn, session, { transactionName, version
 // SAP IBP which version to target (per official API documentation). Omitting
 // them makes SAP default to __BASELINE regardless of the GetTransactionID
 // VersionID.
-export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false, planningArea, versionId } = {}) {
+export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false, planningArea, versionId, signal } = {}) {
   const cleanRows = stripReadonlyFields(rows)
   const attrs = cleanRows.length ? Object.keys(cleanRows[0]).join(',') : ''
 
@@ -183,7 +183,7 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
   }
   const resp = await proxyCall({
     connection: conn, session, com: COM,
-    path: `/${name}Trans`, method: 'POST', body,
+    path: `/${name}Trans`, method: 'POST', body, signal,
   })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   return resp.json().catch(() => ({}))
@@ -192,11 +192,11 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
 // Reads ALL records for the given version and returns just their business-key
 // columns — used to stage deletes for a full-replace migration. Key field
 // names are discovered from the first record's __metadata.uri.
-export async function readKeyRows(conn, session, name, { planningArea, versionId } = {}) {
+export async function readKeyRows(conn, session, name, { planningArea, versionId, signal } = {}) {
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=${PAGE_SIZE}&$skip=0`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path })
+  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   const data  = await resp.json()
   const first = data?.d?.results ?? []
@@ -212,7 +212,7 @@ export async function readKeyRows(conn, session, name, { planningArea, versionId
   if (first.length === PAGE_SIZE) {
     let skip = PAGE_SIZE
     for (;;) {
-      const page = await readEntityPage(conn, session, name, { skip, top: PAGE_SIZE, planningArea, versionId })
+      const page = await readEntityPage(conn, session, name, { skip, top: PAGE_SIZE, planningArea, versionId, signal })
       rows.push(...page.map(pick))
       if (page.length < PAGE_SIZE) break
       skip += PAGE_SIZE
@@ -222,11 +222,11 @@ export async function readKeyRows(conn, session, name, { planningArea, versionId
 }
 
 // Step 3: commit — permanently saves all staged data for this TransactionID.
-export async function commitTransaction(conn, session, transactionId) {
+export async function commitTransaction(conn, session, transactionId, { signal } = {}) {
   const resp = await proxyCall({
     connection: conn, session, com: COM,
     path: `/Commit?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
-    method: 'POST',
+    method: 'POST', signal,
   })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   return resp.json().catch(() => ({}))
@@ -260,10 +260,11 @@ export async function initiateParallelProcess(conn, session, transactionId, { pl
 // of { Name, Value } pairs (e.g. [{ Name: 'Status', Value: 'PROCESSED' }]), which
 // this flattens into a plain object { Status: 'PROCESSED', ... }.
 // Returns null when the endpoint is not available (4xx).
-export async function getExportResult(conn, session, transactionId) {
+export async function getExportResult(conn, session, transactionId, { signal } = {}) {
   const resp = await proxyCall({
     connection: conn, session, com: COM,
     path: `/GetExportResult?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
+    signal,
   })
   if (!resp.ok) {
     if (resp.status >= 400 && resp.status < 500) return null
@@ -283,12 +284,13 @@ export async function getExportResult(conn, session, transactionId) {
 // being applied (GetExportResult Status = 'PROCESSING') and a read would return
 // stale data. Poll until Status is PROCESSED/ERROR or the timeout elapses.
 // Returns 'PROCESSED' | 'ERROR' | 'TIMEOUT' | 'UNSUPPORTED'.
-export async function waitForProcessed(conn, session, transactionId, { timeoutMs = 60000, intervalMs = 2000 } = {}) {
+export async function waitForProcessed(conn, session, transactionId, { timeoutMs = 60000, intervalMs = 2000, signal } = {}) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
+    if (signal?.aborted) return 'ABORTED'
     let res
-    try { res = await getExportResult(conn, session, transactionId) }
-    catch { res = undefined }                 // transient error — retry
+    try { res = await getExportResult(conn, session, transactionId, { signal }) }
+    catch (e) { if (e?.name === 'AbortError') return 'ABORTED'; res = undefined }  // transient — retry
     if (res === null) return 'UNSUPPORTED'     // 4xx — endpoint not available
     const status = res?.Status
     if (status === 'PROCESSED') return 'PROCESSED'
@@ -302,14 +304,14 @@ export async function waitForProcessed(conn, session, transactionId, { timeoutMs
 // Uses $expand=Nav<NAME> to pull the failing record's key/attribute values
 // alongside each message (per SAP documentation). Some tenants reject the
 // expand, so we fall back to the plain message read on failure.
-export async function readMessages(conn, session, name, transactionId) {
+export async function readMessages(conn, session, name, transactionId, { signal } = {}) {
   const filter   = `TransactionID eq %27${encodeURIComponent(transactionId)}%27`
   const basePath = `/${name}Message?$format=json&$filter=${filter}`
 
   // Attempt with expand first.
   const expResp = await proxyCall({
     connection: conn, session, com: COM,
-    path: `${basePath}&$expand=Nav${name}`,
+    path: `${basePath}&$expand=Nav${name}`, signal,
   })
   if (expResp.ok) {
     const data = await expResp.json().catch(() => ({}))
@@ -317,7 +319,7 @@ export async function readMessages(conn, session, name, transactionId) {
   }
 
   // Fallback: plain read without expand.
-  const resp = await proxyCall({ connection: conn, session, com: COM, path: basePath })
+  const resp = await proxyCall({ connection: conn, session, com: COM, path: basePath, signal })
   if (!resp.ok) return []
   const data = await resp.json().catch(() => ({}))
   return data?.d?.results ?? []

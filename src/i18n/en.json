@@ -607,6 +607,7 @@
   "mig.cancelConfirmBack": "Continue",
   "mig.baseWarning": "⚠ Base version selected — some types may not be listed",
   "mig.orderTitle": "Migration order",
+  "mig.leaveWarning": "A migration is in progress. Leaving this screen will cancel it. Continue?",
   "mig.colDst": "Destination (before→after)",
   "mig.versionIndepWarning": "⚠ These types are not version-specific in the destination version and will be written to the base version: {mdts}"
 }
