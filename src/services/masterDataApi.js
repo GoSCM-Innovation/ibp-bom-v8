@@ -87,12 +87,15 @@ export async function previewEntity(conn, session, name, { planningArea, version
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 // Step 1: obtain a TransactionID from SAP IBP.
-// If versionId is empty/null, omits the filter and IBP defaults to __BASE.
+// If versionId is empty/null, falls back to __BASELINE — the documented
+// identifier for the base version in /IBP/MASTER_DATA_API_SRV.
+export const BASE_VERSION_ID = '__BASELINE'
+
 export async function getTransactionId(conn, session, { transactionName, versionId, masterDataTypeId, planningArea }) {
   const encStr = v => `%27${encodeURIComponent(v)}%27`
   const params = [
     `TransactionName=${encStr(transactionName || 'ibp-bom-migration')}`,
-    `VersionID=${encStr(versionId || '__BASE')}`,
+    `VersionID=${encStr(versionId || BASE_VERSION_ID)}`,
     `TransactionID=${encStr('')}`,
     `MasterDataTypeID=${encStr(masterDataTypeId)}`,
     `PlanningArea=${encStr(planningArea)}`,
@@ -217,10 +220,25 @@ export async function getExportResult(conn, session, transactionId) {
 }
 
 // Step 4: read per-row error/info messages after commit.
+// Uses $expand=Nav<NAME> to pull the failing record's key/attribute values
+// alongside each message (per SAP documentation). Some tenants reject the
+// expand, so we fall back to the plain message read on failure.
 export async function readMessages(conn, session, name, transactionId) {
-  const filter = `TransactionID eq %27${encodeURIComponent(transactionId)}%27`
-  const path   = `/${name}Message?$format=json&$filter=${filter}`
-  const resp   = await proxyCall({ connection: conn, session, com: COM, path })
+  const filter   = `TransactionID eq %27${encodeURIComponent(transactionId)}%27`
+  const basePath = `/${name}Message?$format=json&$filter=${filter}`
+
+  // Attempt with expand first.
+  const expResp = await proxyCall({
+    connection: conn, session, com: COM,
+    path: `${basePath}&$expand=Nav${name}`,
+  })
+  if (expResp.ok) {
+    const data = await expResp.json().catch(() => ({}))
+    return data?.d?.results ?? []
+  }
+
+  // Fallback: plain read without expand.
+  const resp = await proxyCall({ connection: conn, session, com: COM, path: basePath })
   if (!resp.ok) return []
   const data = await resp.json().catch(() => ({}))
   return data?.d?.results ?? []

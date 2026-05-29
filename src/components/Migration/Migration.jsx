@@ -8,7 +8,7 @@ import {
   fetchCount, readEntityPage,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, getExportResult, readMessages,
-  PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W,
+  PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID,
 } from '../../services/masterDataApi'
 
 // Parse a count that may arrive as string or number; returns null if invalid.
@@ -247,6 +247,14 @@ export default function Migration({ connection, session }) {
     [availableMdts, mdtSearch]
   )
 
+  // Selected MDTs that are NOT version-specific in the destination version's VSMT.
+  // SAP IBP writes these to the base version regardless of the chosen version.
+  const nonVersionMdts = useMemo(() => {
+    if (!dstVersion) return []
+    const dstSet = new Set(dstMdts)
+    return mdtOrder.filter(m => !dstSet.has(m))
+  }, [dstVersion, dstMdts, mdtOrder])
+
   // ── Source inline login ──
   async function handleSrcLogin(e) {
     e.preventDefault()
@@ -326,12 +334,13 @@ export default function Migration({ connection, session }) {
 
         let totalRows = 0
         let txId = null
+        let dstBefore = null
 
         try {
           totalRows = await fetchCount(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion })
           txId = await getTransactionId(connection, session, {
             transactionName: 'ibp-bom-migration',
-            versionId: dstVersion || '__BASE',
+            versionId: dstVersion || BASE_VERSION_ID,
             masterDataTypeId: mdt,
             planningArea: dstPa,
           })
@@ -339,6 +348,12 @@ export default function Migration({ connection, session }) {
           allResults.push({ mdt, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
           continue
         }
+
+        // Best-effort: count destination rows in the TARGET version before writing.
+        // Used to verify after commit that data landed in the chosen version.
+        try {
+          dstBefore = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID })
+        } catch { /* ignore */ }
 
         // Best-effort: enable server-side parallel processing.
         // Isolated from the main try-catch — a timeout or 4xx here must NOT abort the migration.
@@ -412,6 +427,12 @@ export default function Migration({ connection, session }) {
           const messages  = await readMessages(connection, session, mdt, txId)
           const errorMsgs = messages.filter(m => ['E', 'A'].includes(m.Severity))
 
+          // Best-effort: count destination rows in the TARGET version AFTER commit.
+          let dstAfter = null
+          try {
+            dstAfter = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID })
+          } catch { /* ignore */ }
+
           const resolvedErrors = serverErrors ?? errorMsgs.length
           allResults.push({
             mdt, txId,
@@ -420,13 +441,14 @@ export default function Migration({ connection, session }) {
             ok:       serverOk     ?? (totalRows - errorMsgs.length),
             errors:   resolvedErrors,
             messages: errorMsgs,   // kept for detail panel (Commit 5)
+            dstBefore, dstAfter,
           })
         } catch (e) {
           if (e.isCancelled) {
-            allResults.push({ mdt, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId })
+            allResults.push({ mdt, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
             break
           }
-          allResults.push({ mdt, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: e.message })
+          allResults.push({ mdt, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: e.message, dstBefore, dstAfter: null })
         }
       }
     } finally {
@@ -807,6 +829,18 @@ export default function Migration({ connection, session }) {
       {srcPa && dstPa && mdtOrder.length > 0 && (
         <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
           <div style={SECTION_HDR}>{t('mig.sectionOptions')}</div>
+
+          {nonVersionMdts.length > 0 && (
+            <div style={{
+              fontSize: 11, color: 'var(--yellow, #e6a817)',
+              background: 'color-mix(in srgb, var(--yellow, #e6a817) 10%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--yellow, #e6a817) 30%, transparent)',
+              borderRadius: 6, padding: '7px 10px', marginBottom: 12,
+            }}>
+              {t('mig.versionIndepWarning', { mdts: nonVersionMdts.join(', ') })}
+            </div>
+          )}
+
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
             <input type="checkbox" checked={deleteEntries} onChange={e => setDeleteEntries(e.target.checked)} style={{ marginTop: 2 }} />
             <div>
@@ -870,6 +904,7 @@ export default function Migration({ connection, session }) {
                 <th style={TH}>{t('mig.colTotal')}</th>
                 <th style={TH}>{t('mig.colOk')}</th>
                 <th style={TH}>{t('mig.colErrors')}</th>
+                <th style={TH}>{t('mig.colDst')}</th>
                 <th style={TH}>{t('mig.colTxId')}</th>
               </tr>
             </thead>
@@ -899,11 +934,29 @@ export default function Migration({ connection, session }) {
                           </button>
                         ) : (r.errors || 0).toLocaleString()}
                       </td>
+                      <td style={td({ color: 'var(--text2)', fontSize: 11, whiteSpace: 'nowrap' })}>
+                        {r.dstBefore == null
+                          ? '—'
+                          : (() => {
+                              const after = r.dstAfter == null ? null : r.dstAfter
+                              const delta = after == null ? null : after - r.dstBefore
+                              return (
+                                <span>
+                                  {r.dstBefore.toLocaleString()} → {after == null ? '?' : after.toLocaleString()}
+                                  {delta != null && delta !== 0 && (
+                                    <span style={{ color: delta > 0 ? 'var(--green)' : 'var(--red)', marginLeft: 5, fontWeight: 600 }}>
+                                      ({delta > 0 ? '+' : ''}{delta.toLocaleString()})
+                                    </span>
+                                  )}
+                                </span>
+                              )
+                            })()}
+                      </td>
                       <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text3)', fontSize: 10 })}>{r.txId || '—'}</td>
                     </tr>
                     {isExpanded && (
                       <tr key={`${r.mdt}-detail`}>
-                        <td colSpan={6} style={{ padding: '0 0 8px 24px', borderBottom: '1px solid var(--border)' }}>
+                        <td colSpan={7} style={{ padding: '0 0 8px 24px', borderBottom: '1px solid var(--border)' }}>
                           {detailMsgs.length === 0 ? (
                             <div style={{ fontSize: 11, color: 'var(--text3)', padding: '6px 0' }}>{t('mig.noErrDetail')}</div>
                           ) : (
