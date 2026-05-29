@@ -122,6 +122,16 @@ function td(extra) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Extracts a readable message from anything thrown, never returning "[object Object]".
+function errText(e) {
+  if (e == null) return 'Error desconocido'
+  if (typeof e === 'string') return e
+  const m = e.message
+  if (typeof m === 'string' && m && m !== '[object Object]') return m
+  try { const s = JSON.stringify(e); if (s && s !== '{}') return s } catch { /* ignore */ }
+  return String(e)
+}
+
 // Converts OData v2 date strings like /Date(1764247462000+0000)/ to locale format.
 function formatCell(val) {
   if (typeof val !== 'string') return val ?? ''
@@ -456,6 +466,8 @@ export default function Migration({ connection, session }) {
         const srcName = mdtList[di]
         const dstName = resolveDst(srcName)
         const label   = srcName === dstName ? srcName : `${srcName} → ${dstName}`
+        // Destination schema couldn't be verified → fields were not projected (all sent).
+        const unverified = analysisRef.current?.byMdt?.[srcName]?.verifiable === false
 
         setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading' })
 
@@ -465,7 +477,7 @@ export default function Migration({ connection, session }) {
         try {
           totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal })
         } catch (e) {
-          pushResult({ mdt: srcName, dstName, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
+          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: errText(e) })
           continue
         }
 
@@ -595,7 +607,7 @@ export default function Migration({ connection, session }) {
           }
 
           pushResult({
-            mdt: srcName, dstName, txId,
+            mdt: srcName, dstName, unverified, txId,
             status:   errorMsgs.length > 0 ? 'error' : 'ok',
             total:    totalRows,
             ok:       totalRows - errorMsgs.length,
@@ -606,10 +618,10 @@ export default function Migration({ connection, session }) {
         } catch (e) {
           // Cancellation: explicit flag, an aborted request, or the cancel ref set.
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
-            pushResult({ mdt: srcName, dstName, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
+            pushResult({ mdt: srcName, dstName, unverified, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
             break
           }
-          pushResult({ mdt: srcName, dstName, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: e.message, dstBefore, dstAfter: null })
+          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: errText(e), dstBefore, dstAfter: null })
         }
       }
     } finally {
@@ -1131,7 +1143,12 @@ export default function Migration({ connection, session }) {
                 return (
                   <>
                     <tr key={r.mdt}>
-                      <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text)' })}>{r.mdt}</td>
+                      <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text)' })}>
+                        {r.mdt}{r.dstName && r.dstName !== r.mdt ? ` → ${r.dstName}` : ''}
+                        {r.unverified && (
+                          <span title={t('mig.unverifiedSchema')} style={{ color: 'var(--yellow, #e6a817)', marginLeft: 6, cursor: 'help' }}>⚠</span>
+                        )}
+                      </td>
                       <td style={td({ fontWeight: 600, color: r.status === 'ok' ? 'var(--green)' : r.status === 'error' ? 'var(--red)' : 'var(--text3)' })}>
                         {r.status === 'ok' ? t('mig.statusOk') : r.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled')}
                       </td>

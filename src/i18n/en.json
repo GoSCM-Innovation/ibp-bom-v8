@@ -620,6 +620,7 @@
   "mig.fieldsOmitted": "Omitted (not in destination)",
   "mig.fieldsUnfilled": "Left empty in destination",
   "mig.fieldsUnverifiable": "Could not verify the destination schema (no sample data); all source fields will be sent.",
+  "mig.unverifiedSchema": "Destination schema not verified: all source fields were sent (may include fields absent in destination).",
   "mig.colDst": "Destination (before→after)",
   "mig.versionIndepWarning": "⚠ These types are not version-specific in the destination version and will be written to the base version: {mdts}"
 }

@@ -620,6 +620,7 @@
   "mig.fieldsOmitted": "Se omiten (no existen en destino)",
   "mig.fieldsUnfilled": "Quedan vacíos en destino",
   "mig.fieldsUnverifiable": "No se pudo verificar el esquema del destino (sin datos de muestra); se enviarán todos los campos del origen.",
+  "mig.unverifiedSchema": "Esquema del destino no verificado: se enviaron todos los campos del origen (pueden incluir campos inexistentes en destino).",
   "mig.colDst": "Destino (antes→después)",
   "mig.versionIndepWarning": "⚠ Estos tipos no son específicos de la versión destino y se escribirán en la versión base: {mdts}"
 }

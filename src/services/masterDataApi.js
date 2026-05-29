@@ -3,6 +3,17 @@ import { proxyCall } from './proxyCall.js'
 const COM = '0720'
 const VSMT_TTL = 24 * 60 * 60 * 1000  // 24 h
 
+// Builds a readable Error from a failed proxy response. The proxy returns
+// { error, detail } (both strings); we surface "[status] detail" and never let
+// a non-string coerce into the useless "[object Object]".
+async function httpError(resp) {
+  const body   = await resp.json().catch(() => ({}))
+  const detail = typeof body?.detail === 'string' ? body.detail
+               : typeof body?.error  === 'string' ? body.error
+               : null
+  return new Error(detail ? `[${resp.status}] ${detail}` : `HTTP ${resp.status}`)
+}
+
 export const PAGE_SIZE    = 2000   // rows per read page  (~4 MB, ~3 s measured)
 export const CHUNK_SIZE   = 500    // rows per write POST
 export const PARALLEL_R   = 4      // parallel read pages  (3× speedup measured)
@@ -22,7 +33,7 @@ export async function fetchVsmt(conn, session) {
     path: '/VersionSpecificMasterDataTypes?$format=json' +
           '&$select=PlanningAreaID,VersionID,MasterDataTypeID,PlanningAreaDescr,VersionName',
   })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   const data  = await resp.json()
   const rows  = data?.d?.results ?? []
 
@@ -54,7 +65,7 @@ export async function fetchImportableMdts(conn, session) {
     path: '/?$format=json',
     timeout: 110000,
   })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   const data = await resp.json()
   const sets = data?.d?.EntitySets ?? []
   const importable = sets
@@ -97,7 +108,7 @@ export async function fetchCount(conn, session, name, { planningArea, versionId,
   let path = `/${name}?$format=json&$top=0&$inlinecount=allpages`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
   const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   const data = await resp.json()
   return parseInt(data?.d?.__count ?? '0', 10)
 }
@@ -109,7 +120,7 @@ export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE
   let path = `/${name}?$format=json&$top=${top}&$skip=${skip}`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
   const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   const data = await resp.json()
   return (data?.d?.results ?? []).map(stripMeta)
 }
@@ -119,13 +130,26 @@ export async function previewEntity(conn, session, name, { planningArea, version
   return readEntityPage(conn, session, name, { skip: 0, top, planningArea, versionId })
 }
 
-// Returns the field names of an MDT by reading one sample row, or null when the
-// entity has no rows in that area/version (so the schema can't be inferred this way).
-// Used by the field-mapping analysis to compare source vs destination columns.
-export async function fetchFieldNames(conn, session, name, { planningArea, versionId, signal } = {}) {
-  const rows = await readEntityPage(conn, session, name, { skip: 0, top: 1, planningArea, versionId, signal })
-  if (!rows.length) return null
-  return Object.keys(rows[0])
+// Returns the field names of an MDT by reading one sample row.
+// - Returns string[] when a sample row exists.
+// - Returns null ONLY when the entity genuinely has no rows (empty in that
+//   area/version) — the schema can't be inferred from a sample then.
+// - Retries transient read failures; throws if every attempt fails, so callers
+//   can tell "empty" (null) apart from "couldn't read" (throw) and avoid the
+//   unsafe "send all fields" fallback on a transient glitch.
+export async function fetchFieldNames(conn, session, name, { planningArea, versionId, signal, retries = 2 } = {}) {
+  let lastErr
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const rows = await readEntityPage(conn, session, name, { skip: 0, top: 1, planningArea, versionId, signal })
+      return rows.length ? Object.keys(rows[0]) : null
+    } catch (e) {
+      if (e?.name === 'AbortError') throw e   // cancelled — don't retry
+      lastErr = e
+      if (attempt < retries) await new Promise(r => setTimeout(r, 1500))
+    }
+  }
+  throw lastErr
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────
@@ -148,7 +172,7 @@ export async function getTransactionId(conn, session, { transactionName, version
 
   // GetTransactionID can take 60+ seconds on some IBP tenants — pass an explicit 90 s timeout.
   const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}`, timeout: 90000, signal })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   const data = await resp.json()
   const txId = data?.d?.Value
   if (!txId) throw new Error('GetTransactionID did not return a TransactionID')
@@ -194,7 +218,7 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
     connection: conn, session, com: COM,
     path: `/${name}Trans`, method: 'POST', body, signal,
   })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   return resp.json().catch(() => ({}))
 }
 
@@ -206,7 +230,7 @@ export async function readKeyRows(conn, session, name, { planningArea, versionId
   let path = `/${name}?$format=json&$top=${PAGE_SIZE}&$skip=0`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
   const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   const data  = await resp.json()
   const first = data?.d?.results ?? []
   if (first.length === 0) return { keyNames: [], rows: [] }
@@ -237,7 +261,7 @@ export async function commitTransaction(conn, session, transactionId, { signal }
     path: `/Commit?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
     method: 'POST', signal,
   })
-  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  if (!resp.ok) throw await httpError(resp)
   return resp.json().catch(() => ({}))
 }
 
@@ -260,7 +284,7 @@ export async function initiateParallelProcess(conn, session, transactionId, { pl
   })
   if (!resp.ok) {
     if (resp.status >= 400 && resp.status < 500) return null
-    const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status))
+    throw await httpError(resp)
   }
   return resp.json().catch(() => ({}))
 }
@@ -277,7 +301,7 @@ export async function getExportResult(conn, session, transactionId, { signal } =
   })
   if (!resp.ok) {
     if (resp.status >= 400 && resp.status < 500) return null
-    const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status))
+    throw await httpError(resp)
   }
   const data    = await resp.json().catch(() => ({}))
   const results = data?.d?.results ?? (Array.isArray(data?.d) ? data.d : null)
