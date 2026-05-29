@@ -1377,6 +1377,11 @@ export default function Migration({ connection, session }) {
                           <div style={{ fontSize: 11, color: 'var(--green)' }}>✓ {t('mig.fieldsMatch', { n: a.common.length })}</div>
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            {a.common.length > 0 && (
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                                <span style={{ color: 'var(--green)' }}>✓ {t('mig.fieldsMigrated', { n: a.common.length })}:</span> <span style={{ fontFamily: 'var(--mono)' }}>{a.common.join(', ')}</span>
+                              </div>
+                            )}
                             {a.omitted.length > 0 && (
                               <div style={{ fontSize: 11, color: 'var(--text2)' }}>
                                 <span style={{ color: 'var(--yellow, #e6a817)' }}>↪ {t('mig.fieldsOmitted')}:</span> <span style={{ fontFamily: 'var(--mono)' }}>{a.omitted.join(', ')}</span>

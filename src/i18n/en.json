@@ -614,6 +614,7 @@
   "mig.analyzeIntro": "Review the field differences between source and destination before continuing. Only common fields will be migrated.",
   "mig.analyzeError": "Could not analyze fields: {msg}",
   "mig.fieldsMatch": "Fields match ({n} common)",
+  "mig.fieldsMigrated": "Migrated ({n})",
   "mig.fieldsOmitted": "Omitted (not in destination)",
   "mig.fieldsUnfilled": "Left empty in destination",
   "mig.fieldsUnverifiable": "Could not verify the destination schema (no sample data); all source fields will be sent.",
