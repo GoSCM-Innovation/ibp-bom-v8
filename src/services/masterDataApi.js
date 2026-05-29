@@ -34,6 +34,41 @@ export function invalidateVsmtCache(connId) {
   try { localStorage.removeItem(`ibp:vsmt:${connId}`) } catch {}
 }
 
+// ─── Importable MDT catalog ──────────────────────────────────────────────────
+
+// Returns the set of MasterDataTypeIDs that can be IMPORTED, i.e. those that
+// expose a "<MDT>Trans" entity set. Reference and virtual master data types do
+// not generate a Trans entity set (per SAP docs) and therefore cannot be loaded.
+// The service document ("/?$format=json") lists every entity set; we keep the
+// names ending in "Trans". Cached in localStorage (24 h) like the VSMT catalog.
+export async function fetchImportableMdts(conn, session) {
+  const ck = `ibp:importable:${conn.id}`
+  try {
+    const cached = JSON.parse(localStorage.getItem(ck))
+    if (cached && Date.now() - cached.ts < VSMT_TTL) return new Set(cached.data)
+  } catch { /* ignore cache read errors */ }
+
+  // The service document can be slow on a cold tenant — allow a long timeout.
+  const resp = await proxyCall({
+    connection: conn, session, com: COM,
+    path: '/?$format=json',
+    timeout: 110000,
+  })
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  const data = await resp.json()
+  const sets = data?.d?.EntitySets ?? []
+  const importable = sets
+    .filter(s => s.endsWith('Trans'))
+    .map(s => s.slice(0, -'Trans'.length))
+
+  try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: importable })) } catch { /* ignore quota errors */ }
+  return new Set(importable)
+}
+
+export function invalidateImportableCache(connId) {
+  try { localStorage.removeItem(`ibp:importable:${connId}`) } catch { /* ignore */ }
+}
+
 // Converts the flat VSMT rows into a structured catalog:
 // { [paId]: { desc, versions: [{ id, name, mdts: string[] }] } }
 export function buildCatalog(vsmt) {

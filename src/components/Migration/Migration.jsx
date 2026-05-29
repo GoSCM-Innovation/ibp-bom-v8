@@ -4,7 +4,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import {
-  fetchVsmt, buildCatalog,
+  fetchVsmt, buildCatalog, fetchImportableMdts,
   fetchCount, readEntityPage, readKeyRows,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
@@ -150,6 +150,10 @@ export default function Migration({ connection, session }) {
   const [srcLoading, setSrcLoading]   = useState(false)
   const [catalogError, setCatalogError] = useState('')
 
+  // Set of MDTs importable into the destination (those exposing a <MDT>Trans
+  // entity set). null = not loaded yet → no filtering applied (safe fallback).
+  const [importableSet, setImportableSet] = useState(null)
+
   // ── PA / Version selectors ──
   const [srcPa, setSrcPa]         = useState('')
   const [srcVersion, setSrcVersion] = useState('')
@@ -206,6 +210,18 @@ export default function Migration({ connection, session }) {
     return () => { alive = false }
   }, [connection.id, session?.com0720?.user]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Load importable-MDT set for the destination (best-effort) ──
+  // Reference/virtual MDTs (no <MDT>Trans) are excluded from the selection list.
+  // On failure we leave importableSet null → no filtering, so the tab still works.
+  useEffect(() => {
+    let alive = true
+    setImportableSet(null)
+    fetchImportableMdts(connection, session)
+      .then(set => { if (alive) setImportableSet(set) })
+      .catch(()  => { if (alive) setImportableSet(null) })
+    return () => { alive = false }
+  }, [connection.id, session?.com0720?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Load source catalog when source + session become available ──
   useEffect(() => {
     if (!srcConn || !srcSession) { setSrcCatalog(null); return }
@@ -232,8 +248,12 @@ export default function Migration({ connection, session }) {
     const dstSet = new Set(dstMdts)
     const base  = srcMdts.filter(m => dstSet.has(m))
     const extra = extraMdts.split(',').map(s => s.trim()).filter(s => s && !base.includes(s))
-    return [...new Set([...base, ...extra])].sort()
-  }, [srcMdts, dstMdts, srcPa, dstPa, extraMdts])
+    let all = [...new Set([...base, ...extra])]
+    // Hide reference/virtual MDTs that cannot be imported (no <MDT>Trans).
+    // When importableSet hasn't loaded yet (null), show everything.
+    if (importableSet) all = all.filter(m => importableSet.has(m))
+    return all.sort()
+  }, [srcMdts, dstMdts, srcPa, dstPa, extraMdts, importableSet])
 
   const filteredMdts = useMemo(() =>
     availableMdts.filter(m => !mdtSearch || m.toLowerCase().includes(mdtSearch.toLowerCase())),
