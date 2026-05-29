@@ -608,6 +608,14 @@
   "mig.baseWarning": "⚠ Versión Base seleccionada — puede haber tipos no listados",
   "mig.orderTitle": "Orden de migración",
   "mig.leaveWarning": "Hay una migración en curso. Si sales de esta pantalla, la migración se cancelará. ¿Continuar?",
+  "mig.analyzing": "Analizando campos…",
+  "mig.analyzeTitle": "Confirmar migración",
+  "mig.analyzeIntro": "Revisa las diferencias de campos entre origen y destino antes de continuar. Solo se migrarán los campos comunes.",
+  "mig.analyzeError": "No se pudieron analizar los campos: {msg}",
+  "mig.fieldsMatch": "Los campos coinciden ({n} comunes)",
+  "mig.fieldsOmitted": "Se omiten (no existen en destino)",
+  "mig.fieldsUnfilled": "Quedan vacíos en destino",
+  "mig.fieldsUnverifiable": "No se pudo verificar el esquema del destino (sin datos de muestra); se enviarán todos los campos del origen.",
   "mig.colDst": "Destino (antes→después)",
   "mig.versionIndepWarning": "⚠ Estos tipos no son específicos de la versión destino y se escribirán en la versión base: {mdts}"
 }

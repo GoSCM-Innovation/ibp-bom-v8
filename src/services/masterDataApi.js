@@ -119,6 +119,15 @@ export async function previewEntity(conn, session, name, { planningArea, version
   return readEntityPage(conn, session, name, { skip: 0, top, planningArea, versionId })
 }
 
+// Returns the field names of an MDT by reading one sample row, or null when the
+// entity has no rows in that area/version (so the schema can't be inferred this way).
+// Used by the field-mapping analysis to compare source vs destination columns.
+export async function fetchFieldNames(conn, session, name, { planningArea, versionId, signal } = {}) {
+  const rows = await readEntityPage(conn, session, name, { skip: 0, top: 1, planningArea, versionId, signal })
+  if (!rows.length) return null
+  return Object.keys(rows[0])
+}
+
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 // Step 1: obtain a TransactionID from SAP IBP.
@@ -330,7 +339,8 @@ export async function readMessages(conn, session, name, transactionId, { signal 
 // Fields that SAP IBP returns on GET but rejects on POST via the *Trans endpoint.
 // PlanningAreaID / VersionID are already encoded in the TransactionID context.
 // CREATEDDATE / LASTMODIFIEDDATE are server-managed audit fields.
-const READONLY_FIELDS = new Set([
+// Exported so the field-mapping analysis can exclude them from the diff.
+export const READONLY_FIELDS = new Set([
   'PlanningAreaID', 'VersionID',
   'CREATEDDATE', 'LASTMODIFIEDDATE',
 ])

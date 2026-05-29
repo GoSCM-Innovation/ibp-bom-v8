@@ -5,10 +5,10 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog, fetchImportableMdts,
-  fetchCount, readEntityPage, readKeyRows,
+  fetchCount, readEntityPage, readKeyRows, fetchFieldNames,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
-  PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID,
+  PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
 
@@ -187,8 +187,11 @@ export default function Migration({ connection, session }) {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewData, setPreviewData]       = useState(null)
 
-  // ── Production confirmation ──
+  // ── Pre-migration confirmation (field analysis + production warning) ──
   const [showConfirm, setShowConfirm] = useState(false)
+  const [analyzing, setAnalyzing]     = useState(false)
+  const [analysis, setAnalysis]       = useState(null)   // { byMdt, hasConflicts, error } for the modal
+  const analysisRef                   = useRef(null)      // common-fields map consumed by runMigration
 
   // ── Cancel confirmation (mid-run) ──
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
@@ -339,10 +342,57 @@ export default function Migration({ connection, session }) {
   }
 
   // ── Migration ──
-  function handleMigrateClick() {
-    const isProd = ['Producción', 'Production'].includes(connection.ambiente)
-    if (isProd) { setShowConfirm(true); return }
-    runMigration()
+  // Compares source vs destination fields per MDT (one sample row each) so we can
+  // send only the common fields (avoids HTTP 400) and show the user what differs.
+  async function analyzeFields() {
+    const clean = arr => (arr ? arr.filter(f => !READONLY_FIELDS.has(f)) : null)
+    const byMdt = {}
+    for (const mdt of mdtOrder) {
+      let srcFields = null, dstFields = null
+      try { srcFields = await fetchFieldNames(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion }) } catch { /* ignore */ }
+      try { dstFields = await fetchFieldNames(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion }) } catch { /* ignore */ }
+      const s = clean(srcFields), d = clean(dstFields)
+      if (!s || !d) {
+        // Couldn't infer schema on one side (empty entity) → send all source fields.
+        byMdt[mdt] = { verifiable: false, common: null, omitted: [], unfilled: [] }
+        continue
+      }
+      const dSet = new Set(d), sSet = new Set(s)
+      byMdt[mdt] = {
+        verifiable: true,
+        common:   s.filter(f => dSet.has(f)),
+        omitted:  s.filter(f => !dSet.has(f)),   // only in source → dropped
+        unfilled: d.filter(f => !sSet.has(f)),   // only in destination → left empty
+      }
+    }
+    const hasConflicts = Object.values(byMdt).some(
+      x => !x.verifiable || x.omitted.length > 0 || x.unfilled.length > 0
+    )
+    return { byMdt, hasConflicts }
+  }
+
+  async function handleMigrateClick() {
+    setAnalyzing(true)
+    setAnalysis(null)
+    let result
+    try {
+      result = await analyzeFields()
+    } catch (e) {
+      result = { byMdt: {}, hasConflicts: false, error: e.message }
+    }
+    analysisRef.current = result
+    setAnalysis(result)
+    setAnalyzing(false)
+    setShowConfirm(true)   // modal shows field diffs (+ production warning if applicable)
+  }
+
+  // Projects a row down to the agreed common fields for the MDT (when verifiable).
+  function projectRow(mdt, row) {
+    const entry = analysisRef.current?.byMdt?.[mdt]
+    if (!entry || !entry.common) return row   // fallback: send all fields
+    const out = {}
+    for (const k of entry.common) if (k in row) out[k] = row[k]
+    return out
   }
 
   const runMigration = useCallback(async () => {
@@ -438,10 +488,14 @@ export default function Migration({ connection, session }) {
             const batchRows = pageResults.flat()
             if (batchRows.length === 0) break
 
+            // Project to common fields (field mapping A): drop fields the destination
+            // doesn't have, so SAP won't reject the POST with "Property X is invalid".
+            const projected = batchRows.map(r => projectRow(mdt, r))
+
             // Split into CHUNK_SIZE chunks, write PARALLEL_W at a time
             const chunks = []
-            for (let c = 0; c < batchRows.length; c += CHUNK_SIZE) {
-              chunks.push(batchRows.slice(c, c + CHUNK_SIZE))
+            for (let c = 0; c < projected.length; c += CHUNK_SIZE) {
+              chunks.push(projected.slice(c, c + CHUNK_SIZE))
             }
 
             setProgress(p => ({ ...p, phase: 'writing' }))
@@ -912,8 +966,8 @@ export default function Migration({ connection, session }) {
               {t('mig.cancelBtn')}
             </button>
           ) : (
-            <button style={btnPrimary(!canMigrate)} disabled={!canMigrate} onClick={handleMigrateClick}>
-              {t('mig.migrateBtn')}
+            <button style={btnPrimary(!canMigrate || analyzing)} disabled={!canMigrate || analyzing} onClick={handleMigrateClick}>
+              {analyzing ? t('mig.analyzing') : t('mig.migrateBtn')}
             </button>
           )}
         </div>
@@ -1205,8 +1259,10 @@ export default function Migration({ connection, session }) {
         </div>
       )}
 
-      {/* ── Production confirmation modal ── */}
-      {showConfirm && (
+      {/* ── Pre-migration confirmation modal (field analysis + production warning) ── */}
+      {showConfirm && analysis && (() => {
+        const isProd = ['Producción', 'Production'].includes(connection.ambiente)
+        return (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
           background: 'var(--overlay)', backdropFilter: 'blur(4px)',
@@ -1214,21 +1270,70 @@ export default function Migration({ connection, session }) {
         }}>
           <div style={{
             background: 'var(--bg2)', border: '1px solid var(--border2)',
-            borderRadius: 12, padding: 28, width: 420, maxWidth: '90vw',
-            boxShadow: 'var(--shadow-lg)',
+            borderRadius: 12, padding: 24, width: 560, maxWidth: '92vw', maxHeight: '82vh',
+            display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>
-              {t('mig.confirmTitle')}
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+              {t('mig.analyzeTitle')}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 22 }}>
-              {t('mig.confirmMsg', { name: connection.name })}
-            </div>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+
+            {isProd && (
+              <div style={{
+                fontSize: 11, color: 'var(--red)', lineHeight: 1.5, marginBottom: 12,
+                background: 'color-mix(in srgb, var(--red) 10%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)',
+                borderRadius: 6, padding: '7px 10px',
+              }}>
+                ⚠ {t('mig.confirmMsg', { name: connection.name })}
+              </div>
+            )}
+
+            {analysis.error ? (
+              <div style={{ fontSize: 12, color: 'var(--red)' }}>✕ {t('mig.analyzeError', { msg: analysis.error })}</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>{t('mig.analyzeIntro')}</div>
+                <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {mdtOrder.map(mdt => {
+                    const a = analysis.byMdt[mdt] || {}
+                    const ok = a.verifiable && a.omitted.length === 0 && a.unfilled.length === 0
+                    return (
+                      <div key={mdt} style={{
+                        border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px',
+                        background: 'var(--bg)',
+                      }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--text)', marginBottom: 4 }}>{mdt}</div>
+                        {!a.verifiable ? (
+                          <div style={{ fontSize: 11, color: 'var(--yellow, #e6a817)' }}>⚠ {t('mig.fieldsUnverifiable')}</div>
+                        ) : ok ? (
+                          <div style={{ fontSize: 11, color: 'var(--green)' }}>✓ {t('mig.fieldsMatch', { n: a.common.length })}</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            {a.omitted.length > 0 && (
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                                <span style={{ color: 'var(--yellow, #e6a817)' }}>↪ {t('mig.fieldsOmitted')}:</span> <span style={{ fontFamily: 'var(--mono)' }}>{a.omitted.join(', ')}</span>
+                              </div>
+                            )}
+                            {a.unfilled.length > 0 && (
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                                <span style={{ color: 'var(--yellow, #e6a817)' }}>○ {t('mig.fieldsUnfilled')}:</span> <span style={{ fontFamily: 'var(--mono)' }}>{a.unfilled.join(', ')}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
               <button style={BTN_SEC} onClick={() => setShowConfirm(false)}>
                 {t('mig.confirmCancel')}
               </button>
               <button
-                style={{ ...btnPrimary(false), background: 'var(--red)', color: '#fff' }}
+                style={isProd ? { ...btnPrimary(false), background: 'var(--red)', color: '#fff' } : btnPrimary(false)}
                 onClick={runMigration}
               >
                 {t('mig.confirmBtn')}
@@ -1236,7 +1341,8 @@ export default function Migration({ connection, session }) {
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
     </div>
   )
