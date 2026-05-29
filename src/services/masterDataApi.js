@@ -111,53 +111,38 @@ export async function getTransactionId(conn, session, { transactionName, version
   return txId
 }
 
-// Step 2: POST a chunk of rows via deep-insert to <NAME>Trans(id)/Nav<NAME>.
-// deleteEntries=true should only be set on the FIRST chunk of a migration run
-// to clear existing destination data before loading.
+// Step 2: stage one chunk of rows via deep-insert to <NAME>Trans/Nav<NAME>.
 //
-// SAP IBP ignores Nav* rows when DeleteEntries=true is set in the same request.
-// So when deleteEntries is requested we send TWO calls:
-//   1. DeleteEntries=true  + empty Nav* → stages the delete
-//   2. DeleteEntries=false + actual rows → stages the insert
+//   deleteEntries=false → upsert: create/update the given rows.
+//   deleteEntries=true  → delete: rows must contain the KEY fields of the
+//                          records to remove (SAP deletes the listed records).
+//
+// IMPORTANT — a single TransactionID must use a CONSISTENT DeleteEntries value
+// across all its POSTs. SAP IBP rejects mixing true/false in one transaction
+// ("Create a new transaction ID to use a different DeleteEntries value").
+// A full-replace migration therefore uses TWO separate transactions: first a
+// delete transaction (commit), then a load transaction.
 //
 // planningArea + versionId must be top-level fields in the POST body to tell
-// SAP IBP which version to write to (per official API documentation).
-// Omitting them causes SAP IBP to default to __BASELINE regardless of the
-// VersionID passed to GetTransactionID.
+// SAP IBP which version to target (per official API documentation). Omitting
+// them makes SAP default to __BASELINE regardless of the GetTransactionID
+// VersionID.
 export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false, planningArea, versionId } = {}) {
   const cleanRows = stripReadonlyFields(rows)
   const attrs = cleanRows.length ? Object.keys(cleanRows[0]).join(',') : ''
 
   // Version context: include PlanningAreaID + VersionID only when provided.
-  // Omitting VersionID (or passing __BASELINE) writes to the base version.
+  // Omitting VersionID (or passing __BASELINE) targets the base version.
   const versionCtx = {
     ...(planningArea ? { PlanningAreaID: planningArea } : {}),
     ...(versionId    ? { VersionID:      versionId    } : {}),
   }
 
-  if (deleteEntries) {
-    // Phase 1: stage delete-only (empty rows)
-    const deleteBody = {
-      TransactionID:       transactionId,
-      ...versionCtx,
-      DoCommit:            false,
-      DeleteEntries:       true,
-      RequestedAttributes: attrs,
-      [`Nav${name}`]:      { results: [] },
-    }
-    const delResp = await proxyCall({
-      connection: conn, session, com: COM,
-      path: `/${name}Trans`, method: 'POST', body: deleteBody,
-    })
-    if (!delResp.ok) { const e = await delResp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || delResp.status)) }
-  }
-
-  // Phase 2: stage the actual rows (always, even after delete)
   const body = {
     TransactionID:       transactionId,
     ...versionCtx,
     DoCommit:            false,
-    DeleteEntries:       false,
+    DeleteEntries:       deleteEntries,
     RequestedAttributes: attrs,
     [`Nav${name}`]:      { results: cleanRows },
   }
@@ -167,6 +152,38 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
   })
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
   return resp.json().catch(() => ({}))
+}
+
+// Reads ALL records for the given version and returns just their business-key
+// columns — used to stage deletes for a full-replace migration. Key field
+// names are discovered from the first record's __metadata.uri.
+export async function readKeyRows(conn, session, name, { planningArea, versionId } = {}) {
+  const filter = buildFilter(planningArea, versionId)
+  let path = `/${name}?$format=json&$top=${PAGE_SIZE}&$skip=0`
+  if (filter) path += `&$filter=${encodeURIComponent(filter)}`
+  const resp = await proxyCall({ connection: conn, session, com: COM, path })
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status)) }
+  const data  = await resp.json()
+  const first = data?.d?.results ?? []
+  if (first.length === 0) return { keyNames: [], rows: [] }
+
+  const keyNames = parseKeyNames(first[0]?.__metadata?.uri)
+  if (keyNames.length === 0) return { keyNames: [], rows: [] }
+
+  const pick = r => { const o = {}; keyNames.forEach(k => { o[k] = r[k] }); return o }
+  const rows = first.map(pick)
+
+  // Subsequent pages — tenant never returns __next, so drive $skip manually.
+  if (first.length === PAGE_SIZE) {
+    let skip = PAGE_SIZE
+    for (;;) {
+      const page = await readEntityPage(conn, session, name, { skip, top: PAGE_SIZE, planningArea, versionId })
+      rows.push(...page.map(pick))
+      if (page.length < PAGE_SIZE) break
+      skip += PAGE_SIZE
+    }
+  }
+  return { keyNames, rows }
 }
 
 // Step 3: commit — permanently saves all staged data for this TransactionID.
@@ -204,8 +221,10 @@ export async function initiateParallelProcess(conn, session, transactionId, { pl
   return resp.json().catch(() => ({}))
 }
 
-// Step 3c (optional): retrieve aggregate import result (TotalCount, SuccessCount, ErrorCount).
-// Returns null when the endpoint is not available (4xx) so callers can fall back to readMessages.
+// Step 3c: retrieve the transaction's import result. SAP returns a ValueResultSet
+// of { Name, Value } pairs (e.g. [{ Name: 'Status', Value: 'PROCESSED' }]), which
+// this flattens into a plain object { Status: 'PROCESSED', ... }.
+// Returns null when the endpoint is not available (4xx).
 export async function getExportResult(conn, session, transactionId) {
   const resp = await proxyCall({
     connection: conn, session, com: COM,
@@ -215,8 +234,33 @@ export async function getExportResult(conn, session, transactionId) {
     if (resp.status >= 400 && resp.status < 500) return null
     const e = await resp.json().catch(() => ({})); throw new Error(String(e.detail || e.error || resp.status))
   }
-  const data = await resp.json().catch(() => ({}))
-  return data?.d ?? null
+  const data    = await resp.json().catch(() => ({}))
+  const results = data?.d?.results ?? (Array.isArray(data?.d) ? data.d : null)
+  if (!results) return data?.d ?? null
+  const out = {}
+  for (const item of results) {
+    if (item?.Name != null) out[item.Name] = item.Value
+  }
+  return out
+}
+
+// Step 3d: SAP IBP commits asynchronously — right after Commit the data is still
+// being applied (GetExportResult Status = 'PROCESSING') and a read would return
+// stale data. Poll until Status is PROCESSED/ERROR or the timeout elapses.
+// Returns 'PROCESSED' | 'ERROR' | 'TIMEOUT' | 'UNSUPPORTED'.
+export async function waitForProcessed(conn, session, transactionId, { timeoutMs = 60000, intervalMs = 2000 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    let res
+    try { res = await getExportResult(conn, session, transactionId) }
+    catch { res = undefined }                 // transient error — retry
+    if (res === null) return 'UNSUPPORTED'     // 4xx — endpoint not available
+    const status = res?.Status
+    if (status === 'PROCESSED') return 'PROCESSED'
+    if (status === 'ERROR')     return 'ERROR'
+    if (Date.now() >= deadline) return 'TIMEOUT'
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
 }
 
 // Step 4: read per-row error/info messages after commit.
@@ -260,6 +304,19 @@ function stripReadonlyFields(rows) {
     READONLY_FIELDS.forEach(k => delete clean[k])
     return clean
   })
+}
+
+// Parses business-key field names from an OData entity URI such as
+//   .../AS1UOMTO(UOMTOID='2X',PlanningAreaID='ASIBPTS',VersionID='ZPRUEBARED')
+// Returns ['UOMTOID', ...], excluding the version-context keys (which travel as
+// top-level body fields, not as RequestedAttributes).
+const VERSION_CONTEXT_KEYS = new Set(['PlanningAreaID', 'VersionID'])
+function parseKeyNames(uri) {
+  const m = String(uri || '').match(/\(([^)]*)\)\s*$/)
+  if (!m) return []
+  return m[1].split(',')
+    .map(p => p.split('=')[0].trim())
+    .filter(k => k && !VERSION_CONTEXT_KEYS.has(k))
 }
 
 function buildFilter(planningArea, versionId) {

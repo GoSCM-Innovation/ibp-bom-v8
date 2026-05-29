@@ -5,18 +5,11 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog,
-  fetchCount, readEntityPage,
+  fetchCount, readEntityPage, readKeyRows,
   getTransactionId, initiateParallelProcess, postTransChunk,
-  commitTransaction, getExportResult, readMessages,
+  commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID,
 } from '../../services/masterDataApi'
-
-// Parse a count that may arrive as string or number; returns null if invalid.
-function parseCount(v) {
-  if (v == null) return null
-  const n = parseInt(v, 10)
-  return isNaN(n) ? null : n
-}
 
 // ── History persistence ───────────────────────────────────────────────────────
 
@@ -333,38 +326,61 @@ export default function Migration({ connection, session }) {
         setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: mdt, rows: 0, totalRows: 0, phase: 'reading' })
 
         let totalRows = 0
-        let txId = null
         let dstBefore = null
 
         try {
           totalRows = await fetchCount(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion })
-          txId = await getTransactionId(connection, session, {
-            transactionName: 'ibp-bom-migration',
-            versionId: dstVersion || BASE_VERSION_ID,
-            masterDataTypeId: mdt,
-            planningArea: dstPa,
-          })
         } catch (e) {
           allResults.push({ mdt, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
           continue
         }
 
-        // Best-effort: count destination rows in the TARGET version before writing.
-        // Used to verify after commit that data landed in the chosen version.
+        // Count destination rows in the TARGET version BEFORE writing (verification baseline).
         try {
           dstBefore = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID })
         } catch { /* ignore */ }
 
-        // Best-effort: enable server-side parallel processing.
-        // Isolated from the main try-catch — a timeout or 4xx here must NOT abort the migration.
-        try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: mdt }) } catch { /* ignore */ }
-
-        setProgress(p => ({ ...p, totalRows }))
-
-        const pages = Math.ceil(totalRows / PAGE_SIZE) || 1
-        let loadedRows = 0
-
+        let txId = null
         try {
+          // ── Replace mode: clear destination in its OWN transaction ──
+          // SAP forbids mixing DeleteEntries true/false in one transaction, so the
+          // delete runs as a separate committed transaction before the load.
+          if (deleteEntries) {
+            setProgress(p => ({ ...p, phase: 'deleting' }))
+            const { keyNames, rows: keyRows } = await readKeyRows(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion })
+            if (keyRows.length > 0 && keyNames.length > 0) {
+              const txDel = await getTransactionId(connection, session, {
+                transactionName: 'ibp-bom-migration-del',
+                versionId: dstVersion || BASE_VERSION_ID,
+                masterDataTypeId: mdt, planningArea: dstPa,
+              })
+              for (let c = 0; c < keyRows.length; c += CHUNK_SIZE) {
+                if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                await postTransChunk(connection, session, mdt, txDel, keyRows.slice(c, c + CHUNK_SIZE), {
+                  deleteEntries: true, planningArea: dstPa, versionId: dstVersion,
+                })
+              }
+              await commitTransaction(connection, session, txDel)
+              await waitForProcessed(connection, session, txDel, { timeoutMs: 60000 })
+            }
+          }
+
+          if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+
+          // ── Load source (upsert) in a fresh transaction ──
+          txId = await getTransactionId(connection, session, {
+            transactionName: 'ibp-bom-migration',
+            versionId: dstVersion || BASE_VERSION_ID,
+            masterDataTypeId: mdt, planningArea: dstPa,
+          })
+
+          // Best-effort: enable server-side parallel processing (must not abort the run).
+          try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: mdt }) } catch { /* ignore */ }
+
+          setProgress(p => ({ ...p, totalRows }))
+          const pages = Math.ceil(totalRows / PAGE_SIZE) || 1
+          let loadedRows = 0
+
           for (let pageOffset = 0; pageOffset < pages; pageOffset += PARALLEL_R) {
             if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
@@ -393,9 +409,9 @@ export default function Migration({ connection, session }) {
             for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
               if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
               const writeBatch = chunks.slice(ci, ci + PARALLEL_W)
-              await Promise.all(writeBatch.map((chunk, bi) =>
+              await Promise.all(writeBatch.map(chunk =>
                 postTransChunk(connection, session, mdt, txId, chunk, {
-                  deleteEntries: deleteEntries && pageOffset === 0 && ci === 0 && bi === 0,
+                  deleteEntries: false,
                   planningArea: dstPa,
                   versionId: dstVersion,
                 })
@@ -417,30 +433,34 @@ export default function Migration({ connection, session }) {
           setProgress(p => ({ ...p, phase: 'committing' }))
           await commitTransaction(connection, session, txId)
 
-          setProgress(p => ({ ...p, phase: 'messages' }))
-          // GetExportResult: server-side aggregate counts (best-effort, null if unsupported)
-          const exportResult = await getExportResult(connection, session, txId)
-          const serverTotal  = parseCount(exportResult?.TotalCount   ?? exportResult?.RecordsTotal)
-          const serverOk     = parseCount(exportResult?.SuccessCount ?? exportResult?.RecordsSuccessful)
-          const serverErrors = parseCount(exportResult?.ErrorCount   ?? exportResult?.RecordsError)
+          // SAP commits asynchronously — wait until it finishes applying before
+          // reading messages or counting, otherwise we'd see stale data.
+          setProgress(p => ({ ...p, phase: 'processing' }))
+          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: 60000 })
 
+          setProgress(p => ({ ...p, phase: 'messages' }))
           const messages  = await readMessages(connection, session, mdt, txId)
           const errorMsgs = messages.filter(m => ['E', 'A'].includes(m.Severity))
 
-          // Best-effort: count destination rows in the TARGET version AFTER commit.
+          // Count destination AFTER processing. If the status wasn't confirmed
+          // PROCESSED, retry a few times while the count catches up.
           let dstAfter = null
-          try {
-            dstAfter = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID })
-          } catch { /* ignore */ }
+          const attempts = procStatus === 'PROCESSED' ? 1 : 3
+          for (let a = 0; a < attempts; a++) {
+            if (a > 0) await new Promise(r => setTimeout(r, 2500))
+            try {
+              dstAfter = await fetchCount(connection, session, mdt, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID })
+            } catch { dstAfter = null }
+            if (dstAfter != null) break
+          }
 
-          const resolvedErrors = serverErrors ?? errorMsgs.length
           allResults.push({
             mdt, txId,
-            status:   resolvedErrors > 0 ? 'error' : 'ok',
-            total:    serverTotal  ?? totalRows,
-            ok:       serverOk     ?? (totalRows - errorMsgs.length),
-            errors:   resolvedErrors,
-            messages: errorMsgs,   // kept for detail panel (Commit 5)
+            status:   errorMsgs.length > 0 ? 'error' : 'ok',
+            total:    totalRows,
+            ok:       totalRows - errorMsgs.length,
+            errors:   errorMsgs.length,
+            messages: errorMsgs,   // kept for detail panel
             dstBefore, dstAfter,
           })
         } catch (e) {
@@ -480,8 +500,10 @@ export default function Migration({ connection, session }) {
 
   const PHASE_LABEL = {
     reading:    t('mig.phaseReading'),
+    deleting:   t('mig.phaseDeleting'),
     writing:    t('mig.phaseWriting'),
     committing: t('mig.phaseCommitting'),
+    processing: t('mig.phaseProcessing'),
     messages:   t('mig.phaseMessages'),
   }
 
