@@ -607,6 +607,7 @@
   "mig.cancelConfirmBack": "Continuar",
   "mig.baseWarning": "⚠ Versión Base seleccionada — puede haber tipos no listados",
   "mig.orderTitle": "Orden de migración",
+  "mig.mappedTo": "Tabla de destino mapeada (nombre distinto al origen)",
   "mig.leaveWarning": "Hay una migración en curso. Si sales de esta pantalla, la migración se cancelará. ¿Continuar?",
   "mig.analyzing": "Analizando campos…",
   "mig.analyzeTitle": "Confirmar migración",

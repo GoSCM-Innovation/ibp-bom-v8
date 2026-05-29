@@ -51,6 +51,33 @@ function getMdts(catalog, pa, version) {
   return vEntry ? [...vEntry.mdts].sort() : []
 }
 
+// ── Table pairing (root match) ──────────────────────────────────────────────
+// Tables can be named differently across systems (e.g. AS1PRODUCT vs AS4PRODUCT).
+// We "share a root" if, after trimming a short area prefix (0–4 chars) from each
+// name, the remainder matches exactly and is long enough (>= 4) to be meaningful.
+
+const MIN_ROOT_LEN = 4
+function rootCandidates(name) {
+  const out = []
+  for (let k = 0; k <= 4 && name.length - k >= MIN_ROOT_LEN; k++) out.push(name.slice(k))
+  return out
+}
+
+// Suggests the best destination name for a source table among the candidates:
+// exact name wins; otherwise the candidate sharing the longest root. null if none.
+function suggestDstName(src, candidates) {
+  if (candidates.includes(src)) return src
+  const srcRoots = new Set(rootCandidates(src))
+  let best = null, bestLen = 0
+  for (const d of candidates) {
+    if (d === src) return src
+    for (const r of rootCandidates(d)) {
+      if (srcRoots.has(r) && r.length > bestLen) { best = d; bestLen = r.length }
+    }
+  }
+  return best
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const SECTION = {
@@ -164,10 +191,10 @@ export default function Migration({ connection, session }) {
   // ── MDT selection & order ──
   const [mdtSearch, setMdtSearch] = useState('')
   const [mdtOrder, setMdtOrder]   = useState([])   // ordered array of SOURCE mdt names
-  // Source→destination table mapping for tables named differently across systems.
-  // Empty in phase 1 (destination = source); populated by the pairing UI in phase 2.
+  // Source→destination table mapping for tables named differently across systems
+  // (e.g. AS1PRODUCT → AS4PRODUCT). Auto-filled with the root-match suggestion on
+  // selection; editable per row. Resolution goes through resolveDst (declared below).
   const [mdtMapping, setMdtMapping] = useState({})  // { [srcName]: dstName }
-  const dstNameFor = src => mdtMapping[src] || src
 
   // ── Drag-and-drop (order panel) ──
   const dragId  = useRef(null)
@@ -260,36 +287,46 @@ export default function Migration({ connection, session }) {
   }, [srcConnId, srcTempCreds?.user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset selectors when catalogs change
-  useEffect(() => { setSrcPa(''); setSrcVersion(''); setMdtOrder([]) }, [srcCatalog])
-  useEffect(() => { setDstPa(''); setDstVersion(''); setMdtOrder([]) }, [dstCatalog])
-  useEffect(() => { setMdtOrder([]) }, [srcPa, srcVersion, dstPa, dstVersion])
+  useEffect(() => { setSrcPa(''); setSrcVersion(''); setMdtOrder([]); setMdtMapping({}) }, [srcCatalog])
+  useEffect(() => { setDstPa(''); setDstVersion(''); setMdtOrder([]); setMdtMapping({}) }, [dstCatalog])
+  useEffect(() => { setMdtOrder([]); setMdtMapping({}) }, [srcPa, srcVersion, dstPa, dstVersion])
 
   // ── Available MDTs ──
-  // Only the MDTs that exist in the chosen area/version in BOTH source and
-  // destination (consistent with the selection), and that are importable
-  // (expose a <MDT>Trans entity set — excludes reference/virtual types).
   const srcMdts = useMemo(() => getMdts(srcCatalog, srcPa, srcVersion), [srcCatalog, srcPa, srcVersion])
   const dstMdts = useMemo(() => getMdts(dstCatalog, dstPa, dstVersion), [dstCatalog, dstPa, dstVersion])
+
+  // Importable destination tables present in the chosen destination area/version.
+  // These are the candidates a source table can be paired to.
+  const dstCandidates = useMemo(() =>
+    importableSet ? dstMdts.filter(m => importableSet.has(m)) : [...dstMdts],
+    [dstMdts, importableSet]
+  )
+
+  // Source tables that have a destination match (exact name or by root). A source
+  // table with no importable counterpart in the destination is hidden.
   const availableMdts = useMemo(() => {
     if (!srcPa || !dstPa) return []
-    const dstSet = new Set(dstMdts)
-    let all = srcMdts.filter(m => dstSet.has(m))   // intersection for the chosen PA/version
-    if (importableSet) all = all.filter(m => importableSet.has(m))  // hide non-importable
-    return all.sort()
-  }, [srcMdts, dstMdts, srcPa, dstPa, importableSet])
+    return srcMdts.filter(src => suggestDstName(src, dstCandidates) != null).sort()
+  }, [srcMdts, dstCandidates, srcPa, dstPa])
+
+  // Resolves the destination table for a source: user override → suggestion → self.
+  const resolveDst = useCallback(
+    src => mdtMapping[src] || suggestDstName(src, dstCandidates) || src,
+    [mdtMapping, dstCandidates]
+  )
 
   const filteredMdts = useMemo(() =>
     availableMdts.filter(m => !mdtSearch || m.toLowerCase().includes(mdtSearch.toLowerCase())),
     [availableMdts, mdtSearch]
   )
 
-  // Selected MDTs that are NOT version-specific in the destination version's VSMT.
-  // SAP IBP writes these to the base version regardless of the chosen version.
+  // Selected MDTs whose DESTINATION table is NOT version-specific in the chosen
+  // version's VSMT. SAP IBP writes these to the base version regardless.
   const nonVersionMdts = useMemo(() => {
     if (!dstVersion) return []
     const dstSet = new Set(dstMdts)
-    return mdtOrder.filter(m => !dstSet.has(m))
-  }, [dstVersion, dstMdts, mdtOrder])
+    return mdtOrder.filter(src => !dstSet.has(resolveDst(src)))
+  }, [dstVersion, dstMdts, mdtOrder, resolveDst])
 
   // ── Source inline login ──
   async function handleSrcLogin(e) {
@@ -352,7 +389,7 @@ export default function Migration({ connection, session }) {
     const clean = arr => (arr ? arr.filter(f => !READONLY_FIELDS.has(f)) : null)
     const byMdt = {}
     for (const srcName of mdtOrder) {
-      const dstName = mdtMapping[srcName] || srcName
+      const dstName = resolveDst(srcName)
       let srcFields = null, dstFields = null
       try { srcFields = await fetchFieldNames(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion }) } catch { /* ignore */ }
       try { dstFields = await fetchFieldNames(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion }) } catch { /* ignore */ }
@@ -415,7 +452,7 @@ export default function Migration({ connection, session }) {
       for (let di = 0; di < mdtList.length; di++) {
         if (cancelledRef.current) break
         const srcName = mdtList[di]
-        const dstName = mdtMapping[srcName] || srcName
+        const dstName = resolveDst(srcName)
         const label   = srcName === dstName ? srcName : `${srcName} → ${dstName}`
 
         setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading' })
@@ -594,7 +631,7 @@ export default function Migration({ connection, session }) {
       saveHistory(connection.id, updated)
       setHistory(updated)
     }
-  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, mdtMapping, deleteEntries, connection, session])
+  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, resolveDst, deleteEntries, connection, session])
 
   // ── Derived ──
   const canMigrate = !running && !!srcConn && !!srcSession && !!srcPa && !!dstPa && mdtOrder.length > 0
@@ -784,11 +821,14 @@ export default function Migration({ connection, session }) {
                 </span>
               )}
               <button style={{ ...BTN_SEC, padding: '4px 10px', fontSize: 11 }}
-                onClick={() => setMdtOrder([...availableMdts])}>
+                onClick={() => {
+                  setMdtOrder([...availableMdts])
+                  setMdtMapping(Object.fromEntries(availableMdts.map(src => [src, suggestDstName(src, dstCandidates) || src])))
+                }}>
                 {t('mig.mdtSelectAll')}
               </button>
               <button style={{ ...BTN_SEC, padding: '4px 10px', fontSize: 11 }}
-                onClick={() => setMdtOrder([])}>
+                onClick={() => { setMdtOrder([]); setMdtMapping({}) }}>
                 {t('mig.mdtNone')}
               </button>
             </div>
@@ -823,9 +863,15 @@ export default function Migration({ connection, session }) {
                   <input
                     type="checkbox"
                     checked={mdtOrder.includes(mdt)}
-                    onChange={e => setMdtOrder(prev =>
-                      e.target.checked ? [...prev, mdt] : prev.filter(m => m !== mdt)
-                    )}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setMdtOrder(prev => [...prev, mdt])
+                        setMdtMapping(prev => ({ ...prev, [mdt]: suggestDstName(mdt, dstCandidates) || mdt }))
+                      } else {
+                        setMdtOrder(prev => prev.filter(m => m !== mdt))
+                        setMdtMapping(prev => { const n = { ...prev }; delete n[mdt]; return n })
+                      }
+                    }}
                   />
                   <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'var(--mono)', flex: 1 }}>{mdt}</span>
                   {oneSel && mdtOrder.includes(mdt) && (
@@ -914,8 +960,23 @@ export default function Migration({ connection, session }) {
                     }}>
                       {idx + 1}
                     </div>
-                    {/* Nombre */}
-                    <span style={{ flex: 1, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)' }}>{mdt}</span>
+                    {/* Origen → Destino (mapeo de tabla) */}
+                    <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={mdt}>{mdt}</span>
+                    <span style={{ color: 'var(--text3)', fontSize: 12, flexShrink: 0 }}>→</span>
+                    <select
+                      value={resolveDst(mdt)}
+                      draggable={false}
+                      onPointerDown={e => e.stopPropagation()}
+                      onChange={e => setMdtMapping(prev => ({ ...prev, [mdt]: e.target.value }))}
+                      title={resolveDst(mdt) === mdt ? '' : t('mig.mappedTo')}
+                      style={{
+                        ...SELECT, flex: 1, minWidth: 0, fontSize: 11, padding: '3px 6px',
+                        fontFamily: 'var(--mono)',
+                        borderColor: resolveDst(mdt) === mdt ? 'var(--border)' : 'var(--accent)',
+                      }}
+                    >
+                      {dstCandidates.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
                     {/* ↑ ↓ */}
                     <button
                       disabled={idx === 0}
