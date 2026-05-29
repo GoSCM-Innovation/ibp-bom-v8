@@ -440,13 +440,15 @@ export default function Migration({ connection, session }) {
   const runMigration = useCallback(async () => {
     setShowConfirm(false)
     setRunning(true)
-    setResults(null)
+    setResults([])
     cancelledRef.current = false
     abortRef.current = new AbortController()
     const signal = abortRef.current.signal
 
     const mdtList = [...mdtOrder]
     const allResults = []
+    // Publish results live so completed tables stay visible during the run.
+    const pushResult = r => { allResults.push(r); setResults([...allResults]) }
 
     try {
       for (let di = 0; di < mdtList.length; di++) {
@@ -463,7 +465,7 @@ export default function Migration({ connection, session }) {
         try {
           totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal })
         } catch (e) {
-          allResults.push({ mdt: srcName, dstName, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
+          pushResult({ mdt: srcName, dstName, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: e.message })
           continue
         }
 
@@ -592,7 +594,7 @@ export default function Migration({ connection, session }) {
             if (dstAfter != null) break
           }
 
-          allResults.push({
+          pushResult({
             mdt: srcName, dstName, txId,
             status:   errorMsgs.length > 0 ? 'error' : 'ok',
             total:    totalRows,
@@ -604,10 +606,10 @@ export default function Migration({ connection, session }) {
         } catch (e) {
           // Cancellation: explicit flag, an aborted request, or the cancel ref set.
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
-            allResults.push({ mdt: srcName, dstName, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
+            pushResult({ mdt: srcName, dstName, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
             break
           }
-          allResults.push({ mdt: srcName, dstName, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: e.message, dstBefore, dstAfter: null })
+          pushResult({ mdt: srcName, dstName, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: e.message, dstBefore, dstAfter: null })
         }
       }
     } finally {
@@ -1041,34 +1043,70 @@ export default function Migration({ connection, session }) {
         </div>
       )}
 
-      {/* ── Progress ── */}
-      {running && progress && (
+      {/* ── Progress (step list — every selected table with its live status) ── */}
+      {running && (
         <div style={{ ...SECTION, background: 'color-mix(in srgb, var(--accent) 5%, var(--bg2))' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-            {t('mig.progressDataset', { cur: progress.datasetCur, total: progress.datasetTotal, name: progress.datasetName })}
+          <div style={{ ...SECTION_HDR, marginBottom: 10 }}>
+            {t('mig.progressTitle', { cur: progress?.datasetCur || 0, total: mdtOrder.length })}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 8 }}>
-            {PHASE_LABEL[progress.phase] || ''}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {mdtOrder.map((srcName, i) => {
+              const done      = (results || []).find(r => r.mdt === srcName)
+              const isCurrent = !done && progress && progress.datasetCur === i + 1
+              const dstName   = resolveDst(srcName)
+              const label     = srcName === dstName ? srcName : `${srcName} → ${dstName}`
+              const icon  = done
+                ? (done.status === 'ok' ? '✓' : done.status === 'error' ? '✕' : '⊘')
+                : isCurrent ? '⏳' : '○'
+              const color = done
+                ? (done.status === 'ok' ? 'var(--green)' : done.status === 'error' ? 'var(--red)' : 'var(--text3)')
+                : isCurrent ? 'var(--accent)' : 'var(--text3)'
+              const deltaStr = done && done.dstBefore != null && done.dstAfter != null
+                ? `${done.dstBefore.toLocaleString()}→${done.dstAfter.toLocaleString()}` : null
+              return (
+                <div key={srcName} style={{
+                  border: '1px solid var(--border)', borderRadius: 7, padding: '7px 10px',
+                  background: 'var(--bg)', opacity: (!done && !isCurrent) ? 0.55 : 1,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color, fontSize: 12, flexShrink: 0, width: 14, textAlign: 'center' }}>{icon}</span>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                    <span style={{ fontSize: 11, color, flexShrink: 0 }}>
+                      {done
+                        ? (done.status === 'ok' ? t('mig.statusOk') : done.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled'))
+                        : isCurrent ? (PHASE_LABEL[progress.phase] || '') : t('mig.stepPending')}
+                    </span>
+                  </div>
+                  {done && (
+                    <div style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 22, marginTop: 2 }}>
+                      {(done.total || 0).toLocaleString()} {t('mig.colTotal').toLowerCase()}
+                      {done.errors > 0 ? ` · ${done.errors} ${t('mig.colErrors').toLowerCase()}` : ''}
+                      {deltaStr ? ` · ${deltaStr}` : ''}
+                    </div>
+                  )}
+                  {isCurrent && progress.totalRows > 0 && (
+                    <div style={{ marginLeft: 22, marginTop: 5 }}>
+                      <div style={{ background: 'var(--border)', borderRadius: 4, height: 5, overflow: 'hidden', marginBottom: 3 }}>
+                        <div style={{
+                          background: 'var(--accent)', height: '100%', borderRadius: 4,
+                          width: `${Math.min(100, (progress.rows / progress.totalRows) * 100)}%`,
+                          transition: 'width .3s',
+                        }} />
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text3)' }}>
+                        {t('mig.progressRows', { rows: progress.rows.toLocaleString(), total: progress.totalRows.toLocaleString() })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-          {progress.totalRows > 0 && (
-            <>
-              <div style={{ background: 'var(--border)', borderRadius: 4, height: 6, overflow: 'hidden', marginBottom: 6 }}>
-                <div style={{
-                  background: 'var(--accent)', height: '100%', borderRadius: 4,
-                  width: `${Math.min(100, (progress.rows / progress.totalRows) * 100)}%`,
-                  transition: 'width .3s',
-                }} />
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                {t('mig.progressRows', { rows: progress.rows.toLocaleString(), total: progress.totalRows.toLocaleString() })}
-              </div>
-            </>
-          )}
         </div>
       )}
 
-      {/* ── Results ── */}
-      {results && (
+      {/* ── Results (final, after the run) ── */}
+      {!running && results && results.length > 0 && (
         <div style={SECTION}>
           <div style={SECTION_HDR}>{t('mig.resultsTitle')}</div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>

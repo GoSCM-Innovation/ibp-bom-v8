@@ -559,6 +559,8 @@
   "mig.phaseProcessing": "Procesando en SAP IBP…",
   "mig.phaseMessages": "Leyendo resultados…",
   "mig.progressDataset": "Dataset {cur} de {total}: {name}",
+  "mig.progressTitle": "Progreso de la migración ({cur}/{total})",
+  "mig.stepPending": "Pendiente",
   "mig.progressRows": "{rows} / {total} filas",
   "mig.resultsTitle": "Resultado de la migración",
   "mig.colMdt": "Tipo",
