@@ -237,37 +237,19 @@ export default function Migration({ connection, session }) {
   useEffect(() => { setDstPa(''); setDstVersion(''); setMdtOrder([]) }, [dstCatalog])
   useEffect(() => { setMdtOrder([]) }, [srcPa, srcVersion, dstPa, dstVersion])
 
-  // Every MDT that appears in SOME version of either catalog (i.e. version-specific).
-  // Used to detect version-independent MDTs (importable but absent from any VSMT).
-  const versionedMdts = useMemo(() => {
-    const s = new Set()
-    for (const cat of [srcCatalog, dstCatalog]) {
-      if (!cat) continue
-      for (const pa of Object.values(cat)) {
-        for (const v of pa.versions) v.mdts.forEach(m => s.add(m))
-      }
-    }
-    return s
-  }, [srcCatalog, dstCatalog])
-
   // ── Available MDTs ──
+  // Only the MDTs that exist in the chosen area/version in BOTH source and
+  // destination (consistent with the selection), and that are importable
+  // (expose a <MDT>Trans entity set — excludes reference/virtual types).
   const srcMdts = useMemo(() => getMdts(srcCatalog, srcPa, srcVersion), [srcCatalog, srcPa, srcVersion])
   const dstMdts = useMemo(() => getMdts(dstCatalog, dstPa, dstVersion), [dstCatalog, dstPa, dstVersion])
   const availableMdts = useMemo(() => {
     if (!srcPa || !dstPa) return []
-    // Version-specific: MDTs shared by source and destination for the chosen PA/version.
     const dstSet = new Set(dstMdts)
-    let all = srcMdts.filter(m => dstSet.has(m))
-    if (importableSet) {
-      // Add version-independent importables (in the service document but in no VSMT) —
-      // these are the "base-only" types the old manual field used to cover.
-      const versionIndependent = [...importableSet].filter(m => !versionedMdts.has(m))
-      all = [...new Set([...all, ...versionIndependent])]
-      // Hide reference/virtual MDTs that cannot be imported (no <MDT>Trans).
-      all = all.filter(m => importableSet.has(m))
-    }
+    let all = srcMdts.filter(m => dstSet.has(m))   // intersection for the chosen PA/version
+    if (importableSet) all = all.filter(m => importableSet.has(m))  // hide non-importable
     return all.sort()
-  }, [srcMdts, dstMdts, srcPa, dstPa, importableSet, versionedMdts])
+  }, [srcMdts, dstMdts, srcPa, dstPa, importableSet])
 
   const filteredMdts = useMemo(() =>
     availableMdts.filter(m => !mdtSearch || m.toLowerCase().includes(mdtSearch.toLowerCase())),
