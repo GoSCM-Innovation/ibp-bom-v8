@@ -5,11 +5,12 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { url, serviceRoot, user, password, method = 'GET', body, timeout = 30000 } = req.body
+  const {
+    url, serviceRoot, user, password, method = 'GET', body, timeout = 30000,
+    fetchCsrf, csrfToken: providedToken, cookies: providedCookies,
+  } = req.body
 
-  if (!url || !user || !password) return res.status(400).json({ error: 'Missing url, user or password' })
-
-  try { new URL(url) } catch { return res.status(400).json({ error: 'URL inválida' }) }
+  if (!user || !password) return res.status(400).json({ error: 'Missing user or password' })
 
   try {
     const auth = Buffer.from(`${user}:${password}`).toString('base64')
@@ -19,9 +20,28 @@ export default async function handler(req, res) {
       'Content-Type': 'application/json',
     }
 
-    let csrfToken = null
-    let sessionCookies = ''
-    if (method !== 'GET') {
+    // Mode: only obtain a CSRF token + cookies (reused by the caller across POSTs).
+    if (fetchCsrf) {
+      const csrfUrl = serviceRoot
+      if (!csrfUrl) return res.status(400).json({ error: 'Missing serviceRoot' })
+      try { new URL(csrfUrl) } catch { return res.status(400).json({ error: 'URL inválida' }) }
+      const r = await fetch(csrfUrl, {
+        method: 'GET',
+        headers: { ...baseHeaders, 'X-CSRF-Token': 'Fetch' },
+        signal: AbortSignal.timeout(90000),
+      })
+      const token   = r.headers.get('x-csrf-token')
+      const cookies = (r.headers.getSetCookie?.() ?? []).map(c => c.split(';')[0]).join('; ')
+      return res.json({ csrfToken: token, cookies })
+    }
+
+    if (!url) return res.status(400).json({ error: 'Missing url' })
+    try { new URL(url) } catch { return res.status(400).json({ error: 'URL inválida' }) }
+
+    let csrfToken = providedToken || null
+    let sessionCookies = providedCookies || ''
+    // Fetch CSRF only when a non-GET call didn't bring a reusable token.
+    if (method !== 'GET' && !csrfToken) {
       const csrfUrl = serviceRoot || url.split('?')[0]
       const csrfResp = await fetch(csrfUrl, {
         method: 'GET',

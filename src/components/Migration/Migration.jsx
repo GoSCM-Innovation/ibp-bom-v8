@@ -5,10 +5,11 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog, fetchImportableMdts,
-  fetchCount, readEntityPage, readKeyRows, fetchFieldNames,
+  fetchCount, readEntityPage, readKeyRows, fetchFieldNames, fetchCsrf,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
+  chunkSizeFor, pageSizeFor,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
 
@@ -467,7 +468,13 @@ export default function Migration({ connection, session }) {
         const dstName = resolveDst(srcName)
         const label   = srcName === dstName ? srcName : `${srcName} → ${dstName}`
         // Destination schema couldn't be verified → fields were not projected (all sent).
-        const unverified = analysisRef.current?.byMdt?.[srcName]?.verifiable === false
+        const entry = analysisRef.current?.byMdt?.[srcName]
+        const unverified = entry?.verifiable === false
+        // Adaptive batch sizes by field count (fewer fields → bigger batches → fewer calls).
+        const writeFields = entry?.common?.length || 0
+        const readFields  = (entry?.common?.length || 0) + (entry?.omitted?.length || 0)
+        const writeChunk  = writeFields ? chunkSizeFor(writeFields) : CHUNK_SIZE
+        const readPage    = readFields  ? pageSizeFor(readFields)  : PAGE_SIZE
 
         setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading' })
 
@@ -488,6 +495,11 @@ export default function Migration({ connection, session }) {
 
         let txId = null
         try {
+          // Obtain a CSRF token once and reuse it across all POSTs of this table
+          // (delete + load + commit) — avoids the proxy re-fetching it per POST.
+          let csrf = null
+          try { csrf = await fetchCsrf(connection, session, { signal }) } catch { /* proxy will fetch per POST */ }
+
           // ── Replace mode: clear destination in its OWN transaction ──
           // SAP forbids mixing DeleteEntries true/false in one transaction, so the
           // delete runs as a separate committed transaction before the load.
@@ -500,14 +512,14 @@ export default function Migration({ connection, session }) {
                 versionId: dstVersion || BASE_VERSION_ID,
                 masterDataTypeId: dstName, planningArea: dstPa, signal,
               })
-              for (let c = 0; c < keyRows.length; c += CHUNK_SIZE) {
+              for (let c = 0; c < keyRows.length; c += writeChunk) {
                 if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                await postTransChunk(connection, session, dstName, txDel, keyRows.slice(c, c + CHUNK_SIZE), {
-                  deleteEntries: true, planningArea: dstPa, versionId: dstVersion, signal,
+                await postTransChunk(connection, session, dstName, txDel, keyRows.slice(c, c + writeChunk), {
+                  deleteEntries: true, planningArea: dstPa, versionId: dstVersion, signal, csrf,
                 })
               }
-              await commitTransaction(connection, session, txDel, { signal })
-              await waitForProcessed(connection, session, txDel, { timeoutMs: 60000, signal })
+              await commitTransaction(connection, session, txDel, { signal, csrf })
+              await waitForProcessed(connection, session, txDel, { timeoutMs: Math.min(600000, Math.max(120000, keyRows.length * 4)), signal })
             }
           }
 
@@ -524,7 +536,7 @@ export default function Migration({ connection, session }) {
           try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
 
           setProgress(p => ({ ...p, totalRows }))
-          const pages = Math.ceil(totalRows / PAGE_SIZE) || 1
+          const pages = Math.ceil(totalRows / readPage) || 1
           let loadedRows = 0
 
           for (let pageOffset = 0; pageOffset < pages; pageOffset += PARALLEL_R) {
@@ -534,8 +546,8 @@ export default function Migration({ connection, session }) {
             const batchPageCount = Math.min(PARALLEL_R, pages - pageOffset)
             const readBatch = Array.from({ length: batchPageCount }, (_, i) =>
               readEntityPage(srcConn, srcSession, srcName, {
-                skip: (pageOffset + i) * PAGE_SIZE,
-                top: PAGE_SIZE,
+                skip: (pageOffset + i) * readPage,
+                top: readPage,
                 planningArea: srcPa,
                 versionId: srcVersion,
                 signal,
@@ -550,10 +562,10 @@ export default function Migration({ connection, session }) {
             // doesn't have, so SAP won't reject the POST with "Property X is invalid".
             const projected = batchRows.map(r => projectRow(srcName, r))
 
-            // Split into CHUNK_SIZE chunks, write PARALLEL_W at a time
+            // Split into adaptive-size chunks, write PARALLEL_W at a time
             const chunks = []
-            for (let c = 0; c < projected.length; c += CHUNK_SIZE) {
-              chunks.push(projected.slice(c, c + CHUNK_SIZE))
+            for (let c = 0; c < projected.length; c += writeChunk) {
+              chunks.push(projected.slice(c, c + writeChunk))
             }
 
             setProgress(p => ({ ...p, phase: 'writing' }))
@@ -565,7 +577,7 @@ export default function Migration({ connection, session }) {
                   deleteEntries: false,
                   planningArea: dstPa,
                   versionId: dstVersion,
-                  signal,
+                  signal, csrf,
                 })
               ))
             }
@@ -583,12 +595,13 @@ export default function Migration({ connection, session }) {
           if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
           setProgress(p => ({ ...p, phase: 'committing' }))
-          await commitTransaction(connection, session, txId, { signal })
+          await commitTransaction(connection, session, txId, { signal, csrf })
 
           // SAP commits asynchronously — wait until it finishes applying before
-          // reading messages or counting, otherwise we'd see stale data.
+          // reading messages or counting, otherwise we'd see stale data. The
+          // timeout scales with row count (large tables take longer to process).
           setProgress(p => ({ ...p, phase: 'processing' }))
-          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: 60000, signal })
+          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(600000, Math.max(120000, totalRows * 4)), signal })
 
           setProgress(p => ({ ...p, phase: 'messages' }))
           const messages  = await readMessages(connection, session, dstName, txId, { signal })

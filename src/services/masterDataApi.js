@@ -5,19 +5,48 @@ const VSMT_TTL = 24 * 60 * 60 * 1000  // 24 h
 
 // Builds a readable Error from a failed proxy response. The proxy returns
 // { error, detail } (both strings); we surface "[status] detail" and never let
-// a non-string coerce into the useless "[object Object]".
+// a non-string coerce into the useless "[object Object]". The HTTP status is
+// attached so retry logic can tell transient (5xx) from permanent (4xx) errors.
 async function httpError(resp) {
   const body   = await resp.json().catch(() => ({}))
   const detail = typeof body?.detail === 'string' ? body.detail
                : typeof body?.error  === 'string' ? body.error
                : null
-  return new Error(detail ? `[${resp.status}] ${detail}` : `HTTP ${resp.status}`)
+  const err = new Error(detail ? `[${resp.status}] ${detail}` : `HTTP ${resp.status}`)
+  err.status = resp.status
+  return err
 }
 
-export const PAGE_SIZE    = 2000   // rows per read page  (~4 MB, ~3 s measured)
-export const CHUNK_SIZE   = 500    // rows per write POST
+// Retries a request thunk on TRANSIENT failures (5xx, or network/timeout with no
+// status). Never retries 4xx (data errors) or user-cancellation aborts.
+async function withRetry(fn, { retries = 2, signal } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fn() }
+    catch (e) {
+      if (e?.name === 'AbortError' || signal?.aborted) throw e   // user cancel
+      const transient = e?.status == null || e.status >= 500     // network/timeout or 5xx
+      if (!transient || attempt >= retries) throw e
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)))
+    }
+  }
+}
+
+export const PAGE_SIZE    = 2000   // default rows per read page (overridable, see pageSizeFor)
+export const CHUNK_SIZE   = 500    // default rows per write POST (overridable, see chunkSizeFor)
 export const PARALLEL_R   = 4      // parallel read pages  (3× speedup measured)
 export const PARALLEL_W   = 4      // parallel write POSTs
+
+// Adaptive batch sizing: the real limit is bytes (~4.5 MB on Vercel), which scales
+// with the field count. Bigger batches for narrow tables, smaller for wide ones.
+// ~120k cells ≈ 4 MB. SAP recommends max 5 000 rows per import request.
+export function chunkSizeFor(nFields) {
+  if (!nFields || nFields < 1) return CHUNK_SIZE
+  return Math.max(500, Math.min(5000, Math.floor(120000 / nFields)))
+}
+export function pageSizeFor(nFields) {
+  if (!nFields || nFields < 1) return PAGE_SIZE
+  return Math.max(2000, Math.min(10000, Math.floor(150000 / nFields)))
+}
 
 // ─── VSMT catalog ────────────────────────────────────────────────────────────
 
@@ -154,6 +183,15 @@ export async function fetchFieldNames(conn, session, name, { planningArea, versi
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
+// Obtains a CSRF token + session cookies once, to be reused across the many POSTs
+// of a transaction (chunks + commit). Avoids the proxy re-fetching CSRF on every
+// POST — the main cause of slow staging and timeout-induced 500s.
+export async function fetchCsrf(conn, session, { signal } = {}) {
+  const resp = await proxyCall({ connection: conn, session, com: COM, fetchCsrf: true, signal })
+  if (!resp.ok) throw await httpError(resp)
+  return resp.json()   // { csrfToken, cookies }
+}
+
 // Step 1: obtain a TransactionID from SAP IBP.
 // If versionId is empty/null, falls back to __BASELINE — the documented
 // identifier for the base version in /IBP/MASTER_DATA_API_SRV.
@@ -170,10 +208,12 @@ export async function getTransactionId(conn, session, { transactionName, version
     '$format=json',
   ].join('&')
 
-  // GetTransactionID can take 60+ seconds on some IBP tenants — pass an explicit 90 s timeout.
-  const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}`, timeout: 90000, signal })
-  if (!resp.ok) throw await httpError(resp)
-  const data = await resp.json()
+  // GetTransactionID can take 60+ seconds on some IBP tenants — explicit 90 s timeout + retry on transient failures.
+  const data = await withRetry(async () => {
+    const resp = await proxyCall({ connection: conn, session, com: COM, path: `/GetTransactionID?${params}`, timeout: 90000, signal })
+    if (!resp.ok) throw await httpError(resp)
+    return resp.json()
+  }, { signal })
   const txId = data?.d?.Value
   if (!txId) throw new Error('GetTransactionID did not return a TransactionID')
   return txId
@@ -195,7 +235,7 @@ export async function getTransactionId(conn, session, { transactionName, version
 // SAP IBP which version to target (per official API documentation). Omitting
 // them makes SAP default to __BASELINE regardless of the GetTransactionID
 // VersionID.
-export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false, planningArea, versionId, signal } = {}) {
+export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false, planningArea, versionId, signal, csrf } = {}) {
   const cleanRows = stripReadonlyFields(rows)
   const attrs = cleanRows.length ? Object.keys(cleanRows[0]).join(',') : ''
 
@@ -214,12 +254,14 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
     RequestedAttributes: attrs,
     [`Nav${name}`]:      { results: cleanRows },
   }
-  const resp = await proxyCall({
-    connection: conn, session, com: COM,
-    path: `/${name}Trans`, method: 'POST', body, signal,
-  })
-  if (!resp.ok) throw await httpError(resp)
-  return resp.json().catch(() => ({}))
+  return withRetry(async () => {
+    const resp = await proxyCall({
+      connection: conn, session, com: COM,
+      path: `/${name}Trans`, method: 'POST', body, signal, csrf,
+    })
+    if (!resp.ok) throw await httpError(resp)
+    return resp.json().catch(() => ({}))
+  }, { signal })
 }
 
 // Reads ALL records for the given version and returns just their business-key
@@ -255,14 +297,16 @@ export async function readKeyRows(conn, session, name, { planningArea, versionId
 }
 
 // Step 3: commit — permanently saves all staged data for this TransactionID.
-export async function commitTransaction(conn, session, transactionId, { signal } = {}) {
-  const resp = await proxyCall({
-    connection: conn, session, com: COM,
-    path: `/Commit?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
-    method: 'POST', signal,
-  })
-  if (!resp.ok) throw await httpError(resp)
-  return resp.json().catch(() => ({}))
+export async function commitTransaction(conn, session, transactionId, { signal, csrf } = {}) {
+  return withRetry(async () => {
+    const resp = await proxyCall({
+      connection: conn, session, com: COM,
+      path: `/Commit?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
+      method: 'POST', signal, csrf,
+    })
+    if (!resp.ok) throw await httpError(resp)
+    return resp.json().catch(() => ({}))
+  }, { retries: 1, signal })
 }
 
 // Step 3b (optional): enable server-side parallel processing for this transaction.

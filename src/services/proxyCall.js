@@ -1,4 +1,4 @@
-export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout, signal }) {
+export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout, signal, fetchCsrf, csrf }) {
   const comKey = `com${com}`
   const agreement = connection[comKey]
   const serviceRoot = agreement?.url || ''
@@ -21,6 +21,11 @@ export async function proxyCall({ connection, session, com = '0326', path, metho
       method,
       ...(body !== undefined && { body }),
       ...(timeout !== undefined && { timeout }),
+      // fetchCsrf: ask the proxy to only obtain a CSRF token+cookies (no real call).
+      ...(fetchCsrf ? { fetchCsrf: true } : {}),
+      // csrf: reuse a previously obtained { csrfToken, cookies } so the proxy
+      // skips the per-POST CSRF round-trip to SAP.
+      ...(csrf ? { csrfToken: csrf.csrfToken, cookies: csrf.cookies } : {}),
     }),
     // Caller-provided AbortSignal lets a cancelled migration cut requests in flight.
     ...(signal ? { signal } : {}),
