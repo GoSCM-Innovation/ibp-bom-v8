@@ -131,12 +131,18 @@ export function buildCatalog(vsmt) {
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
+// Reads AND writes can be slow on some tenants/versions (a version-filtered read
+// was measured at 60+ s; staging POSTs can also exceed 30 s), so allow up to 90 s
+// (under Vercel's maxDuration) instead of the 30 s proxy default.
+const READ_TIMEOUT  = 90000
+const WRITE_TIMEOUT = 90000
+
 // Returns total record count using $inlinecount (no extra $count endpoint needed).
 export async function fetchCount(conn, session, name, { planningArea, versionId, signal } = {}) {
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=0&$inlinecount=allpages`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
+  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
   if (!resp.ok) throw await httpError(resp)
   const data = await resp.json()
   return parseInt(data?.d?.__count ?? '0', 10)
@@ -148,7 +154,7 @@ export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=${top}&$skip=${skip}`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
+  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
   if (!resp.ok) throw await httpError(resp)
   const data = await resp.json()
   return (data?.d?.results ?? []).map(stripMeta)
@@ -257,7 +263,7 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
   return withRetry(async () => {
     const resp = await proxyCall({
       connection: conn, session, com: COM,
-      path: `/${name}Trans`, method: 'POST', body, signal, csrf,
+      path: `/${name}Trans`, method: 'POST', body, signal, csrf, timeout: WRITE_TIMEOUT,
     })
     if (!resp.ok) throw await httpError(resp)
     return resp.json().catch(() => ({}))
@@ -302,7 +308,7 @@ export async function commitTransaction(conn, session, transactionId, { signal, 
     const resp = await proxyCall({
       connection: conn, session, com: COM,
       path: `/Commit?P_TransactionID=%27${encodeURIComponent(transactionId)}%27`,
-      method: 'POST', signal, csrf,
+      method: 'POST', signal, csrf, timeout: WRITE_TIMEOUT,
     })
     if (!resp.ok) throw await httpError(resp)
     return resp.json().catch(() => ({}))
@@ -321,10 +327,12 @@ export async function initiateParallelProcess(conn, session, transactionId, { pl
   if (masterDataTypeId) path += `&P_MasterDataTypeID=${enc(masterDataTypeId)}`
   if (planningArea)     path += `&P_PlanningAreaID=${enc(planningArea)}`
   if (versionId)        path += `&P_VersionID=${enc(versionId)}`
+  // Best-effort optimisation — short timeout so a slow/unsupported tenant doesn't
+  // waste the full window before the real load starts.
   const resp = await proxyCall({
     connection: conn, session, com: COM,
     path,
-    method: 'POST',
+    method: 'POST', timeout: 20000,
   })
   if (!resp.ok) {
     if (resp.status >= 400 && resp.status < 500) return null

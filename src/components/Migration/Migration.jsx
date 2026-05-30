@@ -402,8 +402,11 @@ export default function Migration({ connection, session }) {
     for (const srcName of mdtOrder) {
       const dstName = resolveDst(srcName)
       let srcFields = null, dstFields = null
-      try { srcFields = await fetchFieldNames(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion }) } catch { /* ignore */ }
-      try { dstFields = await fetchFieldNames(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion }) } catch { /* ignore */ }
+      // The column schema is version-independent, so read the sample WITHOUT the
+      // version filter — a version-filtered read can be pathologically slow on some
+      // tenants (measured 60+ s) and would time out, breaking the projection.
+      try { srcFields = await fetchFieldNames(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: '' }) } catch { /* ignore */ }
+      try { dstFields = await fetchFieldNames(connection, session, dstName, { planningArea: dstPa, versionId: '' }) } catch { /* ignore */ }
       const s = clean(srcFields), d = clean(dstFields)
       if (!s || !d) {
         // Couldn't infer schema on one side (empty entity) → send all source fields.
