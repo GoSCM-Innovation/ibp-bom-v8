@@ -572,6 +572,8 @@
   "mig.statusOk": "✓ OK",
   "mig.statusError": "✕ Error",
   "mig.statusCancelled": "⊘ Cancelado",
+  "mig.statusProcessing": "⧗ Procesando",
+  "mig.statusProcessingNote": "Los datos se enviaron y confirmaron, pero el postprocessing seguía en SAP IBP al agotar la espera. Verifica el conteo final más tarde.",
   "mig.histToggleOpen": "Ver historial ▾",
   "mig.histToggleClose": "Ocultar historial ▴",
   "mig.histEmpty": "Sin migraciones anteriores",

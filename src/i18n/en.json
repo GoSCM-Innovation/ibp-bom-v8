@@ -571,6 +571,8 @@
   "mig.statusOk": "✓ OK",
   "mig.statusError": "✕ Error",
   "mig.statusCancelled": "⊘ Cancelled",
+  "mig.statusProcessing": "⧗ Processing",
+  "mig.statusProcessingNote": "Data was sent and committed, but SAP IBP was still postprocessing when the wait elapsed. Verify the final count later.",
   "mig.histToggleOpen": "View history ▾",
   "mig.histToggleClose": "Hide history ▴",
   "mig.previewTitle": "Preview: {name}",

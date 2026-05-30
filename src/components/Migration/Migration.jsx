@@ -522,7 +522,7 @@ export default function Migration({ connection, session }) {
                 })
               }
               await commitTransaction(connection, session, txDel, { signal, csrf })
-              await waitForProcessed(connection, session, txDel, { timeoutMs: Math.min(600000, Math.max(120000, keyRows.length * 4)), signal })
+              await waitForProcessed(connection, session, txDel, { timeoutMs: Math.min(1800000, Math.max(120000, keyRows.length * 4)), signal })
             }
           }
 
@@ -604,7 +604,7 @@ export default function Migration({ connection, session }) {
           // reading messages or counting, otherwise we'd see stale data. The
           // timeout scales with row count (large tables take longer to process).
           setProgress(p => ({ ...p, phase: 'processing' }))
-          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(600000, Math.max(120000, totalRows * 4)), signal })
+          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(1800000, Math.max(120000, totalRows * 4)), signal })
 
           setProgress(p => ({ ...p, phase: 'messages' }))
           const messages  = await readMessages(connection, session, dstName, txId, { signal })
@@ -622,9 +622,18 @@ export default function Migration({ connection, session }) {
             if (dstAfter != null) break
           }
 
+          // Status: errors → error; SAP reported postprocessing error → error;
+          // confirmed PROCESSED → ok; couldn't confirm (TIMEOUT/UNSUPPORTED) →
+          // 'processing' (still applying in SAP — not an honest "ok").
+          let status
+          if (errorMsgs.length > 0)        status = 'error'
+          else if (procStatus === 'ERROR') status = 'error'
+          else if (procStatus === 'PROCESSED') status = 'ok'
+          else                             status = 'processing'
+
           pushResult({
-            mdt: srcName, dstName, unverified, txId,
-            status:   errorMsgs.length > 0 ? 'error' : 'ok',
+            mdt: srcName, dstName, unverified, txId, procStatus,
+            status,
             total:    totalRows,
             ok:       totalRows - errorMsgs.length,
             errors:   errorMsgs.length,
@@ -647,7 +656,8 @@ export default function Migration({ connection, session }) {
 
       const totalRowsMigrated = allResults.reduce((s, r) => s + (r.total || 0), 0)
       const overallStatus = allResults.some(r => r.status === 'cancelled') ? 'cancelled'
-        : allResults.some(r => r.status === 'error') ? 'error' : 'ok'
+        : allResults.some(r => r.status === 'error') ? 'error'
+        : allResults.some(r => r.status === 'processing') ? 'processing' : 'ok'
       const entry = {
         date: new Date().toISOString(),
         srcConnId:   srcConn?.id   || '',
@@ -675,6 +685,13 @@ export default function Migration({ connection, session }) {
     processing: t('mig.phaseProcessing'),
     messages:   t('mig.phaseMessages'),
   }
+
+  // Result status → label / colour / icon (shared by results table and step panel).
+  const statusLabel = s => s === 'ok' ? t('mig.statusOk') : s === 'error' ? t('mig.statusError')
+    : s === 'processing' ? t('mig.statusProcessing') : t('mig.statusCancelled')
+  const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)'
+    : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
+  const statusIcon  = s => s === 'ok' ? '✓' : s === 'error' ? '✕' : s === 'processing' ? '⧗' : '⊘'
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1083,12 +1100,8 @@ export default function Migration({ connection, session }) {
               const isCurrent = !done && progress && progress.datasetCur === i + 1
               const dstName   = resolveDst(srcName)
               const label     = srcName === dstName ? srcName : `${srcName} → ${dstName}`
-              const icon  = done
-                ? (done.status === 'ok' ? '✓' : done.status === 'error' ? '✕' : '⊘')
-                : isCurrent ? '⏳' : '○'
-              const color = done
-                ? (done.status === 'ok' ? 'var(--green)' : done.status === 'error' ? 'var(--red)' : 'var(--text3)')
-                : isCurrent ? 'var(--accent)' : 'var(--text3)'
+              const icon  = done ? statusIcon(done.status) : isCurrent ? '⏳' : '○'
+              const color = done ? statusColor(done.status) : isCurrent ? 'var(--accent)' : 'var(--text3)'
               const deltaStr = done && done.dstBefore != null && done.dstAfter != null
                 ? `${done.dstBefore.toLocaleString()}→${done.dstAfter.toLocaleString()}` : null
               return (
@@ -1099,9 +1112,9 @@ export default function Migration({ connection, session }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ color, fontSize: 12, flexShrink: 0, width: 14, textAlign: 'center' }}>{icon}</span>
                     <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-                    <span style={{ fontSize: 11, color, flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, color, flexShrink: 0 }} title={done?.status === 'processing' ? t('mig.statusProcessingNote') : ''}>
                       {done
-                        ? (done.status === 'ok' ? t('mig.statusOk') : done.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled'))
+                        ? statusLabel(done.status)
                         : isCurrent ? (PHASE_LABEL[progress.phase] || '') : t('mig.stepPending')}
                     </span>
                   </div>
@@ -1165,8 +1178,8 @@ export default function Migration({ connection, session }) {
                           <span title={t('mig.unverifiedSchema')} style={{ color: 'var(--yellow, #e6a817)', marginLeft: 6, cursor: 'help' }}>⚠</span>
                         )}
                       </td>
-                      <td style={td({ fontWeight: 600, color: r.status === 'ok' ? 'var(--green)' : r.status === 'error' ? 'var(--red)' : 'var(--text3)' })}>
-                        {r.status === 'ok' ? t('mig.statusOk') : r.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled')}
+                      <td style={td({ fontWeight: 600, color: statusColor(r.status) })} title={r.status === 'processing' ? t('mig.statusProcessingNote') : ''}>
+                        {statusLabel(r.status)}{r.status === 'processing' ? ' ⓘ' : ''}
                       </td>
                       <td style={td({ color: 'var(--text2)' })}>{(r.total || 0).toLocaleString()}</td>
                       <td style={td({ color: 'var(--text2)' })}>{(r.ok || 0).toLocaleString()}</td>
@@ -1279,8 +1292,8 @@ export default function Migration({ connection, session }) {
                         <td style={td({ color: 'var(--text2)' })}>{connection.name} / {h.dstPa}</td>
                         <td style={td({ color: 'var(--text2)' })}>{h.mdts?.length || 0}</td>
                         <td style={td({ color: 'var(--text2)' })}>{(h.totalRows || 0).toLocaleString()}</td>
-                        <td style={td({ fontWeight: 600, color: h.status === 'ok' ? 'var(--green)' : h.status === 'error' ? 'var(--red)' : 'var(--text3)' })}>
-                          {h.status === 'ok' ? t('mig.statusOk') : h.status === 'error' ? t('mig.statusError') : t('mig.statusCancelled')}
+                        <td style={td({ fontWeight: 600, color: statusColor(h.status) })}>
+                          {statusLabel(h.status)}
                         </td>
                       </tr>
                     )
