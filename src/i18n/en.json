@@ -664,5 +664,11 @@
   "kfm.time_day": "Day",
   "kfm.time_techweek": "Technical week",
   "kfm.errNoUnit": "No unit/currency found for {kf} (no data at the chosen level)",
-  "kfm.errCalculated": "{kf} is a calculated key figure: cannot be written (not editable)"
+  "kfm.errCalculated": "{kf} is a calculated key figure: cannot be written (not editable)",
+  "kfm.sectionConv": "Extraction unit / currency",
+  "kfm.convHint": "Some key figures require conversion to a unit or currency. Choose which to extract from the source (from master data).",
+  "kfm.uomLabel": "Unit of measure",
+  "kfm.currLabel": "Currency",
+  "kfm.selectUom": "Select unit…",
+  "kfm.selectCurr": "Select currency…"
 }

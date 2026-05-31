@@ -23,6 +23,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { proxyCall } from './proxyCall.js'
+import { fetchVsmt } from './masterDataApi.js'
 
 const COM = '0720'
 const READ_TIMEOUT  = 90000
@@ -225,6 +226,35 @@ export async function levelSignatureForAttr(conn, session, pa, { baseSelect, att
   const base     = await countKf(conn, session, pa, { select: baseSelect, filter, signal })
   const withAttr = await countKf(conn, session, pa, { select: `${baseSelect},${attr}`, filter, signal })
   return { base, withAttr, root: withAttr > base }
+}
+
+// ─── Conversion master data (units / currencies) ─────────────────────────────
+// When a KF requires a target unit (UOMTOID) or currency (CURRTOID), the user
+// picks from the area's master data. That master lives in MASTER_DATA_API_SRV
+// (com0720's default URL). The MDT name ends in UOMTO / CURRENCYTO; we locate it
+// via the area's VSMT catalog. Returns [{ id, desc }] sorted by id.
+export async function fetchConversionValues(conn, session, pa, kind, { signal } = {}) {
+  const suffix    = kind === 'CURR' ? 'CURRENCYTO'  : 'UOMTO'
+  const idField   = kind === 'CURR' ? 'CURRTOID'    : 'UOMTOID'
+  const descField = kind === 'CURR' ? 'CURRTODESCR' : 'UOMTODESCR'
+  const vsmt = await fetchVsmt(conn, session)
+  const mdts = [...new Set(vsmt.filter(r => !pa || r.PlanningAreaID === pa).map(r => r.MasterDataTypeID))]
+  const mdt  = mdts.find(m => (m || '').toUpperCase().endsWith(suffix))
+  if (!mdt) return []
+  // Read from MASTER_DATA_API_SRV (com0720 default URL — NO serviceRoot override).
+  const resp = await proxyCall({
+    connection: conn, session, com: COM,
+    path: `/${mdt}?$format=json&$select=${idField},${descField}&$top=5000`, signal, timeout: READ_TIMEOUT,
+  })
+  if (!resp.ok) return []
+  const data = await resp.json().catch(() => ({}))
+  const seen = new Set(), out = []
+  for (const r of (data?.d?.results ?? [])) {
+    const id = r[idField]
+    if (!id || seen.has(id)) continue
+    seen.add(id); out.push({ id, desc: r[descField] || id })
+  }
+  return out.sort((a, b) => String(a.id).localeCompare(String(b.id)))
 }
 
 // ─── Write transaction ──────────────────────────────────────────────────────────

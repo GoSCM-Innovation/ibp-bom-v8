@@ -664,5 +664,11 @@
   "kfm.time_day": "Día",
   "kfm.time_techweek": "Semana técnica",
   "kfm.errNoUnit": "No se encontró unidad/moneda para {kf} (sin datos al nivel elegido)",
-  "kfm.errCalculated": "{kf} es un key figure calculado: no se puede escribir (no editable)"
+  "kfm.errCalculated": "{kf} es un key figure calculado: no se puede escribir (no editable)",
+  "kfm.sectionConv": "Unidad / moneda de extracción",
+  "kfm.convHint": "Algunas key figures requieren convertir a una unidad o moneda. Elige en cuál extraer del origen (desde el dato maestro).",
+  "kfm.uomLabel": "Unidad de medida",
+  "kfm.currLabel": "Moneda",
+  "kfm.selectUom": "Seleccionar unidad…",
+  "kfm.selectCurr": "Seleccionar moneda…"
 }

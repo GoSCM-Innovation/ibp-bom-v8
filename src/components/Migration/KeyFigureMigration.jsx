@@ -4,7 +4,7 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import { setMigrationGuard } from '../../services/migrationGuard'
 import {
-  fetchKfCatalog, planningServiceRoot,
+  fetchKfCatalog, planningServiceRoot, fetchConversionValues,
   countKf, readKfPage, detectConversion,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
@@ -81,6 +81,11 @@ export default function KeyFigureMigration({ connection, session }) {
   const [kfSearch, setKfSearch]     = useState('')
   // Per-destination-attribute → source attribute mapping (only when names differ)
   const [attrMap, setAttrMap]       = useState({})
+  // Conversion (UOM / currency) — values from the SOURCE master data, user-selected
+  const [units, setUnits]           = useState([])
+  const [currencies, setCurrencies] = useState([])
+  const [selUom, setSelUom]         = useState('')
+  const [selCurr, setSelCurr]       = useState('')
 
   // ── Run state ──
   const cancelledRef = useRef(false)
@@ -120,6 +125,15 @@ export default function KeyFigureMigration({ connection, session }) {
   // Reset selections when catalogs change
   useEffect(() => { setLevelAttrs([]); setSteps([]); setAttrMap({}) }, [dstCat])
 
+  // Load conversion master data (units & currencies) from the SOURCE when available
+  useEffect(() => {
+    if (!srcConn || !srcSession || !srcCat) { setUnits([]); setCurrencies([]); setSelUom(''); setSelCurr(''); return }
+    let alive = true
+    fetchConversionValues(srcConn, srcSession, srcCat.pa, 'UOM').then(u => { if (alive) setUnits(u) }).catch(() => {})
+    fetchConversionValues(srcConn, srcSession, srcCat.pa, 'CURR').then(c => { if (alive) setCurrencies(c) }).catch(() => {})
+    return () => { alive = false }
+  }, [srcConnId, srcCat?.pa]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Derived option lists ──
   const dstAttrs = useMemo(() => (dstCat?.dims || []).filter(a => !a.startsWith('PERIODID') && !READONLY_ATTRS.has(a)).sort(), [dstCat])
   const dstKfs   = useMemo(() => (dstCat?.measures || []).slice().sort(), [dstCat])
@@ -158,8 +172,11 @@ export default function KeyFigureMigration({ connection, session }) {
   }
 
   // ── Migration engine ──
+  const needsUom  = steps.some(s => s.conv === 'UOM')
+  const needsCurr = steps.some(s => s.conv === 'CURR')
   const canMigrate = !running && !!srcConn && !!srcSession && !!dstCat && !!srcCat &&
-    levelAttrs.length > 0 && steps.length > 0 && steps.every(s => s.srcKf) && unmappedAttrs.length === 0
+    levelAttrs.length > 0 && steps.length > 0 && steps.every(s => s.srcKf) && unmappedAttrs.length === 0 &&
+    (!needsUom || selUom) && (!needsCurr || selCurr)
 
   const runMigration = useCallback(async () => {
     setRunning(true); setResults([])
@@ -185,30 +202,22 @@ export default function KeyFigureMigration({ connection, session }) {
         const dstLevelCols = [...levelAttrs]
 
         try {
-          // Conversion attribute required by this KF (UOM / currency).
-          const conv = await detectConversion(srcConn, srcSession, srcPa, srcKf, { signal })
-          // For 'misma UOM' we read in the product's base unit by not forcing a target;
-          // SAP still requires the attribute present — request it so the read is valid.
+          // Conversion attribute required by this KF (UOM / currency) — the target
+          // unit/currency is the one the user selected from the source master data.
+          const conv = steps[i].conv !== undefined ? steps[i].conv : await detectConversion(srcConn, srcSession, srcPa, srcKf, { signal })
           const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
+          const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
 
           const srcSelect = [...srcLevelCols, srcKf, timeField, ...(convAttr ? [convAttr] : [])].join(',')
-          // Source $filter: version + (added below) the required conversion unit.
           let filter = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
 
           if (convAttr) {
-            // Without a concrete UOM/CURR SAP rejects the read. We pick the most common
-            // value by sampling one row, then read everything in that unit (misma UOM).
-            const sample = await readKfPage(srcConn, srcSession, srcPa, {
-              select: [...srcLevelCols, srcKf, timeField, convAttr].join(','),
-              filter: filter || undefined, skip: 0, top: 1, signal,
-            }).catch(() => [])
-            const unit = sample[0]?.[convAttr]
-            if (!unit) {
+            if (!convVal) {
               push({ kf: dstKf, srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: t('kfm.errNoUnit', { kf: srcKf }) })
               continue
             }
-            filter += `${filter ? ' and ' : ''}${convAttr} eq '${unit}'`
-            srcLevelCols.push(convAttr)  // carry the unit so the value matches on write context
+            filter += `${filter ? ' and ' : ''}${convAttr} eq '${convVal}'`
+            srcLevelCols.push(convAttr)
           }
 
           // Count (safe: small top, never 0)
@@ -288,7 +297,7 @@ export default function KeyFigureMigration({ connection, session }) {
     } finally {
       setRunning(false); setProgress(null); setResults(all)
     }
-  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, resolveSrcAttr]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'processing' ? t('kfm.stProc') : t('kfm.stCancel')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
@@ -435,8 +444,13 @@ export default function KeyFigureMigration({ connection, session }) {
               return (
                 <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '3px 2px' }} title={dstCat.labels?.[k] || k}>
                   <input type="checkbox" checked={sel} onChange={e => {
-                    if (e.target.checked) setSteps(p => [...p, { dstKf: k, srcKf: defaultSrcKf(k) }])
-                    else setSteps(p => p.filter(s => s.dstKf !== k))
+                    if (e.target.checked) {
+                      setSteps(p => [...p, { dstKf: k, srcKf: defaultSrcKf(k), conv: undefined }])
+                      const sk = defaultSrcKf(k) || k
+                      detectConversion(srcConn, srcSession, srcCat.pa, sk)
+                        .then(conv => setSteps(p => p.map(s => s.dstKf === k ? { ...s, conv } : s)))
+                        .catch(() => {})
+                    } else setSteps(p => p.filter(s => s.dstKf !== k))
                   }} />
                   <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text)', flex: 1 }}>{k}</span>
                 </label>
@@ -465,6 +479,34 @@ export default function KeyFigureMigration({ connection, session }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Conversion (UOM / currency) ── */}
+      {dstCat && srcCat && (needsUom || needsCurr) && (
+        <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
+          <div style={SECTION_HDR}>{t('kfm.sectionConv')}</div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>{t('kfm.convHint')}</div>
+          <div style={{ display: 'flex', gap: 24 }}>
+            {needsUom && (
+              <div style={{ flex: 1 }}>
+                <label style={LABEL}>{t('kfm.uomLabel')}</label>
+                <select style={{ ...SELECT, borderColor: selUom ? 'var(--border)' : 'var(--red)' }} value={selUom} onChange={e => setSelUom(e.target.value)}>
+                  <option value="">{t('kfm.selectUom')}</option>
+                  {units.map(u => <option key={u.id} value={u.id}>{u.id}{u.desc && u.desc !== u.id ? ` — ${u.desc}` : ''}</option>)}
+                </select>
+              </div>
+            )}
+            {needsCurr && (
+              <div style={{ flex: 1 }}>
+                <label style={LABEL}>{t('kfm.currLabel')}</label>
+                <select style={{ ...SELECT, borderColor: selCurr ? 'var(--border)' : 'var(--red)' }} value={selCurr} onChange={e => setSelCurr(e.target.value)}>
+                  <option value="">{t('kfm.selectCurr')}</option>
+                  {currencies.map(c => <option key={c.id} value={c.id}>{c.id}{c.desc && c.desc !== c.id ? ` — ${c.desc}` : ''}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
