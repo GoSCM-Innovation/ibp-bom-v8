@@ -191,50 +191,62 @@ export default function KeyFigureMigration({ connection, session }) {
       let csrf = null
       try { csrf = await fetchCsrf(connection, session, { signal }) } catch { /* proxy fetches per POST */ }
 
-      for (let i = 0; i < steps.length; i++) {
-        if (cancelledRef.current) break
-        const { dstKf, srcKf } = steps[i]
-        const label = srcKf === dstKf ? dstKf : `${srcKf} → ${dstKf}`
-        setProgress({ cur: i + 1, total: steps.length, name: label, rows: 0, totalRows: 0, phase: 'detect' })
+      // Resolve each step's conversion (cached on the step or detected now), then
+      // GROUP key figures that share the same conversion (none / UOM / currency).
+      // All KF of a group share the planning level, so they are read in ONE source
+      // sweep and written in shared POSTs (rows × nKf ≤ 5000) — one transaction per
+      // group. This avoids re-reading the (huge) level once per key figure.
+      const resolved = []
+      for (const s of steps) {
+        let conv = s.conv
+        if (conv === undefined) { try { conv = await detectConversion(srcConn, srcSession, srcPa, s.srcKf, { signal }) } catch { conv = null } }
+        resolved.push({ ...s, conv: conv || null })
+      }
+      const order = [], groups = {}
+      for (const s of resolved) {
+        const k = s.conv || 'none'
+        if (!groups[k]) { groups[k] = []; order.push(k) }
+        groups[k].push(s)
+      }
 
-        // Source/destination column lists (root attrs mapped to each side) + time + KF.
+      let done = 0
+      for (const gk of order) {
+        if (cancelledRef.current) break
+        const g = groups[gk]
+        const conv = g[0].conv
+        const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
+        const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
+        const srcKfs = g.map(s => s.srcKf)
+        const dstKfs = g.map(s => s.dstKf)
+        const label  = dstKfs.join(', ')
+
         const srcLevelCols = levelAttrs.map(resolveSrcAttr)
         const dstLevelCols = [...levelAttrs]
+        let filter = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
+        if (convAttr) {
+          if (!convVal) {
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: t('kfm.errNoUnit', { kf: s.srcKf }) })
+            done += g.length; continue
+          }
+          filter += `${filter ? ' and ' : ''}${convAttr} eq '${convVal}'`
+          srcLevelCols.push(convAttr)
+        }
+        const srcSelect = [...srcLevelCols, ...srcKfs, timeField].join(',')
+        const dstFields = [...dstLevelCols, ...dstKfs, timeField].join(',')
+
+        setProgress({ cur: done + 1, total: steps.length, name: label, rows: 0, totalRows: 0, phase: 'count' })
 
         try {
-          // Conversion attribute required by this KF (UOM / currency) — the target
-          // unit/currency is the one the user selected from the source master data.
-          const conv = steps[i].conv !== undefined ? steps[i].conv : await detectConversion(srcConn, srcSession, srcPa, srcKf, { signal })
-          const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
-          const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
-
-          const srcSelect = [...srcLevelCols, srcKf, timeField, ...(convAttr ? [convAttr] : [])].join(',')
-          let filter = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
-
-          if (convAttr) {
-            if (!convVal) {
-              push({ kf: dstKf, srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: t('kfm.errNoUnit', { kf: srcKf }) })
-              continue
-            }
-            filter += `${filter ? ' and ' : ''}${convAttr} eq '${convVal}'`
-            srcLevelCols.push(convAttr)
-          }
-
-          // Count (safe: small top, never 0)
-          setProgress(p => ({ ...p, phase: 'count' }))
           const totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: filter || undefined, signal })
           setProgress(p => ({ ...p, totalRows }))
 
-          // Transaction
           const txId = await getTransactionId(connection, session, { signal })
           try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
 
-          const dstFields = [...dstLevelCols, dstKf, timeField].join(',')
-          const chunkRows = rowsPerChunk(1)   // one KF per step
+          const chunkRows = rowsPerChunk(dstKfs.length)   // rows × nKf ≤ 5000 values/POST
           const pageSize  = 5000
           const pages = Math.max(1, Math.ceil(totalRows / pageSize))
-          let loaded = 0, errors = 0
-          const errMsgsAll = []
+          let loaded = 0
 
           for (let pg = 0; pg < pages; pg += PARALLEL_R) {
             if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
@@ -245,16 +257,13 @@ export default function KeyFigureMigration({ connection, session }) {
             const rowsRead = (await Promise.all(batch)).flat()
             if (rowsRead.length === 0) break
 
-            // Project each row to the destination write shape: root attrs (renamed) +
-            // time (ISO) + KF (renamed). Derived attrs are NOT sent (destination fills them).
+            // Project to destination write shape: root attrs (renamed) + time (ISO) +
+            // each KF (renamed). Derived attrs are NOT sent (destination fills them).
             const projected = rowsRead.map(r => {
               const o = {}
-              for (const dstA of dstLevelCols) {
-                const srcA = resolveSrcAttr(dstA)
-                o[dstA] = r[srcA] ?? ''
-              }
+              for (const dstA of dstLevelCols) o[dstA] = r[resolveSrcAttr(dstA)] ?? ''
               o[timeField] = odataDateToIso(r[timeField])
-              o[dstKf] = r[srcKf] ?? '0'
+              for (let gi = 0; gi < dstKfs.length; gi++) o[dstKfs[gi]] = r[srcKfs[gi]] ?? '0'
               return o
             })
 
@@ -276,23 +285,21 @@ export default function KeyFigureMigration({ connection, session }) {
           setProgress(p => ({ ...p, phase: 'processing' }))
           const status = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(1800000, Math.max(120000, totalRows * 3)), signal })
           const msgs = await readMessages(connection, session, dstPa, txId, { signal })
-          errors = msgs.length
-          errMsgsAll.push(...msgs)
-
-          push({
-            kf: dstKf, srcKf, txId,
-            status: errors > 0 || status === 'PROCESSED_WITH_ERRORS' || status === 'ERROR' ? 'error'
-                  : status === 'PROCESSED' ? 'ok' : 'processing',
-            total: loaded, ok: loaded - errors, errors, messages: errMsgsAll,
-          })
+          const st = msgs.length > 0 || status === 'PROCESSED_WITH_ERRORS' || status === 'ERROR' ? 'error'
+                   : status === 'PROCESSED' ? 'ok' : 'processing'
+          // One result row per KF of the group (shared transaction, count and status).
+          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId, status: st, total: loaded, ok: loaded - msgs.length, errors: msgs.length, messages: msgs })
         } catch (e) {
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
-            push({ kf: dstKf, srcKf, status: 'cancelled', total: 0, ok: 0, errors: 0 }); break
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'cancelled', total: 0, ok: 0, errors: 0 })
+            break
           }
-          // Calculated KF detection surfaces here.
-          const msg = e.isCalculated ? t('kfm.errCalculated', { kf: e.calculatedKf || dstKf }) : errText(e)
-          push({ kf: dstKf, srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: msg })
+          // A calculated KF in the group fails the whole group's POST; report the
+          // offending KF (from "invalid column name") so the user can remove it.
+          const msg = e.isCalculated ? t('kfm.errCalculated', { kf: e.calculatedKf || label }) : errText(e)
+          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: msg })
         }
+        done += g.length
       }
     } finally {
       setRunning(false); setProgress(null); setResults(all)
