@@ -7,7 +7,7 @@ import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
 import Metering from '../Metering/Metering'
 import Orchestrations from '../Orchestrations/Orchestrations'
-import Migration from '../Migration/Migration'
+import MigrationTabs from '../Migration/MigrationTabs'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getSapSystemUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
@@ -122,7 +122,7 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'orquestador'  && <Orchestrations connection={connection} session={session} />}
         {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
         {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
-        {activeApp === 'migration'    && <Migration      connection={connection} session={session} />}
+        {activeApp === 'migration'    && <MigrationTabs  connection={connection} session={session} />}
       </div>
     </div>
   )
