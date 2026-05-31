@@ -203,6 +203,24 @@ function stripMeta(row) {
   return out
 }
 
+// Distinct time periods present (as ISO strings) for a filter. Selecting only the
+// period + one KF (no attributes) makes SAP aggregate to time-only level, returning
+// one row per period — a cheap way to drive time-based partitioning of huge reads.
+export async function fetchTimeBuckets(conn, session, pa, { timeField, kf, filter, signal } = {}) {
+  let path = `/${pa}?$format=json&$select=${qenc(`${timeField},${kf}`)}&$top=5000`
+  if (filter) path += `&$filter=${qenc(filter)}`
+  const resp = await pcall(conn, session, { path, signal })
+  if (!resp.ok) throw await httpError(resp)
+  const data = await resp.json()
+  const seen = new Set(), out = []
+  for (const r of (data?.d?.results ?? [])) {
+    const raw = r[timeField]
+    if (raw == null || seen.has(raw)) continue
+    seen.add(raw); out.push(odataDateToIso(raw))
+  }
+  return out.sort()
+}
+
 // ─── Diagnostics / safeguards ────────────────────────────────────────────────
 
 // Detects whether a key figure needs a conversion attribute in $filter:

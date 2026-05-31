@@ -5,7 +5,7 @@ import { getSession, setSession } from '../../services/sessionStorage'
 import { setMigrationGuard } from '../../services/migrationGuard'
 import {
   fetchKfCatalog, planningServiceRoot, fetchConversionValues,
-  countKf, readKfPage, detectConversion,
+  countKf, readKfPage, detectConversion, fetchTimeBuckets,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
   odataDateToIso, rowsPerChunk, PARALLEL_R, PARALLEL_W,
@@ -35,6 +35,9 @@ const TIME_LEVELS = [
   { field: 'PERIODID5_TSTAMP', key: 'techweek' },
 ]
 const READONLY_ATTRS = new Set(['VERSIONID','VERSIONNAME','SCENARIOID','SCENARIONAME','MASTER_DATA_TYPE','AGGREGATE','LASTMODIFIEDDATE','CREATEDDATE'])
+// Above this row count, the source read is partitioned by time bucket (one period
+// per segment) to bound each query and avoid very deep $skip offsets on huge volumes.
+const TIME_PARTITION_THRESHOLD = 100000
 
 function errText(e) {
   if (e == null) return 'Error desconocido'
@@ -245,39 +248,54 @@ export default function KeyFigureMigration({ connection, session }) {
 
           const chunkRows = rowsPerChunk(dstKfs.length)   // rows × nKf ≤ 5000 values/POST
           const pageSize  = 5000
-          const pages = Math.max(1, Math.ceil(totalRows / pageSize))
           let loaded = 0
 
-          for (let pg = 0; pg < pages; pg += PARALLEL_R) {
+          // For huge volumes, partition the source read by time bucket (one period
+          // per segment) to bound each query and avoid very deep $skip offsets.
+          // Otherwise a single segment over the whole filter.
+          let segFilters = [filter]
+          if (timeField && totalRows > TIME_PARTITION_THRESHOLD) {
+            try {
+              const buckets = await fetchTimeBuckets(srcConn, srcSession, srcPa, { timeField, kf: srcKfs[0], filter: filter || undefined, signal })
+              if (buckets.length > 1) segFilters = buckets.map(iso => `${filter ? filter + ' and ' : ''}${timeField} eq datetime'${iso}'`)
+            } catch { /* fall back to a single segment */ }
+          }
+
+          for (const segFilter of segFilters) {
             if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-            setProgress(p => ({ ...p, phase: 'reading' }))
-            const batch = Array.from({ length: Math.min(PARALLEL_R, pages - pg) }, (_, j) =>
-              readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: filter || undefined, skip: (pg + j) * pageSize, top: pageSize, signal })
-            )
-            const rowsRead = (await Promise.all(batch)).flat()
-            if (rowsRead.length === 0) break
-
-            // Project to destination write shape: root attrs (renamed) + time (ISO) +
-            // each KF (renamed). Derived attrs are NOT sent (destination fills them).
-            const projected = rowsRead.map(r => {
-              const o = {}
-              for (const dstA of dstLevelCols) o[dstA] = r[resolveSrcAttr(dstA)] ?? ''
-              o[timeField] = odataDateToIso(r[timeField])
-              for (let gi = 0; gi < dstKfs.length; gi++) o[dstKfs[gi]] = r[srcKfs[gi]] ?? '0'
-              return o
-            })
-
-            setProgress(p => ({ ...p, phase: 'writing' }))
-            const chunks = []
-            for (let c = 0; c < projected.length; c += chunkRows) chunks.push(projected.slice(c, c + chunkRows))
-            for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+            for (let skip = 0; ; skip += PARALLEL_R * pageSize) {
               if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-              await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
-                postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
-              ))
+              setProgress(p => ({ ...p, phase: 'reading' }))
+              const batch = Array.from({ length: PARALLEL_R }, (_, j) =>
+                readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: segFilter || undefined, skip: skip + j * pageSize, top: pageSize, signal })
+              )
+              const rowsRead = (await Promise.all(batch)).flat()
+              if (rowsRead.length === 0) break
+
+              // Project to destination write shape: root attrs (renamed) + time (ISO) +
+              // each KF (renamed). Derived attrs are NOT sent (destination fills them).
+              const projected = rowsRead.map(r => {
+                const o = {}
+                for (const dstA of dstLevelCols) o[dstA] = r[resolveSrcAttr(dstA)] ?? ''
+                o[timeField] = odataDateToIso(r[timeField])
+                for (let gi = 0; gi < dstKfs.length; gi++) o[dstKfs[gi]] = r[srcKfs[gi]] ?? '0'
+                return o
+              })
+
+              setProgress(p => ({ ...p, phase: 'writing' }))
+              const chunks = []
+              for (let c = 0; c < projected.length; c += chunkRows) chunks.push(projected.slice(c, c + chunkRows))
+              for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
+                  postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
+                ))
+              }
+              loaded += rowsRead.length
+              setProgress(p => ({ ...p, rows: loaded }))
+              // A short last batch means this segment is exhausted.
+              if (rowsRead.length < PARALLEL_R * pageSize) break
             }
-            loaded += rowsRead.length
-            setProgress(p => ({ ...p, rows: loaded }))
           }
 
           setProgress(p => ({ ...p, phase: 'committing' }))
