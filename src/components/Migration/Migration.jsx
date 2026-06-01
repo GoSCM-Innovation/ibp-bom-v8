@@ -57,10 +57,16 @@ function getMdts(catalog, pa, version) {
 // We "share a root" if, after trimming a short area prefix (0–4 chars) from each
 // name, the remainder matches exactly and is long enough (>= 4) to be meaningful.
 
-// Max attempts to stage+commit a table. Each attempt uses a FRESH transaction;
-// a failed attempt is abandoned uncommitted (SAP discards it) and re-staged, so
-// retries never duplicate keys within a committed transaction.
-const MAX_LOAD_ATTEMPTS = 3
+// Rows per COMMITTED segment. The table is loaded in segments of this size, each
+// committed before the next — so a transient failure only re-does the CURRENT
+// segment (in a fresh transaction), never the whole table, and already-committed
+// segments are kept. Smaller = more durable but more commits.
+const SEGMENT_SIZE = 10000
+// Max attempts PER SEGMENT. A failed attempt abandons its uncommitted transaction
+// (SAP discards it) and re-stages that segment, so retries never duplicate keys
+// within a committed transaction. Higher than before because each retry is now
+// cheap (one segment, not the whole table).
+const MAX_SEGMENT_ATTEMPTS = 5
 
 const MIN_ROOT_LEN = 4
 function rootCandidates(name) {
@@ -604,126 +610,139 @@ export default function Migration({ connection, session }) {
 
           if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
-          // ── Load source (upsert) — idempotent transaction-level retry ──
-          // A chunk is NEVER re-POSTed inside a live transaction (that would
-          // stage a duplicate key → SAP error 119 → both copies rejected). If a
-          // POST fails transiently we ABANDON the uncommitted transaction (SAP
-          // treats it as non-existent) and re-stage everything in a FRESH one.
-          // Only data that was read once is ever committed → "llega solo lo que
-          // se leyó del origen".
+          // ── Load source by COMMITTED SEGMENTS ──
+          // The table is loaded in segments of SEGMENT_SIZE rows; EACH segment is
+          // its own transaction that we commit before moving on. This makes
+          // progress DURABLE: a transient failure only re-does the CURRENT segment
+          // (≤ SEGMENT_SIZE rows) in a fresh transaction — never the whole table —
+          // and already-committed segments are kept. Still duplicate-safe: within
+          // a segment a chunk is NEVER re-POSTed (would stage a duplicate key →
+          // SAP error 119 → both copies rejected); across committed segments a
+          // re-load is an idempotent upsert.
           // Business keys for a stable $orderby (deterministic pagination). Best-effort.
           let srcKeys = []
           try { srcKeys = await fetchKeyNames(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal }) } catch { /* read unordered */ }
 
           setProgress(p => ({ ...p, totalRows }))
-          const pages = Math.ceil(totalRows / readPage) || 1
 
-          for (let attempt = 1; ; attempt++) {
-            if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-            loadedRows = 0
-            try {
-              txId = await getTransactionId(connection, session, {
-                transactionName: 'ibp-bom-migration',
-                versionId: dstVersion || BASE_VERSION_ID,
-                masterDataTypeId: dstName, planningArea: dstPa, signal,
-              })
+          const segmentTxIds = []   // one committed transaction per segment
+          let committedRows = 0     // durable baseline — never reset on a retry
 
-              // Best-effort: enable server-side parallel processing (must not abort the run).
-              try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
+          for (let segStart = 0; segStart < totalRows; segStart += SEGMENT_SIZE) {
+            const segEnd = Math.min(segStart + SEGMENT_SIZE, totalRows)
 
-              for (let pageOffset = 0; pageOffset < pages; pageOffset += PARALLEL_R) {
+            for (let attempt = 1; ; attempt++) {
+              if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+              let segLoaded = 0   // rows staged in THIS attempt (reset on retry)
+              try {
+                txId = await getTransactionId(connection, session, {
+                  transactionName: 'ibp-bom-migration',
+                  versionId: dstVersion || BASE_VERSION_ID,
+                  masterDataTypeId: dstName, planningArea: dstPa, signal,
+                })
+
+                // Best-effort: enable server-side parallel processing (must not abort the run).
+                try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
+
+                // Read + stage ONLY this segment's rows, PARALLEL_R pages at a time.
+                for (let pageStart = segStart; pageStart < segEnd; pageStart += readPage * PARALLEL_R) {
+                  if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+
+                  const batchPageCount = Math.min(PARALLEL_R, Math.ceil((segEnd - pageStart) / readPage))
+                  const readBatch = Array.from({ length: batchPageCount }, (_, i) => {
+                    const skip = pageStart + i * readPage
+                    const top  = Math.min(readPage, segEnd - skip)
+                    return readEntityPage(srcConn, srcSession, srcName, {
+                      skip, top,
+                      planningArea: srcPa, versionId: srcVersion,
+                      select: selectFields, orderby: srcKeys, signal,
+                    })
+                  })
+                  timer.mark('reading')
+                  setProgress(p => ({ ...p, phase: 'reading' }))
+                  const pageResults = await Promise.all(readBatch)
+                  const batchRows = pageResults.flat()
+                  if (batchRows.length === 0) break
+
+                  // Project to common fields (drop fields the destination lacks).
+                  const projected = batchRows.map(r => projectRow(srcName, r))
+
+                  // Split into adaptive-size chunks, write PARALLEL_W at a time.
+                  const chunks = []
+                  for (let c = 0; c < projected.length; c += writeChunk) chunks.push(projected.slice(c, c + writeChunk))
+
+                  timer.mark('writing')
+                  setProgress(p => ({ ...p, phase: 'writing' }))
+                  for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                    if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                    const writeBatch = chunks.slice(ci, ci + PARALLEL_W)
+                    await Promise.all(writeBatch.map(chunk =>
+                      postTransChunk(connection, session, dstName, txId, chunk, {
+                        deleteEntries: false, planningArea: dstPa, versionId: dstVersion, signal, csrf,
+                      })
+                    ))
+                  }
+
+                  segLoaded += batchRows.length
+                  // Throttle row-count re-renders to 500 ms. Show committed baseline + in-flight.
+                  const now = Date.now()
+                  if (now - lastProgressUpdateRef.current >= 500) {
+                    lastProgressUpdateRef.current = now
+                    setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
+                  }
+                }
+
                 if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
-                // Read up to PARALLEL_R pages simultaneously (from the SOURCE table)
-                const batchPageCount = Math.min(PARALLEL_R, pages - pageOffset)
-                const readBatch = Array.from({ length: batchPageCount }, (_, i) =>
-                  readEntityPage(srcConn, srcSession, srcName, {
-                    skip: (pageOffset + i) * readPage,
-                    top: readPage,
-                    planningArea: srcPa,
-                    versionId: srcVersion,
-                    select: selectFields,
-                    orderby: srcKeys,
-                    signal,
-                  })
-                )
-                timer.mark('reading')
-                setProgress(p => ({ ...p, phase: 'reading' }))
-                const pageResults = await Promise.all(readBatch)
-                const batchRows = pageResults.flat()
-                if (batchRows.length === 0) break
+                timer.mark('committing')
+                setProgress(p => ({ ...p, phase: 'committing' }))
+                await commitTransaction(connection, session, txId, { signal, csrf })
 
-                // Project to common fields (field mapping A): drop fields the destination
-                // doesn't have, so SAP won't reject the POST with "Property X is invalid".
-                const projected = batchRows.map(r => projectRow(srcName, r))
-
-                // Split into adaptive-size chunks, write PARALLEL_W at a time
-                const chunks = []
-                for (let c = 0; c < projected.length; c += writeChunk) {
-                  chunks.push(projected.slice(c, c + writeChunk))
+                // Segment committed → durable. Advance the baseline so a later
+                // failure (or retry of the NEXT segment) never drops below this.
+                committedRows += segLoaded
+                loadedRows = committedRows
+                segmentTxIds.push(txId)
+                setProgress(p => ({ ...p, rows: committedRows }))
+                break   // segment done; move to the next one
+              } catch (e) {
+                if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
+                const transient = e?.status == null || e.status >= 500   // network/timeout or 5xx
+                if (transient && attempt < MAX_SEGMENT_ATTEMPTS) {
+                  // Abandon THIS segment's uncommitted transaction; retry only this segment.
+                  timer.mark('retrying')
+                  setProgress(p => ({ ...p, phase: 'retrying' }))
+                  await new Promise(r => setTimeout(r, 1500 * attempt))
+                  continue
                 }
-
-                timer.mark('writing')
-                setProgress(p => ({ ...p, phase: 'writing' }))
-                for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
-                  if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                  const writeBatch = chunks.slice(ci, ci + PARALLEL_W)
-                  await Promise.all(writeBatch.map(chunk =>
-                    postTransChunk(connection, session, dstName, txId, chunk, {
-                      deleteEntries: false,
-                      planningArea: dstPa,
-                      versionId: dstVersion,
-                      signal, csrf,
-                    })
-                  ))
-                }
-
-                loadedRows += batchRows.length
-                // Throttle row-count re-renders to 500 ms; always update on the last page batch.
-                const isLastBatch = pageOffset + PARALLEL_R >= pages
-                const now = Date.now()
-                if (isLastBatch || now - lastProgressUpdateRef.current >= 500) {
-                  lastProgressUpdateRef.current = now
-                  setProgress(p => ({ ...p, rows: loadedRows }))
-                }
+                throw e
               }
-
-              if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-
-              timer.mark('committing')
-              setProgress(p => ({ ...p, phase: 'committing' }))
-              await commitTransaction(connection, session, txId, { signal, csrf })
-              break   // staged + committed without resending any chunk
-            } catch (e) {
-              if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
-              const transient = e?.status == null || e.status >= 500   // network/timeout or 5xx
-              if (transient && attempt < MAX_LOAD_ATTEMPTS) {
-                // Abandon the uncommitted transaction and retry from scratch with a fresh one.
-                timer.mark('retrying')
-                setProgress(p => ({ ...p, phase: 'retrying' }))
-                await new Promise(r => setTimeout(r, 1500 * attempt))
-                continue
-              }
-              throw e
             }
           }
 
-          // SAP commits asynchronously — wait until it finishes applying before
-          // reading messages or counting, otherwise we'd see stale data. The
-          // timeout scales with row count (large tables take longer to process).
+          // SAP commits asynchronously — each segment was committed independently,
+          // so wait for processing and read messages across ALL segment
+          // transactions before counting (otherwise we'd see stale data). By now
+          // the earlier segments are typically already processed.
           timer.mark('processing')
           setProgress(p => ({ ...p, phase: 'processing' }))
-          const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(1800000, Math.max(120000, totalRows * 4)), signal })
+          let anyError = false, anyUnconfirmed = false
+          const errorMsgs = []
+          for (const tx of segmentTxIds) {
+            if (cancelledRef.current) break
+            const st = await waitForProcessed(connection, session, tx, { timeoutMs: Math.min(1800000, Math.max(120000, SEGMENT_SIZE * 4)), signal })
+            if (st === 'ERROR') anyError = true
+            else if (st !== 'PROCESSED') anyUnconfirmed = true
+            timer.mark('messages')
+            setProgress(p => ({ ...p, phase: 'messages' }))
+            const msgs = await readMessages(connection, session, dstName, tx, { signal })
+            errorMsgs.push(...msgs.filter(m => ['E', 'A'].includes(m.Severity)))
+          }
 
-          timer.mark('messages')
-          setProgress(p => ({ ...p, phase: 'messages' }))
-          const messages  = await readMessages(connection, session, dstName, txId, { signal })
-          const errorMsgs = messages.filter(m => ['E', 'A'].includes(m.Severity))
-
-          // Count destination AFTER processing. If the status wasn't confirmed
+          // Count destination AFTER processing. If anything wasn't confirmed
           // PROCESSED, retry a few times while the count catches up.
           let dstAfter = null
-          const attempts = procStatus === 'PROCESSED' ? 1 : 3
+          const attempts = (!anyError && !anyUnconfirmed) ? 1 : 3
           for (let a = 0; a < attempts; a++) {
             if (a > 0) await new Promise(r => setTimeout(r, 2500))
             try {
@@ -732,25 +751,24 @@ export default function Migration({ connection, session }) {
             if (dstAfter != null) break
           }
 
-          // Honest counts reflect what SAP IBP actually reported, not the source
-          // count: rejected = rows SAP refused (one message per rejected row);
-          // sent = rows read from source AND staged (each exactly once now).
+          // Honest counts: rejected = rows SAP refused (one message per rejected
+          // row, across all segments); sent = rows read AND committed.
           const rejected = errorMsgs.length
-          const sent     = loadedRows
+          const sent     = committedRows
 
-          // Status mirrors the IBP job outcome:
-          //   ERROR              → error
-          //   PROCESSED, 0 rej.  → ok ("Migrado")
-          //   PROCESSED, rej.>0  → warning ("Procesado con errores")
-          //   couldn't confirm   → processing (still applying in SAP)
+          // Status: any segment ERROR → error; rejections → warning; unconfirmed
+          // → processing (still applying in SAP); else ok.
           let status
-          if (procStatus === 'ERROR')          status = 'error'
-          else if (procStatus === 'PROCESSED') status = rejected > 0 ? 'warning' : 'ok'
-          else                                 status = 'processing'
+          if (anyError)            status = 'error'
+          else if (rejected > 0)   status = 'warning'
+          else if (anyUnconfirmed) status = 'processing'
+          else                     status = 'ok'
 
           const { phases: phaseTimes, total: durationMs } = timer.finish()
           pushResult({
-            mdt: srcName, dstName, unverified, txId, procStatus,
+            mdt: srcName, dstName, unverified,
+            txId: segmentTxIds[segmentTxIds.length - 1] || null,
+            segments: segmentTxIds.length,
             status,
             total:    sent,
             ok:       Math.max(0, sent - rejected),

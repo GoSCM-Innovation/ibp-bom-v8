@@ -33,7 +33,7 @@ async function withRetry(fn, { retries = 2, signal } = {}) {
 
 export const PAGE_SIZE    = 2000   // default rows per read page (overridable, see pageSizeFor)
 export const CHUNK_SIZE   = 500    // default rows per write POST (overridable, see chunkSizeFor)
-export const PARALLEL_R   = 4      // parallel read pages  (3× speedup measured)
+export const PARALLEL_R   = 3      // parallel read pages (lowered: bigger pages → keep concurrent bytes modest)
 export const PARALLEL_W   = 4      // parallel write POSTs
 
 // Adaptive batch sizing. The hard limit is BYTES, not rows. Reads and writes get
@@ -53,8 +53,8 @@ export const PARALLEL_W   = 4      // parallel write POSTs
 // fields ≈ 1.7 KB read / 1.2 KB POST; AS1UOMTO 6 fields ≈ 0.57 KB / 44 B). The
 // estimates are deliberately conservative (over-estimate) so text-heavy rows
 // still stay under budget. SAP also recommends max 5 000 rows per import.
-const WRITE_BYTE_BUDGET = 2_800_000   // POST body ceiling, well below Vercel's ~4.5 MB
-const READ_BYTE_BUDGET  =   700_000   // GET response ceiling — small to survive proxy relay
+const WRITE_BYTE_BUDGET = 3_500_000   // POST body ceiling, still well below Vercel's ~4.5 MB
+const READ_BYTE_BUDGET  = 1_200_000   // GET response ceiling — moderate; page reads retry on truncation
 const readBytesPerRow  = nFields => 500 + nFields * 30   // GET response (all fields + metadata)
 const writeBytesPerRow = nFields => 150 + nFields * 25   // POST body (projected, no readonly/metadata)
 
@@ -154,7 +154,7 @@ export function buildCatalog(vsmt) {
 // was measured at 60+ s; staging POSTs can also exceed 30 s), so allow up to 90 s
 // (under Vercel's maxDuration) instead of the 30 s proxy default.
 const READ_TIMEOUT  = 90000
-const WRITE_TIMEOUT = 90000
+const WRITE_TIMEOUT = 110000   // headroom under Vercel maxDuration (120s) for larger POST chunks
 
 // Returns total record count using $inlinecount (no extra $count endpoint needed).
 export async function fetchCount(conn, session, name, { planningArea, versionId, signal } = {}) {
@@ -167,7 +167,7 @@ export async function fetchCount(conn, session, name, { planningArea, versionId,
     if (!resp.ok) throw await httpError(resp)
     const data = await resp.json()
     return parseInt(data?.d?.__count ?? '0', 10)
-  }, { retries: 3, signal })
+  }, { retries: 5, signal })
 }
 
 // Fetches one page of rows (2 000 by default). Uses explicit $skip — this tenant
@@ -195,7 +195,7 @@ export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE
     if (!resp.ok) throw await httpError(resp)
     const data = await resp.json()
     return (data?.d?.results ?? []).map(stripMeta)
-  }, { retries: 3, signal })
+  }, { retries: 5, signal })
 }
 
 // Returns the business-key field names of an MDT (excluding the version-context
