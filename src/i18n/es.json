@@ -625,6 +625,8 @@
   "kfm.loadingCat": "Cargando catálogo…",
   "kfm.baseVersion": "Versión base (Baseline)",
   "kfm.areaIs": "Área de planificación: {pa}",
+  "kfm.area": "Área de planificación",
+  "kfm.selectArea": "Selecciona un área",
   "kfm.dstLabel": "Sistema destino (actual)",
   "kfm.sectionLevel": "Nivel de planificación (destino)",
   "kfm.timeLevel": "Nivel de tiempo",

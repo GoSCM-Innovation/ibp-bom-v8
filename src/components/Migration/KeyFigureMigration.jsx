@@ -4,7 +4,7 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import { setMigrationGuard } from '../../services/migrationGuard'
 import {
-  fetchKfCatalog, planningServiceRoot, fetchConversionValues,
+  fetchKfCatalog, fetchKfAreas, planningServiceRoot, fetchConversionValues,
   countKf, readKfPage, detectConversion, fetchTimeBuckets,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
@@ -67,7 +67,11 @@ export default function KeyFigureMigration({ connection, session }) {
   }, [srcConnId, srcTempCreds])
   const needsSrcLogin = !!(srcConn && !srcSession)
 
-  // ── Catalogs ──
+  // ── Catalogs + planning-area selection ──
+  const [dstAreas, setDstAreas] = useState([])
+  const [srcAreas, setSrcAreas] = useState([])
+  const [dstPa, setDstPa]   = useState('')   // selected destination planning area
+  const [srcPa, setSrcPa]   = useState('')   // selected source planning area
   const [dstCat, setDstCat] = useState(null)
   const [srcCat, setSrcCat] = useState(null)
   const [dstLoading, setDstLoading] = useState(false)
@@ -98,28 +102,54 @@ export default function KeyFigureMigration({ connection, session }) {
   const [results, setResults]   = useState(null)
   const [expanded, setExpanded] = useState(null)
 
-  // ── Load destination catalog on mount ──
+  // ── Discover destination planning areas on mount (auto-select if only one) ──
   useEffect(() => {
     let alive = true
     setDstLoading(true); setCatError('')
-    fetchKfCatalog(connection, session)
-      .then(c => { if (alive) setDstCat(c) })
+    setDstPa(''); setDstCat(null)
+    fetchKfAreas(connection, session)
+      .then(areas => { if (!alive) return; setDstAreas(areas); if (areas.length === 1) setDstPa(areas[0]) })
       .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
       .finally(() => { if (alive) setDstLoading(false) })
     return () => { alive = false }
   }, [connection.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Load source catalog when source session is available ──
+  // ── Load destination catalog for the selected area ──
   useEffect(() => {
-    if (!srcConn || !srcSession) { setSrcCat(null); return }
+    if (!dstPa) { setDstCat(null); return }
+    let alive = true
+    setDstLoading(true); setCatError('')
+    fetchKfCatalog(connection, session, { pa: dstPa })
+      .then(c => { if (alive) setDstCat(c) })
+      .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
+      .finally(() => { if (alive) setDstLoading(false) })
+    return () => { alive = false }
+  }, [connection.id, dstPa]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Discover source planning areas when source session is available ──
+  useEffect(() => {
+    if (!srcConn || !srcSession) { setSrcAreas([]); setSrcPa(''); setSrcCat(null); return }
     let alive = true
     setSrcLoading(true); setCatError('')
-    fetchKfCatalog(srcConn, srcSession)
-      .then(c => { if (alive) setSrcCat(c) })
+    setSrcPa(''); setSrcCat(null)
+    fetchKfAreas(srcConn, srcSession)
+      .then(areas => { if (!alive) return; setSrcAreas(areas); if (areas.length === 1) setSrcPa(areas[0]) })
       .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
       .finally(() => { if (alive) setSrcLoading(false) })
     return () => { alive = false }
   }, [srcConnId, srcTempCreds?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Load source catalog for the selected area ──
+  useEffect(() => {
+    if (!srcConn || !srcSession || !srcPa) { setSrcCat(null); return }
+    let alive = true
+    setSrcLoading(true); setCatError('')
+    fetchKfCatalog(srcConn, srcSession, { pa: srcPa })
+      .then(c => { if (alive) setSrcCat(c) })
+      .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
+      .finally(() => { if (alive) setSrcLoading(false) })
+    return () => { alive = false }
+  }, [srcConnId, srcPa, srcTempCreds?.user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Leave guard while running ──
   useEffect(() => { setMigrationGuard(running, t('mig.leaveWarning')); return () => setMigrationGuard(false) }, [running, t])
@@ -417,14 +447,16 @@ export default function KeyFigureMigration({ connection, session }) {
             )}
             {srcConn && srcSession && (
               <div style={{ marginTop: 12 }}>
-                <label style={LABEL}>{t('kfm.srcVersion')}</label>
-                {srcLoading ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>{t('kfm.loadingCat')}</div> : (
-                  <select style={SELECT} value={srcVersion} onChange={e => setSrcVersion(e.target.value)}>
-                    <option value="">{t('kfm.baseVersion')}</option>
-                    {(srcCat?.versions || []).filter(v => v.id && v.id !== '__BASELINE').map(v => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
-                  </select>
-                )}
-                {srcCat && <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{t('kfm.areaIs', { pa: srcCat.pa })}</div>}
+                <label style={LABEL}>{t('kfm.area')}</label>
+                <select style={SELECT} value={srcPa} onChange={e => setSrcPa(e.target.value)} disabled={srcAreas.length <= 1}>
+                  {srcAreas.length !== 1 && <option value="">{srcLoading ? t('kfm.loadingCat') : t('kfm.selectArea')}</option>}
+                  {srcAreas.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <label style={{ ...LABEL, marginTop: 10 }}>{t('kfm.srcVersion')}</label>
+                <select style={SELECT} value={srcVersion} onChange={e => setSrcVersion(e.target.value)} disabled={!srcCat}>
+                  <option value="">{t('kfm.baseVersion')}</option>
+                  {(srcCat?.versions || []).filter(v => v.id && v.id !== '__BASELINE').map(v => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
+                </select>
               </div>
             )}
           </div>
@@ -435,14 +467,18 @@ export default function KeyFigureMigration({ connection, session }) {
               {connection.name}
             </div>
             <div style={{ marginTop: 12 }}>
+              <label style={LABEL}>{t('kfm.area')}</label>
+              <select style={SELECT} value={dstPa} onChange={e => setDstPa(e.target.value)} disabled={dstAreas.length <= 1}>
+                {dstAreas.length !== 1 && <option value="">{dstLoading ? t('kfm.loadingCat') : t('kfm.selectArea')}</option>}
+                {dstAreas.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div style={{ marginTop: 12 }}>
               <label style={LABEL}>{t('kfm.dstVersion')}</label>
-              {dstLoading ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>{t('kfm.loadingCat')}</div> : (
-                <select style={SELECT} value={dstVersion} onChange={e => setDstVersion(e.target.value)}>
-                  <option value="">{t('kfm.baseVersion')}</option>
-                  {(dstCat?.versions || []).filter(v => v.id && v.id !== '__BASELINE').map(v => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
-                </select>
-              )}
-              {dstCat && <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{t('kfm.areaIs', { pa: dstCat.pa })}</div>}
+              <select style={SELECT} value={dstVersion} onChange={e => setDstVersion(e.target.value)} disabled={!dstCat}>
+                <option value="">{t('kfm.baseVersion')}</option>
+                {(dstCat?.versions || []).filter(v => v.id && v.id !== '__BASELINE').map(v => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
+              </select>
             </div>
           </div>
         </div>

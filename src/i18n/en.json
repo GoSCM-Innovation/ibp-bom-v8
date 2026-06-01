@@ -625,6 +625,8 @@
   "kfm.loadingCat": "Loading catalog…",
   "kfm.baseVersion": "Base version (Baseline)",
   "kfm.areaIs": "Planning area: {pa}",
+  "kfm.area": "Planning area",
+  "kfm.selectArea": "Select an area",
   "kfm.dstLabel": "Destination system (current)",
   "kfm.sectionLevel": "Planning level (destination)",
   "kfm.timeLevel": "Time level",

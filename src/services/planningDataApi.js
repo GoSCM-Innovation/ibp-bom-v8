@@ -151,9 +151,11 @@ export async function fetchVersions(conn, session, pa, { signal } = {}) {
   return rows.map(r => ({ id: r.VERSIONID, name: r.VERSIONNAME || r.VERSIONID }))
 }
 
-// Full per-connection catalog: { pa, dims, measures, labels, versions }. Cached 24 h.
-export async function fetchKfCatalog(conn, session, { force = false, signal } = {}) {
-  const ck = `ibp:kfcatalog:${conn.id}`
+// Planning-area list exposed to this user (cached 24 h per connection). The
+// service exposes an area as an entity set only if it's enabled for this service
+// in the SAP_COM_0720 arrangement — usually one, sometimes several.
+export async function fetchKfAreas(conn, session, { force = false, signal } = {}) {
+  const ck = `ibp:kfareas:${conn.id}`
   if (!force) {
     try {
       const cached = JSON.parse(localStorage.getItem(ck))
@@ -161,21 +163,43 @@ export async function fetchKfCatalog(conn, session, { force = false, signal } = 
     } catch { /* ignore */ }
   }
   const areas = await discoverPlanningArea(conn, session, { signal })
+  try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: areas })) } catch { /* quota */ }
+  return areas
+}
+
+// Catalog for ONE planning area: { pa, areas, dims, measures, labels, versions }.
+// Cached per connection+area. If `pa` is omitted (or unknown), the first
+// discovered area is used — so single-area tenants keep working with no selection.
+export async function fetchKfCatalog(conn, session, { pa, force = false, signal } = {}) {
+  const areas = await fetchKfAreas(conn, session, { force, signal })
   if (areas.length === 0) {
     throw new Error('El servicio PLANNING_DATA_API_SRV no expone ningún área de planificación para este usuario. Habilítela en el communication arrangement SAP_COM_0720.')
   }
-  const pa = areas[0]
+  const area = (pa && areas.includes(pa)) ? pa : areas[0]
+  const ck = `ibp:kfcatalog:${conn.id}:${area}`
+  if (!force) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(ck))
+      if (cached && Date.now() - cached.ts < CATALOG_TTL) return cached.data
+    } catch { /* ignore */ }
+  }
   const [{ dims, measures, labels }, versions] = await Promise.all([
-    fetchKfMetadata(conn, session, pa, { signal }),
-    fetchVersions(conn, session, pa, { signal }),
+    fetchKfMetadata(conn, session, area, { signal }),
+    fetchVersions(conn, session, area, { signal }),
   ])
-  const data = { pa, areas, dims, measures, labels, versions }
+  const data = { pa: area, areas, dims, measures, labels, versions }
   try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data })) } catch { /* quota */ }
   return data
 }
 
 export function invalidateKfCatalog(connId) {
-  try { localStorage.removeItem(`ibp:kfcatalog:${connId}`) } catch { /* ignore */ }
+  try {
+    const prefix = `ibp:kfcatalog:${connId}`
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i)
+      if (k === `ibp:kfareas:${connId}` || (k && k.startsWith(prefix))) localStorage.removeItem(k)
+    }
+  } catch { /* ignore */ }
 }
 
 // ─── Read ──────────────────────────────────────────────────────────────────────
