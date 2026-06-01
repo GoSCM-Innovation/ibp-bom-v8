@@ -8,7 +8,7 @@ import {
   countKf, readKfPage, detectConversion, fetchTimeBuckets,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
-  odataDateToIso, rowsPerChunk, readRowsPerPage, PARALLEL_R, PARALLEL_W, MAX_LOAD_ATTEMPTS,
+  odataDateToIso, rowsPerChunk, readRowsPerPage, PARALLEL_R, PARALLEL_W, SEGMENT_SIZE, MAX_SEGMENT_ATTEMPTS,
 } from '../../services/planningDataApi'
 
 // ── Styles (shared visual language with Migration.jsx) ──────────────────────────
@@ -350,98 +350,134 @@ export default function KeyFigureMigration({ connection, session }) {
           // POSTs, no pointless disaggregation, cleaner destination.
           const isEmpty = v => v == null || String(v).trim() === '' || Number(v) === 0
 
-          // ── Stage + commit with idempotent transaction-level retry ──
-          // A chunk is never re-POSTed inside a live transaction (that would stage a
-          // duplicate value). On a transient failure we abandon the uncommitted
-          // transaction (SAP saves nothing without commit) and re-stage in a fresh one.
-          let txId = null, loaded = 0, written = 0
-          for (let attempt = 1; ; attempt++) {
+          // ── Stage + commit by COMMITTED SEGMENTS ──
+          // The group is loaded in segments of ~SEGMENT_SIZE read rows (kept within a
+          // time bucket), each in its own transaction that is COMMITTED before the
+          // next. A transient failure only re-does the CURRENT segment in a fresh
+          // transaction — never the whole group — and committed segments are kept
+          // (durable progress). Still duplicate-safe: within a segment a chunk is
+          // never re-POSTed; across committed segments a re-load is idempotent upsert.
+          const projectBatch = rowsRead => {
+            const out = []
+            for (const r of rowsRead) {
+              const o = {}
+              for (const dstA of dstLevelCols) o[dstA] = r[resolveSrcAttr(dstA)] ?? ''
+              o[timeField] = odataDateToIso(r[timeField])
+              let hasValue = false
+              for (let gi = 0; gi < dstKfs.length; gi++) {
+                const val = r[srcKfs[gi]]
+                o[dstKfs[gi]] = val ?? '0'
+                if (!isEmpty(val)) hasValue = true
+              }
+              if (hasValue) out.push(o)
+            }
+            return out
+          }
+
+          const segmentTxIds = []   // one committed transaction per non-empty segment
+          let committedRows = 0     // read rows confirmed — durable baseline (never reset)
+          let totalWritten  = 0     // values actually written across all segments
+          const batchSize   = PARALLEL_R * readPageSize
+
+          for (const segFilter of segFilters) {
             if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-            loaded = 0; written = 0
-            try {
-              txId = await getTransactionId(connection, session, { signal })
-              try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
+            let bucketSkip = 0, bucketDone = false
+            while (!bucketDone) {
+              if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
-              for (const segFilter of segFilters) {
+              for (let attempt = 1; ; attempt++) {
                 if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                for (let skip = 0; ; skip += PARALLEL_R * readPageSize) {
-                  if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                  setProgress(p => ({ ...p, phase: 'reading' }))
-                  const batch = Array.from({ length: PARALLEL_R }, (_, j) =>
-                    readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: segFilter || undefined, skip: skip + j * readPageSize, top: readPageSize, orderby, signal })
-                  )
-                  const rowsRead = (await Promise.all(batch)).flat()
-                  if (rowsRead.length === 0) break
+                let segLoaded = 0, segWritten = 0, reachedEnd = false
+                try {
+                  const txId = await getTransactionId(connection, session, { signal })
+                  try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
 
-                  // Project to destination shape (root attrs renamed + time ISO + KFs
-                  // renamed); drop rows where every key figure is empty/0/null.
-                  const projected = []
-                  for (const r of rowsRead) {
-                    const o = {}
-                    for (const dstA of dstLevelCols) o[dstA] = r[resolveSrcAttr(dstA)] ?? ''
-                    o[timeField] = odataDateToIso(r[timeField])
-                    let hasValue = false
-                    for (let gi = 0; gi < dstKfs.length; gi++) {
-                      const val = r[srcKfs[gi]]
-                      o[dstKfs[gi]] = val ?? '0'
-                      if (!isEmpty(val)) hasValue = true
+                  // Read + stage one segment: up to ~SEGMENT_SIZE rows from bucketSkip.
+                  let skip = bucketSkip
+                  while (segLoaded < SEGMENT_SIZE) {
+                    if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                    setProgress(p => ({ ...p, phase: 'reading' }))
+                    const batch = Array.from({ length: PARALLEL_R }, (_, j) =>
+                      readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: segFilter || undefined, skip: skip + j * readPageSize, top: readPageSize, orderby, signal })
+                    )
+                    const rowsRead = (await Promise.all(batch)).flat()
+                    if (rowsRead.length === 0) { reachedEnd = true; break }
+
+                    const projected = projectBatch(rowsRead)
+                    if (projected.length > 0) {
+                      setProgress(p => ({ ...p, phase: 'writing' }))
+                      const chunks = []
+                      for (let c = 0; c < projected.length; c += chunkRows) chunks.push(projected.slice(c, c + chunkRows))
+                      for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                        if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                        await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
+                          postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
+                        ))
+                      }
+                      segWritten += projected.length
                     }
-                    if (hasValue) projected.push(o)
+                    segLoaded += rowsRead.length
+                    skip += batchSize
+                    setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
+                    if (rowsRead.length < batchSize) { reachedEnd = true; break }
                   }
 
-                  if (projected.length > 0) {
-                    setProgress(p => ({ ...p, phase: 'writing' }))
-                    const chunks = []
-                    for (let c = 0; c < projected.length; c += chunkRows) chunks.push(projected.slice(c, c + chunkRows))
-                    for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
-                      if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                      await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
-                        postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
-                      ))
-                    }
-                    written += projected.length
+                  // Commit this segment (only if it staged something; an all-empty
+                  // segment is abandoned — SAP saves nothing without commit).
+                  if (segWritten > 0) {
+                    setProgress(p => ({ ...p, phase: 'committing' }))
+                    await commitTransaction(connection, session, txId, { signal, csrf })
+                    segmentTxIds.push(txId)
+                    totalWritten += segWritten
                   }
-                  loaded += rowsRead.length
-                  setProgress(p => ({ ...p, rows: loaded }))
-                  if (rowsRead.length < PARALLEL_R * readPageSize) break
+                  committedRows += segLoaded
+                  bucketSkip    += segLoaded
+                  setProgress(p => ({ ...p, rows: committedRows }))
+                  if (reachedEnd) bucketDone = true
+                  break   // segment done
+                } catch (e) {
+                  if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
+                  if (e.isCalculated) throw e   // permanent (calculated KF) — don't retry
+                  const transient = e?.status == null || e.status >= 500
+                  if (transient && attempt < MAX_SEGMENT_ATTEMPTS) {
+                    setProgress(p => ({ ...p, phase: 'retrying' }))
+                    await new Promise(r => setTimeout(r, 1500 * attempt))
+                    continue
+                  }
+                  throw e
                 }
               }
-
-              if (written === 0) break   // nothing meaningful to commit; abandon the empty tx
-              setProgress(p => ({ ...p, phase: 'committing' }))
-              await commitTransaction(connection, session, txId, { signal, csrf })
-              break   // staged + committed without resending any chunk
-            } catch (e) {
-              if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
-              if (e.isCalculated) throw e   // permanent (calculated KF) — don't retry
-              const transient = e?.status == null || e.status >= 500
-              if (transient && attempt < MAX_LOAD_ATTEMPTS) {
-                setProgress(p => ({ ...p, phase: 'retrying' }))
-                await new Promise(r => setTimeout(r, 1500 * attempt))
-                continue
-              }
-              throw e
             }
           }
 
           // Nothing had a value → nothing migrated (and nothing committed).
-          if (written === 0) {
-            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId, status: 'ok', total: 0, ok: 0, errors: 0 })
+          if (totalWritten === 0) {
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId: null, status: 'ok', total: 0, ok: 0, errors: 0 })
             done += g.length
             continue
           }
 
+          // Confirm processing + collect messages across ALL segment transactions.
           setProgress(p => ({ ...p, phase: 'processing' }))
-          const status = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(1800000, Math.max(120000, written * 3)), signal })
-          const msgs = await readMessages(connection, session, dstPa, txId, { signal })
-          // Honest status mirroring the IBP job: ERROR → error; processed with
-          // rejections → warning; clean → ok; couldn't confirm → processing.
-          const st = status === 'ERROR' ? 'error'
-                   : (msgs.length > 0 || status === 'PROCESSED_WITH_ERRORS') ? 'warning'
-                   : status === 'PROCESSED' ? 'ok' : 'processing'
-          // One result row per KF of the group (shared transaction). total = rows
-          // actually written (with a value), not rows read.
-          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId, status: st, total: written, ok: Math.max(0, written - msgs.length), errors: msgs.length, messages: msgs })
+          let anyError = false, anyWarning = false, anyUnconfirmed = false
+          const msgs = []
+          for (const tx of segmentTxIds) {
+            if (cancelledRef.current) break
+            const st0 = await waitForProcessed(connection, session, tx, { timeoutMs: Math.min(1800000, Math.max(120000, SEGMENT_SIZE * 3)), signal })
+            if (st0 === 'ERROR') anyError = true
+            else if (st0 === 'PROCESSED_WITH_ERRORS') anyWarning = true
+            else if (st0 !== 'PROCESSED') anyUnconfirmed = true
+            const m = await readMessages(connection, session, dstPa, tx, { signal })
+            msgs.push(...m)
+          }
+          // Honest status: any ERROR → error; rejections/warnings → warning;
+          // unconfirmed → processing; else ok.
+          const st = anyError ? 'error'
+                   : (msgs.length > 0 || anyWarning) ? 'warning'
+                   : anyUnconfirmed ? 'processing' : 'ok'
+          // One result row per KF of the group. total = values actually written.
+          const lastTx = segmentTxIds[segmentTxIds.length - 1] || null
+          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId: lastTx, status: st, total: totalWritten, ok: Math.max(0, totalWritten - msgs.length), errors: msgs.length, messages: msgs })
         } catch (e) {
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
             for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'cancelled', total: 0, ok: 0, errors: 0 })

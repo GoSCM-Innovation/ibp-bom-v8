@@ -27,19 +27,31 @@ import { fetchVsmt } from './masterDataApi.js'
 
 const COM = '0720'
 const READ_TIMEOUT  = 90000
-const WRITE_TIMEOUT = 90000
+const WRITE_TIMEOUT = 110000   // headroom under Vercel maxDuration (120s) for larger POST chunks
 const CATALOG_TTL   = 24 * 60 * 60 * 1000   // 24 h
 
 export const BASE_VERSION_ID = '__BASELINE'
 export const MAX_KF_VALUES_PER_POST = 5000  // SAP-recommended limit
-export const PARALLEL_R = 4                  // parallel read pages
+export const PARALLEL_R = 3                  // parallel read pages (lowered: bigger pages → keep concurrent bytes modest)
 export const PARALLEL_W = 4                  // parallel write POSTs
 export const COUNT_TOP  = 2                  // small $top for safe counting (never 0)
-export const BYTE_BUDGET = 2_800_000         // safe ceiling under Vercel's ~4.5 MB body limit
-// Max attempts to stage+commit one KF group. Each attempt uses a FRESH transaction;
-// a failed attempt is abandoned uncommitted (SAP saves nothing without commit) and
-// re-staged, so retries never duplicate values within a committed transaction.
-export const MAX_LOAD_ATTEMPTS = 3
+// Separate byte budgets (the hard ceiling is BYTES, not rows; Vercel caps the
+// request/response body at ~4.5 MB). Reads get a SMALLER budget: large multi-MB
+// read responses relayed through the proxy can arrive TRUNCATED under load, so we
+// keep each read page well under the size where truncation appears (and page
+// reads retry — see readKfPage). Mirrors the master-data fix.
+export const WRITE_BYTE_BUDGET = 3_500_000   // POST body ceiling, well below ~4.5 MB
+export const READ_BYTE_BUDGET  = 1_200_000   // GET response ceiling — moderate; reads retry on truncation
+// Rows per COMMITTED segment. A KF group is loaded in segments of this size, each
+// committed before the next — so a transient failure only re-does the CURRENT
+// segment (in a fresh transaction), never the whole group, and committed segments
+// are kept. Mirrors the master-data fix.
+export const SEGMENT_SIZE = 10000
+// Max attempts PER SEGMENT. A failed attempt abandons its uncommitted transaction
+// (SAP saves nothing without commit) and re-stages that segment, so retries never
+// duplicate values within a committed transaction. Higher than before because each
+// retry is now cheap (one segment, not the whole group).
+export const MAX_SEGMENT_ATTEMPTS = 5
 
 // Entity sets the service always exposes regardless of planning area.
 const GENERIC_SETS = new Set(['KeyFigureDeltaDefinitionSet', 'ValueResultSet'])
@@ -210,10 +222,13 @@ export function invalidateKfCatalog(connId) {
 export async function countKf(conn, session, pa, { select, filter, signal } = {}) {
   let path = `/${pa}?$format=json&$top=${COUNT_TOP}&$inlinecount=allpages&$select=${qenc(select)}`
   if (filter) path += `&$filter=${qenc(filter)}`
-  const resp = await pcall(conn, session, { path, signal })
-  if (!resp.ok) throw await httpError(resp)
-  const data = await resp.json()
-  return parseInt(data?.d?.__count ?? '0', 10)
+  // Idempotent read → retry transient failures (5xx / truncated-relay 502 / network).
+  return withRetry(async () => {
+    const resp = await pcall(conn, session, { path, signal })
+    if (!resp.ok) throw await httpError(resp)
+    const data = await resp.json()
+    return parseInt(data?.d?.__count ?? '0', 10)
+  }, { retries: 5, signal })
 }
 
 // One page of key-figure rows. Caller drives pagination via skip/top.
@@ -223,10 +238,16 @@ export async function readKfPage(conn, session, pa, { select, filter, skip = 0, 
   let path = `/${pa}?$format=json&$select=${qenc(select)}&$top=${top}&$skip=${skip}`
   if (orderby && orderby.length) path += `&$orderby=${qenc(orderby.join(','))}`
   if (filter) path += `&$filter=${qenc(filter)}`
-  const resp = await pcall(conn, session, { path, signal })
-  if (!resp.ok) throw await httpError(resp)
-  const data = await resp.json()
-  return (data?.d?.results ?? []).map(stripMeta)
+  // A page read is idempotent (same $skip/$top/$orderby → same rows), so it is safe
+  // to retry. This lets a truncated-relay page (proxy 502) or transient 5xx recover
+  // on its own WITHOUT discarding the segment. NOTE: writes are NOT retried (see
+  // postKfChunk) — re-POSTing would duplicate values inside a live transaction.
+  return withRetry(async () => {
+    const resp = await pcall(conn, session, { path, signal })
+    if (!resp.ok) throw await httpError(resp)
+    const data = await resp.json()
+    return (data?.d?.results ?? []).map(stripMeta)
+  }, { retries: 5, signal })
 }
 
 function stripMeta(row) {
@@ -461,16 +482,17 @@ export function odataDateToIso(val) {
 const readBytesPerRow  = nFields => 500 + (nFields || 1) * 30   // GET response/row estimate
 const writeBytesPerRow = nFields => 150 + (nFields || 1) * 25   // POST body/row estimate
 
-// Rows per read page: bounded by the byte budget (avoid 4.5 MB → HTTP 500).
+// Rows per read page: bounded by the (smaller) read byte budget to survive the
+// proxy relay without truncation.
 export function readRowsPerPage(nFields) {
-  return Math.max(500, Math.min(10000, Math.floor(BYTE_BUDGET / readBytesPerRow(nFields))))
+  return Math.max(250, Math.min(10000, Math.floor(READ_BYTE_BUDGET / readBytesPerRow(nFields))))
 }
 
-// Rows per write chunk: the SMALLER of SAP's ≤5000-values cap and the byte budget.
-// nFields = columns per row (level attrs + key figures + time). nKf = key figures.
+// Rows per write chunk: the SMALLER of SAP's ≤5000-values cap and the write byte
+// budget. nFields = columns per row (level attrs + key figures + time). nKf = key figures.
 export function rowsPerChunk(nKf, nFields) {
   const byValues = Math.max(1, Math.min(5000, Math.floor(MAX_KF_VALUES_PER_POST / Math.max(1, nKf || 1))))
   if (!nFields) return byValues
-  const byBytes = Math.max(1, Math.floor(BYTE_BUDGET / writeBytesPerRow(nFields)))
+  const byBytes = Math.max(1, Math.floor(WRITE_BYTE_BUDGET / writeBytesPerRow(nFields)))
   return Math.max(1, Math.min(byValues, byBytes))
 }
