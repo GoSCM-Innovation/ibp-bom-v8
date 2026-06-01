@@ -146,6 +146,47 @@ function formatCell(val) {
   return val
 }
 
+// Formats a millisecond duration compactly: "1h 02m", "2m 14s", "4,2 s", "850 ms".
+function fmtDuration(ms) {
+  if (ms == null || !isFinite(ms)) return '—'
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1).replace('.', ',')} s`
+  const m = Math.floor(s / 60)
+  const rem = Math.round(s % 60)
+  if (m < 60) return `${m}m ${String(rem).padStart(2, '0')}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${String(m % 60).padStart(2, '0')}m`
+}
+
+// Per-table phase timer: accumulates elapsed ms into the current phase bucket.
+// Call mark(phase) on every phase change; finish() seals the last phase and
+// returns { phases: { reading, writing, ... }, total }. Pure wall-clock — adds
+// no SAP calls.
+function makePhaseTimer() {
+  const phases = {}
+  const start = Date.now()
+  let cur = null
+  let last = start
+  return {
+    mark(phase) {
+      const now = Date.now()
+      if (cur) phases[cur] = (phases[cur] || 0) + (now - last)
+      cur = phase
+      last = now
+    },
+    finish() {
+      const now = Date.now()
+      if (cur) phases[cur] = (phases[cur] || 0) + (now - last)
+      cur = null
+      return { phases, total: now - start }
+    },
+  }
+}
+
+// Phases shown in the per-table breakdown, in execution order.
+const TIMED_PHASES = ['reading', 'deleting', 'writing', 'committing', 'processing', 'messages', 'retrying']
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Migration({ connection, session }) {
@@ -229,6 +270,12 @@ export default function Migration({ connection, session }) {
 
   // ── Error detail expand ──
   const [expandedMdt, setExpandedMdt] = useState(null)
+  // ── Phase-timing detail expand (per result row) ──
+  const [expandedTimeMdt, setExpandedTimeMdt] = useState(null)
+
+  // ── Live elapsed clock (ticks once per second while a run is active) ──
+  const runStartRef = useRef(0)
+  const [runElapsed, setRunElapsed] = useState(0)
 
   // ── Preview ──
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -288,6 +335,13 @@ export default function Migration({ connection, session }) {
 
   // On unmount (e.g. user confirmed leaving the tab/connection), abort the run.
   useEffect(() => () => { cancelledRef.current = true; abortRef.current?.abort() }, [])
+
+  // Tick the live elapsed clock every second while running.
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => setRunElapsed(Date.now() - runStartRef.current), 1000)
+    return () => clearInterval(id)
+  }, [running])
 
   // ── Load source catalog when source + session become available ──
   useEffect(() => {
@@ -463,6 +517,8 @@ export default function Migration({ connection, session }) {
     cancelledRef.current = false
     abortRef.current = new AbortController()
     const signal = abortRef.current.signal
+    runStartRef.current = Date.now()
+    setRunElapsed(0)
 
     const mdtList = [...mdtOrder]
     const allResults = []
@@ -488,8 +544,14 @@ export default function Migration({ connection, session }) {
         // without it (unverifiable) we download every column (common + omitted).
         const readFields  = selectFields ? selectFields.length : ((entry?.common?.length || 0) + (entry?.omitted?.length || 0))
         const writeChunk  = writeFields ? chunkSizeFor(writeFields) : CHUNK_SIZE
-        const readPage    = readFields  ? pageSizeFor(readFields)  : PAGE_SIZE
+        // Unknown schema (unverified) reads ALL columns → assume ~60 fields so the
+        // page stays small instead of falling back to a large 2000-row page.
+        const readPage    = pageSizeFor(readFields || 60)
 
+        // Per-table phase timer — measures how long each phase takes (shown in
+        // results + saved to history). Mark on every phase change below.
+        const timer = makePhaseTimer()
+        timer.mark('reading')
         setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading' })
 
         let totalRows = 0
@@ -499,7 +561,8 @@ export default function Migration({ connection, session }) {
         try {
           totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal })
         } catch (e) {
-          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: errText(e) })
+          const { phases: phaseTimes, total: durationMs } = timer.finish()
+          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: errText(e), phaseTimes, durationMs })
           continue
         }
 
@@ -519,6 +582,7 @@ export default function Migration({ connection, session }) {
           // SAP forbids mixing DeleteEntries true/false in one transaction, so the
           // delete runs as a separate committed transaction before the load.
           if (deleteEntries) {
+            timer.mark('deleting')
             setProgress(p => ({ ...p, phase: 'deleting' }))
             const { keyNames, rows: keyRows } = await readKeyRows(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion, signal })
             if (keyRows.length > 0 && keyNames.length > 0) {
@@ -583,6 +647,7 @@ export default function Migration({ connection, session }) {
                     signal,
                   })
                 )
+                timer.mark('reading')
                 setProgress(p => ({ ...p, phase: 'reading' }))
                 const pageResults = await Promise.all(readBatch)
                 const batchRows = pageResults.flat()
@@ -598,6 +663,7 @@ export default function Migration({ connection, session }) {
                   chunks.push(projected.slice(c, c + writeChunk))
                 }
 
+                timer.mark('writing')
                 setProgress(p => ({ ...p, phase: 'writing' }))
                 for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
                   if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
@@ -624,6 +690,7 @@ export default function Migration({ connection, session }) {
 
               if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
+              timer.mark('committing')
               setProgress(p => ({ ...p, phase: 'committing' }))
               await commitTransaction(connection, session, txId, { signal, csrf })
               break   // staged + committed without resending any chunk
@@ -632,6 +699,7 @@ export default function Migration({ connection, session }) {
               const transient = e?.status == null || e.status >= 500   // network/timeout or 5xx
               if (transient && attempt < MAX_LOAD_ATTEMPTS) {
                 // Abandon the uncommitted transaction and retry from scratch with a fresh one.
+                timer.mark('retrying')
                 setProgress(p => ({ ...p, phase: 'retrying' }))
                 await new Promise(r => setTimeout(r, 1500 * attempt))
                 continue
@@ -643,9 +711,11 @@ export default function Migration({ connection, session }) {
           // SAP commits asynchronously — wait until it finishes applying before
           // reading messages or counting, otherwise we'd see stale data. The
           // timeout scales with row count (large tables take longer to process).
+          timer.mark('processing')
           setProgress(p => ({ ...p, phase: 'processing' }))
           const procStatus = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(1800000, Math.max(120000, totalRows * 4)), signal })
 
+          timer.mark('messages')
           setProgress(p => ({ ...p, phase: 'messages' }))
           const messages  = await readMessages(connection, session, dstName, txId, { signal })
           const errorMsgs = messages.filter(m => ['E', 'A'].includes(m.Severity))
@@ -678,6 +748,7 @@ export default function Migration({ connection, session }) {
           else if (procStatus === 'PROCESSED') status = rejected > 0 ? 'warning' : 'ok'
           else                                 status = 'processing'
 
+          const { phases: phaseTimes, total: durationMs } = timer.finish()
           pushResult({
             mdt: srcName, dstName, unverified, txId, procStatus,
             status,
@@ -686,14 +757,16 @@ export default function Migration({ connection, session }) {
             errors:   rejected,
             messages: errorMsgs,   // kept for detail panel
             dstBefore, dstAfter,
+            phaseTimes, durationMs,
           })
         } catch (e) {
+          const { phases: phaseTimes, total: durationMs } = timer.finish()
           // Cancellation: explicit flag, an aborted request, or the cancel ref set.
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
-            pushResult({ mdt: srcName, dstName, unverified, status: 'cancelled', total: loadedRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
+            pushResult({ mdt: srcName, dstName, unverified, status: 'cancelled', total: loadedRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null, phaseTimes, durationMs })
             break
           }
-          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: loadedRows, ok: 0, errors: 1, txId, errorMsg: errText(e), dstBefore, dstAfter: null })
+          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: loadedRows, ok: 0, errors: 1, txId, errorMsg: errText(e), dstBefore, dstAfter: null, phaseTimes, durationMs })
         }
       }
     } finally {
@@ -702,6 +775,7 @@ export default function Migration({ connection, session }) {
       setResults(allResults)
 
       const totalRowsMigrated = allResults.reduce((s, r) => s + (r.total || 0), 0)
+      const runDurationMs = Date.now() - runStartRef.current
       const overallStatus = allResults.some(r => r.status === 'cancelled') ? 'cancelled'
         : allResults.some(r => r.status === 'error') ? 'error'
         : allResults.some(r => r.status === 'processing') ? 'processing'
@@ -714,6 +788,8 @@ export default function Migration({ connection, session }) {
         mdts: mdtList,
         totalRows: totalRowsMigrated,
         status: overallStatus,
+        durationMs: runDurationMs,
+        timings: allResults.map(r => ({ mdt: r.mdt, durationMs: r.durationMs, phaseTimes: r.phaseTimes })),
       }
       const updated = [entry, ...loadHistory(connection.id)].slice(0, 50)
       saveHistory(connection.id, updated)
@@ -733,6 +809,16 @@ export default function Migration({ connection, session }) {
     processing: t('mig.phaseProcessing'),
     messages:   t('mig.phaseMessages'),
     retrying:   t('mig.phaseRetrying'),
+  }
+  // Concise phase names for the per-table timing breakdown.
+  const PHASE_SHORT = {
+    reading:    t('mig.tReading'),
+    deleting:   t('mig.tDeleting'),
+    writing:    t('mig.tWriting'),
+    committing: t('mig.tCommitting'),
+    processing: t('mig.tProcessing'),
+    messages:   t('mig.tMessages'),
+    retrying:   t('mig.tRetrying'),
   }
 
   // Result status → label / colour / icon (shared by results table and step panel).
@@ -1143,8 +1229,9 @@ export default function Migration({ connection, session }) {
       {/* ── Progress (step list — every selected table with its live status) ── */}
       {running && (
         <div style={{ ...SECTION, background: 'color-mix(in srgb, var(--accent) 5%, var(--bg2))' }}>
-          <div style={{ ...SECTION_HDR, marginBottom: 10 }}>
-            {t('mig.progressTitle', { cur: progress?.datasetCur || 0, total: mdtOrder.length })}
+          <div style={{ ...SECTION_HDR, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{t('mig.progressTitle', { cur: progress?.datasetCur || 0, total: mdtOrder.length })}</span>
+            <span style={{ fontFamily: 'var(--mono)', color: 'var(--text2)', letterSpacing: 0 }}>⏱ {fmtDuration(runElapsed)}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {mdtOrder.map((srcName, i) => {
@@ -1202,6 +1289,39 @@ export default function Migration({ connection, session }) {
       {!running && results && results.length > 0 && (
         <div style={SECTION}>
           <div style={SECTION_HDR}>{t('mig.resultsTitle')}</div>
+
+          {/* ── Timing summary ── */}
+          {(() => {
+            const totalRun = results.reduce((s, r) => s + (r.durationMs || 0), 0)
+            const phaseTotals = {}
+            results.forEach(r => Object.entries(r.phaseTimes || {}).forEach(([p, ms]) => { phaseTotals[p] = (phaseTotals[p] || 0) + ms }))
+            const slowest = results.reduce((a, b) => ((b.durationMs || 0) > (a?.durationMs || 0) ? b : a), null)
+            return (
+              <div style={{
+                background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+                padding: '10px 12px', marginBottom: 14, fontSize: 12,
+              }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', alignItems: 'baseline' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>
+                    {t('mig.summaryTotal', { dur: fmtDuration(totalRun) })}
+                  </span>
+                  {slowest && (
+                    <span style={{ color: 'var(--text2)' }}>
+                      {t('mig.summarySlowest', { name: slowest.mdt, dur: fmtDuration(slowest.durationMs) })}
+                    </span>
+                  )}
+                </div>
+                {Object.keys(phaseTotals).length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 6, color: 'var(--text3)', fontSize: 11 }}>
+                    {TIMED_PHASES.filter(p => phaseTotals[p]).map(p => (
+                      <span key={p}>{PHASE_SHORT[p]}: <span style={{ color: 'var(--text2)', fontFamily: 'var(--mono)' }}>{fmtDuration(phaseTotals[p])}</span></span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr>
@@ -1211,12 +1331,14 @@ export default function Migration({ connection, session }) {
                 <th style={TH}>{t('mig.colOk')}</th>
                 <th style={TH}>{t('mig.colErrors')}</th>
                 <th style={TH}>{t('mig.colDst')}</th>
+                <th style={TH}>{t('mig.colTime')}</th>
                 <th style={TH}>{t('mig.colTxId')}</th>
               </tr>
             </thead>
             <tbody>
               {results.map(r => {
                 const isExpanded = expandedMdt === r.mdt
+                const isTimeExpanded = expandedTimeMdt === r.mdt
                 const detailMsgs = r.messages || []
                 const msgCols    = detailMsgs.length > 0
                   ? Object.keys(detailMsgs[0]).filter(k => k !== '__metadata')
@@ -1263,11 +1385,36 @@ export default function Migration({ connection, session }) {
                               )
                             })()}
                       </td>
+                      <td style={td({ color: 'var(--text2)', fontSize: 11, whiteSpace: 'nowrap' })}>
+                        {r.durationMs == null ? '—' : (
+                          <button
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', fontSize: 11, padding: 0, fontFamily: 'var(--mono)' }}
+                            title={t('mig.timeBreakdownHint')}
+                            onClick={() => setExpandedTimeMdt(isTimeExpanded ? null : r.mdt)}
+                          >
+                            {fmtDuration(r.durationMs)} {isTimeExpanded ? '▾' : '▸'}
+                          </button>
+                        )}
+                      </td>
                       <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text3)', fontSize: 10 })}>{r.txId || '—'}</td>
                     </tr>
+                    {isTimeExpanded && (
+                      <tr key={`${r.mdt}-time`}>
+                        <td colSpan={8} style={{ padding: '4px 0 8px 24px', borderBottom: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 11, color: 'var(--text3)' }}>
+                            {TIMED_PHASES.filter(p => r.phaseTimes?.[p]).map(p => (
+                              <span key={p}>{PHASE_SHORT[p]}: <span style={{ color: 'var(--text2)', fontFamily: 'var(--mono)' }}>{fmtDuration(r.phaseTimes[p])}</span></span>
+                            ))}
+                            {(!r.phaseTimes || Object.keys(r.phaseTimes).length === 0) && (
+                              <span>{t('mig.noTimeDetail')}</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {isExpanded && (
                       <tr key={`${r.mdt}-detail`}>
-                        <td colSpan={7} style={{ padding: '0 0 8px 24px', borderBottom: '1px solid var(--border)' }}>
+                        <td colSpan={8} style={{ padding: '0 0 8px 24px', borderBottom: '1px solid var(--border)' }}>
                           {detailMsgs.length === 0 ? (
                             <div style={{ fontSize: 11, color: 'var(--text3)', padding: '6px 0' }}>{t('mig.noErrDetail')}</div>
                           ) : (
@@ -1331,6 +1478,7 @@ export default function Migration({ connection, session }) {
                     <th style={TH}>{t('mig.histDst')}</th>
                     <th style={TH}>{t('mig.histDatasets')}</th>
                     <th style={TH}>{t('mig.histRows')}</th>
+                    <th style={TH}>{t('mig.histTime')}</th>
                     <th style={TH}>{t('mig.histStatus')}</th>
                   </tr>
                 </thead>
@@ -1344,6 +1492,7 @@ export default function Migration({ connection, session }) {
                         <td style={td({ color: 'var(--text2)' })}>{connection.name} / {h.dstPa}</td>
                         <td style={td({ color: 'var(--text2)' })}>{h.mdts?.length || 0}</td>
                         <td style={td({ color: 'var(--text2)' })}>{(h.totalRows || 0).toLocaleString()}</td>
+                        <td style={td({ color: 'var(--text2)', fontFamily: 'var(--mono)' })}>{fmtDuration(h.durationMs)}</td>
                         <td style={td({ fontWeight: 600, color: statusColor(h.status) })}>
                           {statusLabel(h.status)}
                         </td>

@@ -88,10 +88,40 @@ export default async function handler(req, res) {
       return res.status(resp.status).json({ error: `SAP IBP returned ${resp.status}`, detail })
     }
     const contentType = resp.headers.get('content-type') || ''
-    if (contentType.includes('xml')) {
-      return res.setHeader('Content-Type', 'text/xml').send(await resp.text())
+    const text = await resp.text()
+
+    // Truncation guard. Large OData responses relayed through this serverless
+    // function were observed to arrive INCOMPLETE under load (the body ends mid
+    // string). Two checks catch it; either way we surface a RETRYABLE 502 so the
+    // caller re-reads the page (reads are idempotent) instead of letting a
+    // partial body through — which used to throw "Unterminated string in JSON"
+    // and return an opaque 500 that failed the whole table.
+    //   1) Declared Content-Length vs bytes actually received. (When SAP gzips,
+    //      received > declared, so this never false-positives.)
+    //   2) The body must parse as JSON before we forward it.
+    const declared = parseInt(resp.headers.get('content-length') || '0', 10)
+    const received = Buffer.byteLength(text)
+    if (declared && received < declared) {
+      return res.status(502).json({
+        error: 'Respuesta incompleta de SAP IBP',
+        detail: `Cuerpo truncado: se recibieron ${received} de ${declared} bytes`,
+      })
     }
-    return res.json(await resp.json())
+
+    if (contentType.includes('xml')) {
+      return res.setHeader('Content-Type', 'text/xml').send(text)
+    }
+
+    try {
+      JSON.parse(text)
+    } catch (parseErr) {
+      return res.status(502).json({
+        error: 'Respuesta incompleta de SAP IBP',
+        detail: `JSON inválido o truncado: ${parseErr.message}`,
+      })
+    }
+    // Forward the validated body verbatim (no re-serialize → faster, byte-exact).
+    return res.setHeader('Content-Type', 'application/json').send(text)
   } catch (e) {
     return res.status(500).json({ error: e.message })
   }

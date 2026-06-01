@@ -36,27 +36,35 @@ export const CHUNK_SIZE   = 500    // default rows per write POST (overridable, 
 export const PARALLEL_R   = 4      // parallel read pages  (3× speedup measured)
 export const PARALLEL_W   = 4      // parallel write POSTs
 
-// Adaptive batch sizing. The hard limit is BYTES, not rows: a Vercel serverless
-// function caps the request AND response body at ~4.5 MB. A page/chunk that
-// exceeds it makes the proxy return 500 (which then forces a transaction-level
-// retry). We size every batch to a safe BYTE_BUDGET well under that ceiling.
+// Adaptive batch sizing. The hard limit is BYTES, not rows. Reads and writes get
+// SEPARATE budgets:
+//   • Writes (POST body) → up to ~2.8 MB, well below Vercel's ~4.5 MB ceiling.
+//   • Reads (GET response) → a much SMALLER budget. Large (multi-MB) read
+//     responses relayed through the Vercel proxy were observed to arrive
+//     TRUNCATED under the load of a big table (200k+ rows): the body ended mid
+//     string, the proxy failed to JSON-parse it ("Unterminated string in JSON")
+//     and returned 500, failing the whole table. SAP itself returns the full
+//     payload intact — the truncation is introduced while relaying the multi-MB
+//     body. Smaller read pages keep each response well under the size where
+//     truncation appears (and a single flaky page is now retried — see withRetry).
 //
 // Bytes-per-row is estimated from the field count with a fixed per-row envelope
 // plus a per-field cost — a model fitted to measured rows (e.g. AS1PRODUCT 62
 // fields ≈ 1.7 KB read / 1.2 KB POST; AS1UOMTO 6 fields ≈ 0.57 KB / 44 B). The
 // estimates are deliberately conservative (over-estimate) so text-heavy rows
 // still stay under budget. SAP also recommends max 5 000 rows per import.
-const BYTE_BUDGET = 2_800_000   // safe ceiling, well below Vercel's ~4.5 MB
+const WRITE_BYTE_BUDGET = 2_800_000   // POST body ceiling, well below Vercel's ~4.5 MB
+const READ_BYTE_BUDGET  =   700_000   // GET response ceiling — small to survive proxy relay
 const readBytesPerRow  = nFields => 500 + nFields * 30   // GET response (all fields + metadata)
 const writeBytesPerRow = nFields => 150 + nFields * 25   // POST body (projected, no readonly/metadata)
 
 export function chunkSizeFor(nFields) {
   if (!nFields || nFields < 1) return CHUNK_SIZE
-  return Math.max(500, Math.min(5000, Math.floor(BYTE_BUDGET / writeBytesPerRow(nFields))))
+  return Math.max(500, Math.min(5000, Math.floor(WRITE_BYTE_BUDGET / writeBytesPerRow(nFields))))
 }
 export function pageSizeFor(nFields) {
   if (!nFields || nFields < 1) return PAGE_SIZE
-  return Math.max(500, Math.min(5000, Math.floor(BYTE_BUDGET / readBytesPerRow(nFields))))
+  return Math.max(250, Math.min(5000, Math.floor(READ_BYTE_BUDGET / readBytesPerRow(nFields))))
 }
 
 // ─── VSMT catalog ────────────────────────────────────────────────────────────
@@ -153,10 +161,13 @@ export async function fetchCount(conn, session, name, { planningArea, versionId,
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=0&$inlinecount=allpages`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
-  if (!resp.ok) throw await httpError(resp)
-  const data = await resp.json()
-  return parseInt(data?.d?.__count ?? '0', 10)
+  // Idempotent read → retry transient failures (5xx / truncated-relay 502 / network).
+  return withRetry(async () => {
+    const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
+    if (!resp.ok) throw await httpError(resp)
+    const data = await resp.json()
+    return parseInt(data?.d?.__count ?? '0', 10)
+  }, { retries: 3, signal })
 }
 
 // Fetches one page of rows (2 000 by default). Uses explicit $skip — this tenant
@@ -175,10 +186,16 @@ export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE
   if (orderby && orderby.length) path += `&$orderby=${encodeURIComponent(orderby.join(','))}`
   if (select  && select.length)  path += `&$select=${encodeURIComponent(select.join(','))}`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
-  if (!resp.ok) throw await httpError(resp)
-  const data = await resp.json()
-  return (data?.d?.results ?? []).map(stripMeta)
+  // A page read is idempotent (same $skip/$top/$orderby → same rows), so it is
+  // safe to retry. This is what makes a single truncated-relay page (proxy 502)
+  // or a transient 5xx recover on its own WITHOUT discarding the whole table's
+  // transaction. NOTE: writes are deliberately NOT retried (see postTransChunk).
+  return withRetry(async () => {
+    const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
+    if (!resp.ok) throw await httpError(resp)
+    const data = await resp.json()
+    return (data?.d?.results ?? []).map(stripMeta)
+  }, { retries: 3, signal })
 }
 
 // Returns the business-key field names of an MDT (excluding the version-context
@@ -314,33 +331,28 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
 }
 
 // Reads ALL records for the given version and returns just their business-key
-// columns — used to stage deletes for a full-replace migration. Key field
-// names are discovered from the first record's __metadata.uri.
+// columns — used to stage deletes for a full-replace migration. The key field
+// names are discovered from a sample row, then we page reading ONLY the key
+// columns via $select. Key-only rows are tiny, so each page is well under the
+// read budget — fast and immune to the large-response truncation that affected
+// the old full-column read. Pages are read via readEntityPage (retried, $skip
+// driven manually, stable $orderby on the keys).
 export async function readKeyRows(conn, session, name, { planningArea, versionId, signal } = {}) {
-  const filter = buildFilter(planningArea, versionId)
-  let path = `/${name}?$format=json&$top=${PAGE_SIZE}&$skip=0`
-  if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal })
-  if (!resp.ok) throw await httpError(resp)
-  const data  = await resp.json()
-  const first = data?.d?.results ?? []
-  if (first.length === 0) return { keyNames: [], rows: [] }
-
-  const keyNames = parseKeyNames(first[0]?.__metadata?.uri)
+  const keyNames = await fetchKeyNames(conn, session, name, { planningArea, versionId, signal })
   if (keyNames.length === 0) return { keyNames: [], rows: [] }
 
-  const pick = r => { const o = {}; keyNames.forEach(k => { o[k] = r[k] }); return o }
-  const rows = first.map(pick)
-
-  // Subsequent pages — tenant never returns __next, so drive $skip manually.
-  if (first.length === PAGE_SIZE) {
-    let skip = PAGE_SIZE
-    for (;;) {
-      const page = await readEntityPage(conn, session, name, { skip, top: PAGE_SIZE, planningArea, versionId, signal })
-      rows.push(...page.map(pick))
-      if (page.length < PAGE_SIZE) break
-      skip += PAGE_SIZE
-    }
+  const pageSize = pageSizeFor(keyNames.length)
+  const rows = []
+  let skip = 0
+  for (;;) {
+    if (signal?.aborted) break
+    const page = await readEntityPage(conn, session, name, {
+      skip, top: pageSize, planningArea, versionId,
+      select: keyNames, orderby: keyNames, signal,
+    })
+    rows.push(...page)
+    if (page.length < pageSize) break
+    skip += pageSize
   }
   return { keyNames, rows }
 }
