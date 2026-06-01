@@ -161,14 +161,41 @@ export async function fetchCount(conn, session, name, { planningArea, versionId,
 
 // Fetches one page of rows (2 000 by default). Uses explicit $skip — this tenant
 // never returns __next, so the caller drives pagination manually.
-export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE_SIZE, planningArea, versionId, signal } = {}) {
+//
+// - select  (string[]): restrict columns via $select. The migration passes only
+//   the fields it will actually import (the "common" fields), so we don't
+//   download columns we'd discard anyway — smaller payloads, bigger pages, fewer
+//   calls. MUST include the key fields (they're always part of "common"). Omit
+//   to read all columns (used by schema discovery and the preview).
+// - orderby (string[]): stable sort via $orderby (the business keys), so the
+//   $skip/$top windows can't overlap or skip rows under concurrent reads.
+export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE_SIZE, planningArea, versionId, signal, select, orderby } = {}) {
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=${top}&$skip=${skip}`
+  if (orderby && orderby.length) path += `&$orderby=${encodeURIComponent(orderby.join(','))}`
+  if (select  && select.length)  path += `&$select=${encodeURIComponent(select.join(','))}`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
   const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
   if (!resp.ok) throw await httpError(resp)
   const data = await resp.json()
   return (data?.d?.results ?? []).map(stripMeta)
+}
+
+// Returns the business-key field names of an MDT (excluding the version-context
+// keys) by parsing one sample row's __metadata.uri — used to drive a stable
+// $orderby for deterministic pagination. Best-effort: returns [] if it can't be
+// determined (empty table, read error), in which case the caller reads unordered.
+export async function fetchKeyNames(conn, session, name, { planningArea, versionId, signal } = {}) {
+  const filter = buildFilter(planningArea, versionId)
+  let path = `/${name}?$format=json&$top=1&$skip=0`
+  if (filter) path += `&$filter=${encodeURIComponent(filter)}`
+  try {
+    const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
+    if (!resp.ok) return []
+    const data  = await resp.json()
+    const first = (data?.d?.results ?? [])[0]
+    return first ? parseKeyNames(first.__metadata?.uri) : []
+  } catch { return [] }
 }
 
 // Reads the first `top` rows for preview (used by the Preview button).

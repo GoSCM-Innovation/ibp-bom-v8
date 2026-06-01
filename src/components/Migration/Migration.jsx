@@ -5,7 +5,7 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog, fetchImportableMdts,
-  fetchCount, readEntityPage, readKeyRows, fetchFieldNames, fetchCsrf,
+  fetchCount, readEntityPage, readKeyRows, fetchFieldNames, fetchKeyNames, fetchCsrf,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
@@ -478,9 +478,15 @@ export default function Migration({ connection, session }) {
         // Destination schema couldn't be verified → fields were not projected (all sent).
         const entry = analysisRef.current?.byMdt?.[srcName]
         const unverified = entry?.verifiable === false
+        // When the schema is verifiable we read only the fields we'll actually
+        // import (the common fields) via $select — smaller payloads, bigger pages.
+        // Unverifiable → selectFields null → read all columns (current behaviour).
+        const selectFields = (entry?.common && entry.common.length) ? entry.common : null
         // Adaptive batch sizes by field count (fewer fields → bigger batches → fewer calls).
         const writeFields = entry?.common?.length || 0
-        const readFields  = (entry?.common?.length || 0) + (entry?.omitted?.length || 0)
+        // With $select we download only the common fields, so size the page by those;
+        // without it (unverifiable) we download every column (common + omitted).
+        const readFields  = selectFields ? selectFields.length : ((entry?.common?.length || 0) + (entry?.omitted?.length || 0))
         const writeChunk  = writeFields ? chunkSizeFor(writeFields) : CHUNK_SIZE
         const readPage    = readFields  ? pageSizeFor(readFields)  : PAGE_SIZE
 
@@ -541,6 +547,10 @@ export default function Migration({ connection, session }) {
           // treats it as non-existent) and re-stage everything in a FRESH one.
           // Only data that was read once is ever committed → "llega solo lo que
           // se leyó del origen".
+          // Business keys for a stable $orderby (deterministic pagination). Best-effort.
+          let srcKeys = []
+          try { srcKeys = await fetchKeyNames(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal }) } catch { /* read unordered */ }
+
           setProgress(p => ({ ...p, totalRows }))
           const pages = Math.ceil(totalRows / readPage) || 1
 
@@ -568,6 +578,8 @@ export default function Migration({ connection, session }) {
                     top: readPage,
                     planningArea: srcPa,
                     versionId: srcVersion,
+                    select: selectFields,
+                    orderby: srcKeys,
                     signal,
                   })
                 )
