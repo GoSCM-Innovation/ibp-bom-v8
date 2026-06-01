@@ -333,16 +333,17 @@ export async function commitTransaction(conn, session, transactionId, { signal, 
 
 // Step 3b (optional): enable server-side parallel processing for this transaction.
 // Call after GetTransactionID and before the first postTransChunk.
-// Returns null and does NOT throw when the endpoint is unsupported (HTTP 4xx) so callers
-// can treat it as a best-effort optimisation.
-// masterDataTypeId is required by the API; planningArea + versionId are optional
-// but needed for version-specific parallel imports (per SAP documentation).
+// Returns null and does NOT throw on HTTP 4xx so callers treat it as best-effort.
 //
-// Some tenants/service versions don't expose this function import at all (it
-// returns 4xx). Once we learn that for a connection we cache it and skip the
-// call — otherwise it would 404 once per table, spamming the console with
-// handled errors and wasting a round-trip each time. Cached for VSMT_TTL so a
-// later service upgrade is eventually re-probed.
+// Parameter names MUST match the function import in $metadata exactly: bare
+// names (NO "P_" prefix), and "PlanningArea" (not "PlanningAreaID"). VersionID
+// is REQUIRED — omitting it returns 404 "Invalid Function Import Parameter
+// 'VersionID'". (The sibling Commit/GetExportResult imports DO use a P_ prefix;
+// these don't — they mirror GetTransactionID instead.)
+//
+// If a tenant genuinely doesn't support it we cache the 4xx per connection
+// (VSMT_TTL) and stop calling, so it doesn't spam the console with handled
+// errors or waste a round-trip per table.
 const PARALLEL_UNSUPPORTED_KEY = id => `ibp:noParallel:${id}`
 
 export async function initiateParallelProcess(conn, session, transactionId, { planningArea, versionId, masterDataTypeId } = {}) {
@@ -352,10 +353,11 @@ export async function initiateParallelProcess(conn, session, transactionId, { pl
   } catch { /* ignore cache read errors */ }
 
   const enc = v => `%27${encodeURIComponent(v)}%27`
-  let path = `/InitiateParallelProcess?P_TransactionID=${enc(transactionId)}`
-  if (masterDataTypeId) path += `&P_MasterDataTypeID=${enc(masterDataTypeId)}`
-  if (planningArea)     path += `&P_PlanningAreaID=${enc(planningArea)}`
-  if (versionId)        path += `&P_VersionID=${enc(versionId)}`
+  let path = `/InitiateParallelProcess?TransactionID=${enc(transactionId)}`
+    + `&VersionID=${enc(versionId || BASE_VERSION_ID)}`   // required
+  if (masterDataTypeId) path += `&MasterDataTypeID=${enc(masterDataTypeId)}`
+  if (planningArea)     path += `&PlanningArea=${enc(planningArea)}`
+  path += '&$format=json'
   // Best-effort optimisation — short timeout so a slow/unsupported tenant doesn't
   // waste the full window before the real load starts.
   const resp = await proxyCall({
