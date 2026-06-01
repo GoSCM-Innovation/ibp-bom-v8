@@ -8,7 +8,7 @@ import {
   countKf, readKfPage, detectConversion, fetchTimeBuckets,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
-  odataDateToIso, rowsPerChunk, PARALLEL_R, PARALLEL_W,
+  odataDateToIso, rowsPerChunk, readRowsPerPage, PARALLEL_R, PARALLEL_W, MAX_LOAD_ATTEMPTS,
 } from '../../services/planningDataApi'
 
 // ── Styles (shared visual language with Migration.jsx) ──────────────────────────
@@ -243,16 +243,13 @@ export default function KeyFigureMigration({ connection, session }) {
           const totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: filter || undefined, signal })
           setProgress(p => ({ ...p, totalRows }))
 
-          const txId = await getTransactionId(connection, session, { signal })
-          try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
-
-          const chunkRows = rowsPerChunk(dstKfs.length)   // rows × nKf ≤ 5000 values/POST
-          const pageSize  = 5000
-          let loaded = 0
+          // Byte-budgeted batch sizes + stable sort (level columns + time).
+          const readPageSize = readRowsPerPage(srcLevelCols.length + srcKfs.length + 1)
+          const chunkRows    = rowsPerChunk(dstKfs.length, dstLevelCols.length + dstKfs.length + 1)
+          const orderby      = [...srcLevelCols, timeField]
 
           // For huge volumes, partition the source read by time bucket (one period
-          // per segment) to bound each query and avoid very deep $skip offsets.
-          // Otherwise a single segment over the whole filter.
+          // per segment). Computed once and reused across retries.
           let segFilters = [filter]
           if (timeField && totalRows > TIME_PARTITION_THRESHOLD) {
             try {
@@ -261,52 +258,103 @@ export default function KeyFigureMigration({ connection, session }) {
             } catch { /* fall back to a single segment */ }
           }
 
-          for (const segFilter of segFilters) {
+          // In IBP a useful transactional value is one that HAS a value. Rows whose
+          // key figures are ALL null/0/empty carry no information — skip them: fewer
+          // POSTs, no pointless disaggregation, cleaner destination.
+          const isEmpty = v => v == null || String(v).trim() === '' || Number(v) === 0
+
+          // ── Stage + commit with idempotent transaction-level retry ──
+          // A chunk is never re-POSTed inside a live transaction (that would stage a
+          // duplicate value). On a transient failure we abandon the uncommitted
+          // transaction (SAP saves nothing without commit) and re-stage in a fresh one.
+          let txId = null, loaded = 0, written = 0
+          for (let attempt = 1; ; attempt++) {
             if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-            for (let skip = 0; ; skip += PARALLEL_R * pageSize) {
-              if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-              setProgress(p => ({ ...p, phase: 'reading' }))
-              const batch = Array.from({ length: PARALLEL_R }, (_, j) =>
-                readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: segFilter || undefined, skip: skip + j * pageSize, top: pageSize, signal })
-              )
-              const rowsRead = (await Promise.all(batch)).flat()
-              if (rowsRead.length === 0) break
+            loaded = 0; written = 0
+            try {
+              txId = await getTransactionId(connection, session, { signal })
+              try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
 
-              // Project to destination write shape: root attrs (renamed) + time (ISO) +
-              // each KF (renamed). Derived attrs are NOT sent (destination fills them).
-              const projected = rowsRead.map(r => {
-                const o = {}
-                for (const dstA of dstLevelCols) o[dstA] = r[resolveSrcAttr(dstA)] ?? ''
-                o[timeField] = odataDateToIso(r[timeField])
-                for (let gi = 0; gi < dstKfs.length; gi++) o[dstKfs[gi]] = r[srcKfs[gi]] ?? '0'
-                return o
-              })
-
-              setProgress(p => ({ ...p, phase: 'writing' }))
-              const chunks = []
-              for (let c = 0; c < projected.length; c += chunkRows) chunks.push(projected.slice(c, c + chunkRows))
-              for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+              for (const segFilter of segFilters) {
                 if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
-                  postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
-                ))
+                for (let skip = 0; ; skip += PARALLEL_R * readPageSize) {
+                  if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                  setProgress(p => ({ ...p, phase: 'reading' }))
+                  const batch = Array.from({ length: PARALLEL_R }, (_, j) =>
+                    readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: segFilter || undefined, skip: skip + j * readPageSize, top: readPageSize, orderby, signal })
+                  )
+                  const rowsRead = (await Promise.all(batch)).flat()
+                  if (rowsRead.length === 0) break
+
+                  // Project to destination shape (root attrs renamed + time ISO + KFs
+                  // renamed); drop rows where every key figure is empty/0/null.
+                  const projected = []
+                  for (const r of rowsRead) {
+                    const o = {}
+                    for (const dstA of dstLevelCols) o[dstA] = r[resolveSrcAttr(dstA)] ?? ''
+                    o[timeField] = odataDateToIso(r[timeField])
+                    let hasValue = false
+                    for (let gi = 0; gi < dstKfs.length; gi++) {
+                      const val = r[srcKfs[gi]]
+                      o[dstKfs[gi]] = val ?? '0'
+                      if (!isEmpty(val)) hasValue = true
+                    }
+                    if (hasValue) projected.push(o)
+                  }
+
+                  if (projected.length > 0) {
+                    setProgress(p => ({ ...p, phase: 'writing' }))
+                    const chunks = []
+                    for (let c = 0; c < projected.length; c += chunkRows) chunks.push(projected.slice(c, c + chunkRows))
+                    for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                      if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                      await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
+                        postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
+                      ))
+                    }
+                    written += projected.length
+                  }
+                  loaded += rowsRead.length
+                  setProgress(p => ({ ...p, rows: loaded }))
+                  if (rowsRead.length < PARALLEL_R * readPageSize) break
+                }
               }
-              loaded += rowsRead.length
-              setProgress(p => ({ ...p, rows: loaded }))
-              // A short last batch means this segment is exhausted.
-              if (rowsRead.length < PARALLEL_R * pageSize) break
+
+              if (written === 0) break   // nothing meaningful to commit; abandon the empty tx
+              setProgress(p => ({ ...p, phase: 'committing' }))
+              await commitTransaction(connection, session, txId, { signal, csrf })
+              break   // staged + committed without resending any chunk
+            } catch (e) {
+              if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
+              if (e.isCalculated) throw e   // permanent (calculated KF) — don't retry
+              const transient = e?.status == null || e.status >= 500
+              if (transient && attempt < MAX_LOAD_ATTEMPTS) {
+                setProgress(p => ({ ...p, phase: 'retrying' }))
+                await new Promise(r => setTimeout(r, 1500 * attempt))
+                continue
+              }
+              throw e
             }
           }
 
-          setProgress(p => ({ ...p, phase: 'committing' }))
-          await commitTransaction(connection, session, txId, { signal, csrf })
+          // Nothing had a value → nothing migrated (and nothing committed).
+          if (written === 0) {
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId, status: 'ok', total: 0, ok: 0, errors: 0 })
+            done += g.length
+            continue
+          }
+
           setProgress(p => ({ ...p, phase: 'processing' }))
-          const status = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(1800000, Math.max(120000, totalRows * 3)), signal })
+          const status = await waitForProcessed(connection, session, txId, { timeoutMs: Math.min(1800000, Math.max(120000, written * 3)), signal })
           const msgs = await readMessages(connection, session, dstPa, txId, { signal })
-          const st = msgs.length > 0 || status === 'PROCESSED_WITH_ERRORS' || status === 'ERROR' ? 'error'
+          // Honest status mirroring the IBP job: ERROR → error; processed with
+          // rejections → warning; clean → ok; couldn't confirm → processing.
+          const st = status === 'ERROR' ? 'error'
+                   : (msgs.length > 0 || status === 'PROCESSED_WITH_ERRORS') ? 'warning'
                    : status === 'PROCESSED' ? 'ok' : 'processing'
-          // One result row per KF of the group (shared transaction, count and status).
-          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId, status: st, total: loaded, ok: loaded - msgs.length, errors: msgs.length, messages: msgs })
+          // One result row per KF of the group (shared transaction). total = rows
+          // actually written (with a value), not rows read.
+          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId, status: st, total: written, ok: Math.max(0, written - msgs.length), errors: msgs.length, messages: msgs })
         } catch (e) {
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
             for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'cancelled', total: 0, ok: 0, errors: 0 })
@@ -324,9 +372,9 @@ export default function KeyFigureMigration({ connection, session }) {
     }
   }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'processing' ? t('kfm.stProc') : t('kfm.stCancel')
-  const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
-  const PHASE = { detect: t('kfm.phDetect'), count: t('kfm.phCount'), reading: t('kfm.phReading'), writing: t('kfm.phWriting'), committing: t('kfm.phCommit'), processing: t('kfm.phProcessing') }
+  const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'warning' ? t('kfm.stWarning') : s === 'processing' ? t('kfm.stProc') : t('kfm.stCancel')
+  const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'warning' ? 'var(--yellow, #e6a817)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
+  const PHASE = { detect: t('kfm.phDetect'), count: t('kfm.phCount'), reading: t('kfm.phReading'), writing: t('kfm.phWriting'), committing: t('kfm.phCommit'), processing: t('kfm.phProcessing'), retrying: t('kfm.phRetrying') }
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (

@@ -35,6 +35,11 @@ export const MAX_KF_VALUES_PER_POST = 5000  // SAP-recommended limit
 export const PARALLEL_R = 4                  // parallel read pages
 export const PARALLEL_W = 4                  // parallel write POSTs
 export const COUNT_TOP  = 2                  // small $top for safe counting (never 0)
+export const BYTE_BUDGET = 2_800_000         // safe ceiling under Vercel's ~4.5 MB body limit
+// Max attempts to stage+commit one KF group. Each attempt uses a FRESH transaction;
+// a failed attempt is abandoned uncommitted (SAP saves nothing without commit) and
+// re-staged, so retries never duplicate values within a committed transaction.
+export const MAX_LOAD_ATTEMPTS = 3
 
 // Entity sets the service always exposes regardless of planning area.
 const GENERIC_SETS = new Set(['KeyFigureDeltaDefinitionSet', 'ValueResultSet'])
@@ -188,8 +193,11 @@ export async function countKf(conn, session, pa, { select, filter, signal } = {}
 }
 
 // One page of key-figure rows. Caller drives pagination via skip/top.
-export async function readKfPage(conn, session, pa, { select, filter, skip = 0, top = 5000, signal } = {}) {
+// orderby (string[]): stable sort (the level columns) so $skip/$top windows can't
+// overlap or skip rows under concurrent reads.
+export async function readKfPage(conn, session, pa, { select, filter, skip = 0, top = 5000, orderby, signal } = {}) {
   let path = `/${pa}?$format=json&$select=${qenc(select)}&$top=${top}&$skip=${skip}`
+  if (orderby && orderby.length) path += `&$orderby=${qenc(orderby.join(','))}`
   if (filter) path += `&$filter=${qenc(filter)}`
   const resp = await pcall(conn, session, { path, signal })
   if (!resp.ok) throw await httpError(resp)
@@ -297,7 +305,14 @@ export async function getTransactionId(conn, session, { signal } = {}) {
 
 // Step 2 (optional, best-effort) — enable server-side parallel processing.
 // Params go in the QUERY string (POST with empty body). 4xx → returns null.
+const PARALLEL_UNSUPPORTED_KEY = id => `ibp:noParallelKf:${id}`
+
 export async function initiateParallelProcess(conn, session, txId, { planningArea, versionId, scenarioId = '', transactionName = 'ibp-bom-kf' } = {}) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(PARALLEL_UNSUPPORTED_KEY(conn.id)))
+    if (cached && Date.now() - cached.ts < CATALOG_TTL) return null
+  } catch { /* ignore */ }
+
   const q = [
     `Transactionid=${enc(txId)}`,
     `VersionID=${enc(versionId || '')}`,
@@ -308,7 +323,10 @@ export async function initiateParallelProcess(conn, session, txId, { planningAre
   ].join('&')
   const resp = await pcall(conn, session, { path: `/InitiateParallelProcess?${q}`, method: 'POST', timeout: 20000 })
   if (!resp.ok) {
-    if (resp.status >= 400 && resp.status < 500) return null
+    if (resp.status >= 400 && resp.status < 500) {
+      try { localStorage.setItem(PARALLEL_UNSUPPORTED_KEY(conn.id), JSON.stringify({ ts: Date.now() })) } catch { /* ignore */ }
+      return null
+    }
     throw await httpError(resp)
   }
   return resp.json().catch(() => ({}))
@@ -327,16 +345,18 @@ export async function postKfChunk(conn, session, pa, txId, rows, { fields, versi
     ...(scenarioId ? { ScenarioID: scenarioId } : {}),
     [`Nav${pa}`]: rows,
   }
-  return withRetry(async () => {
-    const resp = await pcall(conn, session, { path: `/${pa}Trans`, method: 'POST', body, signal, csrf, timeout: WRITE_TIMEOUT })
-    if (!resp.ok) {
-      const err = await httpError(resp)
-      const m = /invalid column name:\s*([A-Z0-9_]+)/i.exec(err.detail || '')
-      if (m) { err.calculatedKf = m[1]; err.isCalculated = true }
-      throw err
-    }
-    return resp.json().catch(() => ({}))
-  }, { signal })
+  // NO retry here, on purpose. Staging is NOT idempotent: re-POSTing a chunk that
+  // SAP already staged (after a proxy/gateway 5xx) duplicates values inside the
+  // SAME transaction. The caller retries at the TRANSACTION level instead —
+  // discard the uncommitted transaction and re-stage in a fresh one.
+  const resp = await pcall(conn, session, { path: `/${pa}Trans`, method: 'POST', body, signal, csrf, timeout: WRITE_TIMEOUT })
+  if (!resp.ok) {
+    const err = await httpError(resp)
+    const m = /invalid column name:\s*([A-Z0-9_]+)/i.exec(err.detail || '')
+    if (m) { err.calculatedKf = m[1]; err.isCalculated = true }
+    throw err
+  }
+  return resp.json().catch(() => ({}))
 }
 
 // Step 4 — commit all staged POSTs of the transaction (async on the SAP side).
@@ -381,12 +401,23 @@ export async function waitForProcessed(conn, session, txId, { timeoutMs = 600000
 }
 
 // Step 6 — per-transaction messages (errors/info). Filtered by transaction id.
+// Paged so the rejected-row count is complete on large error sets.
 export async function readMessages(conn, session, pa, txId, { signal } = {}) {
-  const path = `/${pa}Message?$format=json&$filter=${qenc(`Transactionid eq '${txId}'`)}`
-  const resp = await pcall(conn, session, { path, signal })
-  if (!resp.ok) return []
-  const data = await resp.json().catch(() => ({}))
-  return data?.d?.results ?? []
+  const base = `/${pa}Message?$format=json&$filter=${qenc(`Transactionid eq '${txId}'`)}`
+  const top  = 5000
+  const all  = []
+  let skip = 0
+  for (;;) {
+    if (signal?.aborted) break
+    const resp = await pcall(conn, session, { path: `${base}&$top=${top}&$skip=${skip}`, signal })
+    if (!resp.ok) break
+    const data = await resp.json().catch(() => ({}))
+    const page = data?.d?.results ?? []
+    all.push(...page)
+    if (page.length < top) break
+    skip += top
+  }
+  return all
 }
 
 // ─── Time / value helpers ────────────────────────────────────────────────────
@@ -401,9 +432,21 @@ export function odataDateToIso(val) {
   return d.toISOString().slice(0, 19)   // drop milliseconds + Z
 }
 
-// Adaptive chunk size: SAP caps ~5000 key-figure values per POST. With nKf key
-// figures per row, rows-per-chunk = floor(MAX / nKf).
-export function rowsPerChunk(nKf) {
-  const n = Math.max(1, nKf || 1)
-  return Math.max(1, Math.min(5000, Math.floor(MAX_KF_VALUES_PER_POST / n)))
+// Adaptive sizing. SAP caps ~5000 key-figure values per POST; the hard ceiling is
+// BYTES (Vercel caps the request/response body at ~4.5 MB). We size to the smaller.
+const readBytesPerRow  = nFields => 500 + (nFields || 1) * 30   // GET response/row estimate
+const writeBytesPerRow = nFields => 150 + (nFields || 1) * 25   // POST body/row estimate
+
+// Rows per read page: bounded by the byte budget (avoid 4.5 MB → HTTP 500).
+export function readRowsPerPage(nFields) {
+  return Math.max(500, Math.min(10000, Math.floor(BYTE_BUDGET / readBytesPerRow(nFields))))
+}
+
+// Rows per write chunk: the SMALLER of SAP's ≤5000-values cap and the byte budget.
+// nFields = columns per row (level attrs + key figures + time). nKf = key figures.
+export function rowsPerChunk(nKf, nFields) {
+  const byValues = Math.max(1, Math.min(5000, Math.floor(MAX_KF_VALUES_PER_POST / Math.max(1, nKf || 1))))
+  if (!nFields) return byValues
+  const byBytes = Math.max(1, Math.floor(BYTE_BUDGET / writeBytesPerRow(nFields)))
+  return Math.max(1, Math.min(byValues, byBytes))
 }
