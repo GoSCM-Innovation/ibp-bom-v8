@@ -102,6 +102,11 @@ export default function KeyFigureMigration({ connection, session }) {
   const [results, setResults]   = useState(null)
   const [expanded, setExpanded] = useState(null)
 
+  // ── Pre-migration level check (deduce each KF's level from the chosen dims) ──
+  const [analyzing, setAnalyzing]   = useState(false)
+  const [analysis, setAnalysis]     = useState(null)   // { byKf, error? }
+  const [showConfirm, setShowConfirm] = useState(false)
+
   // ── Discover destination planning areas on mount (auto-select if only one) ──
   useEffect(() => {
     let alive = true
@@ -211,7 +216,59 @@ export default function KeyFigureMigration({ connection, session }) {
     levelAttrs.length > 0 && steps.length > 0 && steps.every(s => s.srcKf) && unmappedAttrs.length === 0 &&
     (!needsUom || selUom) && (!needsCurr || selCurr)
 
+  // Deduce each KF's planning level USING ONLY the level the user configured:
+  // for every chosen dimension, count with vs without it — if removing it lowers
+  // the count, the dimension is a genuine root of the KF; if not, it doesn't
+  // apply (the KF's level is more aggregated). Verdict per KF: identical to the
+  // proposed level, or different (which chosen dims don't apply). Advisory only.
+  async function analyzeLevels() {
+    const srcPa = srcCat.pa
+    const byKf = {}
+    for (const s of steps) {
+      let conv = s.conv
+      if (conv === undefined) { try { conv = await detectConversion(srcConn, srcSession, srcPa, s.srcKf) } catch { conv = null } }
+      const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
+      const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
+      let filter = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
+      if (convAttr && convVal) filter += `${filter ? ' and ' : ''}${convAttr} eq '${convVal}'`
+      const srcLevelCols = levelAttrs.map(resolveSrcAttr)
+      const fixed = convAttr ? [convAttr] : []
+      const sel = cols => [...cols, ...fixed, timeField, s.srcKf].join(',')
+      try {
+        const full = await countKf(srcConn, srcSession, srcPa, { select: sel(srcLevelCols), filter: filter || undefined })
+        const dimResults = await Promise.all(levelAttrs.map(async (dstDim, i) => {
+          const without = srcLevelCols.filter((_, j) => j !== i)
+          const c = await countKf(srcConn, srcSession, srcPa, { select: sel(without), filter: filter || undefined })
+          return { dstDim, root: full > c }
+        }))
+        const extra = dimResults.filter(d => !d.root).map(d => d.dstDim)   // chosen but not a root
+        byKf[s.dstKf] = {
+          verifiable: true,
+          proposed: [...levelAttrs],
+          deduced:  dimResults.filter(d => d.root).map(d => d.dstDim),
+          extra,
+          identical: extra.length === 0,
+        }
+      } catch (e) {
+        byKf[s.dstKf] = { verifiable: false, error: errText(e) }
+      }
+    }
+    return { byKf }
+  }
+
+  async function handleMigrateClick() {
+    setAnalyzing(true); setAnalysis(null)
+    let result
+    try { result = await analyzeLevels() } catch (e) { result = { byKf: {}, error: errText(e) } }
+    setAnalysis(result); setAnalyzing(false); setShowConfirm(true)
+  }
+
+  // Human label of the selected time level (for the proposed/deduced level display).
+  const timeLabel = t(`kfm.time_${(TIME_LEVELS.find(x => x.field === timeField) || {}).key}`)
+  const levelStr = dims => [...dims, timeLabel].join(' × ')
+
   const runMigration = useCallback(async () => {
+    setShowConfirm(false)
     setRunning(true); setResults([])
     cancelledRef.current = false
     abortRef.current = new AbortController()
@@ -542,8 +599,11 @@ export default function KeyFigureMigration({ connection, session }) {
       {/* ── Key figures (steps) ── */}
       {dstCat && srcCat && levelAttrs.length > 0 && (
         <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
             <div style={SECTION_HDR}>{t('kfm.sectionKf', { n: steps.length })}</div>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+            {t('kfm.kfHint', { dst: connection.name, src: srcConn?.name || t('kfm.srcLabel') })}
           </div>
           <input style={{ ...INPUT, marginBottom: 8 }} placeholder={t('kfm.kfSearch')} value={kfSearch} onChange={e => setKfSearch(e.target.value)} />
           <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -571,6 +631,13 @@ export default function KeyFigureMigration({ connection, session }) {
           {steps.length > 0 && (
             <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
               <div style={{ ...SECTION_HDR, marginBottom: 8 }}>{t('kfm.orderTitle')}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px 4px', fontSize: 9, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                <span style={{ width: 22, flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>{t('kfm.colSrc', { sys: srcConn?.name || '' })}</span>
+                <span style={{ width: 12, flexShrink: 0 }} />
+                <span style={{ flex: '0 0 38%' }}>{t('kfm.colDst', { sys: connection.name })}</span>
+                <span style={{ width: 58, flexShrink: 0 }} />
+              </div>
               {steps.map((s, idx) => (
                 <div key={s.dstKf} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', marginBottom: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7 }}>
                   <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: 'var(--text2)', background: 'var(--bg2)', border: '1px solid var(--border)' }}>{idx + 1}</div>
@@ -625,7 +692,7 @@ export default function KeyFigureMigration({ connection, session }) {
           {running ? (
             <button style={BTN_DANGER} onClick={() => { cancelledRef.current = true; abortRef.current?.abort() }}>{t('kfm.cancelBtn')}</button>
           ) : (
-            <button style={btnPrimary(!canMigrate)} disabled={!canMigrate} onClick={runMigration}>{t('kfm.migrateBtn')}</button>
+            <button style={btnPrimary(!canMigrate || analyzing)} disabled={!canMigrate || analyzing} onClick={handleMigrateClick}>{analyzing ? t('kfm.analyzing') : t('kfm.migrateBtn')}</button>
           )}
           {!dstVersion && <span style={{ fontSize: 11, color: 'var(--yellow, #e6a817)' }}>{t('kfm.baseWarning')}</span>}
         </div>
@@ -678,6 +745,49 @@ export default function KeyFigureMigration({ connection, session }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Pre-migration level confirmation (deduced level vs proposed) ── */}
+      {showConfirm && analysis && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--overlay)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 12, padding: 24, width: 580, maxWidth: '92vw', maxHeight: '82vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>{t('kfm.confirmTitle')}</div>
+            {analysis.error ? (
+              <div style={{ fontSize: 12, color: 'var(--red)' }}>✕ {analysis.error}</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>{t('kfm.confirmIntro')}</div>
+                <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {steps.map(s => {
+                    const a = analysis.byKf[s.dstKf] || {}
+                    return (
+                      <div key={s.dstKf} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', background: 'var(--bg)' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--text)', marginBottom: 4 }}>
+                          {s.srcKf && s.srcKf !== s.dstKf ? `${s.srcKf} → ${s.dstKf}` : s.dstKf}
+                        </div>
+                        {!a.verifiable ? (
+                          <div style={{ fontSize: 11, color: 'var(--yellow, #e6a817)' }}>⚠ {t('kfm.levelUnverifiable')}</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11 }}>
+                            <div style={{ color: 'var(--text2)' }}>{t('kfm.proposedLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(a.proposed)}</span></div>
+                            <div style={{ color: 'var(--text2)' }}>{t('kfm.deducedLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(a.deduced)}</span></div>
+                            {a.identical
+                              ? <div style={{ color: 'var(--green)' }}>✓ {t('kfm.levelIdentical')}</div>
+                              : <div style={{ color: 'var(--yellow, #e6a817)' }}>⚠ {t('kfm.levelDiffers', { dims: a.extra.join(', ') })}</div>}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+              <button style={BTN_SEC} onClick={() => setShowConfirm(false)}>{t('kfm.confirmCancel')}</button>
+              <button style={btnPrimary(false)} onClick={runMigration}>{t('kfm.confirmMigrate')}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
