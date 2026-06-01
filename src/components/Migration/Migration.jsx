@@ -57,6 +57,11 @@ function getMdts(catalog, pa, version) {
 // We "share a root" if, after trimming a short area prefix (0–4 chars) from each
 // name, the remainder matches exactly and is long enough (>= 4) to be meaningful.
 
+// Max attempts to stage+commit a table. Each attempt uses a FRESH transaction;
+// a failed attempt is abandoned uncommitted (SAP discards it) and re-staged, so
+// retries never duplicate keys within a committed transaction.
+const MAX_LOAD_ATTEMPTS = 3
+
 const MIN_ROOT_LEN = 4
 function rootCandidates(name) {
   const out = []
@@ -482,6 +487,7 @@ export default function Migration({ connection, session }) {
         setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading' })
 
         let totalRows = 0
+        let loadedRows = 0   // rows actually read from source AND staged (sent to IBP)
         let dstBefore = null
 
         try {
@@ -528,77 +534,99 @@ export default function Migration({ connection, session }) {
 
           if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
-          // ── Load source (upsert) in a fresh transaction ──
-          txId = await getTransactionId(connection, session, {
-            transactionName: 'ibp-bom-migration',
-            versionId: dstVersion || BASE_VERSION_ID,
-            masterDataTypeId: dstName, planningArea: dstPa, signal,
-          })
-
-          // Best-effort: enable server-side parallel processing (must not abort the run).
-          try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
-
+          // ── Load source (upsert) — idempotent transaction-level retry ──
+          // A chunk is NEVER re-POSTed inside a live transaction (that would
+          // stage a duplicate key → SAP error 119 → both copies rejected). If a
+          // POST fails transiently we ABANDON the uncommitted transaction (SAP
+          // treats it as non-existent) and re-stage everything in a FRESH one.
+          // Only data that was read once is ever committed → "llega solo lo que
+          // se leyó del origen".
           setProgress(p => ({ ...p, totalRows }))
           const pages = Math.ceil(totalRows / readPage) || 1
-          let loadedRows = 0
 
-          for (let pageOffset = 0; pageOffset < pages; pageOffset += PARALLEL_R) {
+          for (let attempt = 1; ; attempt++) {
             if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-
-            // Read up to PARALLEL_R pages simultaneously (from the SOURCE table)
-            const batchPageCount = Math.min(PARALLEL_R, pages - pageOffset)
-            const readBatch = Array.from({ length: batchPageCount }, (_, i) =>
-              readEntityPage(srcConn, srcSession, srcName, {
-                skip: (pageOffset + i) * readPage,
-                top: readPage,
-                planningArea: srcPa,
-                versionId: srcVersion,
-                signal,
+            loadedRows = 0
+            try {
+              txId = await getTransactionId(connection, session, {
+                transactionName: 'ibp-bom-migration',
+                versionId: dstVersion || BASE_VERSION_ID,
+                masterDataTypeId: dstName, planningArea: dstPa, signal,
               })
-            )
-            setProgress(p => ({ ...p, phase: 'reading' }))
-            const pageResults = await Promise.all(readBatch)
-            const batchRows = pageResults.flat()
-            if (batchRows.length === 0) break
 
-            // Project to common fields (field mapping A): drop fields the destination
-            // doesn't have, so SAP won't reject the POST with "Property X is invalid".
-            const projected = batchRows.map(r => projectRow(srcName, r))
+              // Best-effort: enable server-side parallel processing (must not abort the run).
+              try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
 
-            // Split into adaptive-size chunks, write PARALLEL_W at a time
-            const chunks = []
-            for (let c = 0; c < projected.length; c += writeChunk) {
-              chunks.push(projected.slice(c, c + writeChunk))
-            }
+              for (let pageOffset = 0; pageOffset < pages; pageOffset += PARALLEL_R) {
+                if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
-            setProgress(p => ({ ...p, phase: 'writing' }))
-            for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                // Read up to PARALLEL_R pages simultaneously (from the SOURCE table)
+                const batchPageCount = Math.min(PARALLEL_R, pages - pageOffset)
+                const readBatch = Array.from({ length: batchPageCount }, (_, i) =>
+                  readEntityPage(srcConn, srcSession, srcName, {
+                    skip: (pageOffset + i) * readPage,
+                    top: readPage,
+                    planningArea: srcPa,
+                    versionId: srcVersion,
+                    signal,
+                  })
+                )
+                setProgress(p => ({ ...p, phase: 'reading' }))
+                const pageResults = await Promise.all(readBatch)
+                const batchRows = pageResults.flat()
+                if (batchRows.length === 0) break
+
+                // Project to common fields (field mapping A): drop fields the destination
+                // doesn't have, so SAP won't reject the POST with "Property X is invalid".
+                const projected = batchRows.map(r => projectRow(srcName, r))
+
+                // Split into adaptive-size chunks, write PARALLEL_W at a time
+                const chunks = []
+                for (let c = 0; c < projected.length; c += writeChunk) {
+                  chunks.push(projected.slice(c, c + writeChunk))
+                }
+
+                setProgress(p => ({ ...p, phase: 'writing' }))
+                for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                  if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                  const writeBatch = chunks.slice(ci, ci + PARALLEL_W)
+                  await Promise.all(writeBatch.map(chunk =>
+                    postTransChunk(connection, session, dstName, txId, chunk, {
+                      deleteEntries: false,
+                      planningArea: dstPa,
+                      versionId: dstVersion,
+                      signal, csrf,
+                    })
+                  ))
+                }
+
+                loadedRows += batchRows.length
+                // Throttle row-count re-renders to 500 ms; always update on the last page batch.
+                const isLastBatch = pageOffset + PARALLEL_R >= pages
+                const now = Date.now()
+                if (isLastBatch || now - lastProgressUpdateRef.current >= 500) {
+                  lastProgressUpdateRef.current = now
+                  setProgress(p => ({ ...p, rows: loadedRows }))
+                }
+              }
+
               if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-              const writeBatch = chunks.slice(ci, ci + PARALLEL_W)
-              await Promise.all(writeBatch.map(chunk =>
-                postTransChunk(connection, session, dstName, txId, chunk, {
-                  deleteEntries: false,
-                  planningArea: dstPa,
-                  versionId: dstVersion,
-                  signal, csrf,
-                })
-              ))
-            }
 
-            loadedRows += batchRows.length
-            // Throttle row-count re-renders to 500 ms; always update on the last page batch.
-            const isLastBatch = pageOffset + PARALLEL_R >= pages
-            const now = Date.now()
-            if (isLastBatch || now - lastProgressUpdateRef.current >= 500) {
-              lastProgressUpdateRef.current = now
-              setProgress(p => ({ ...p, rows: loadedRows }))
+              setProgress(p => ({ ...p, phase: 'committing' }))
+              await commitTransaction(connection, session, txId, { signal, csrf })
+              break   // staged + committed without resending any chunk
+            } catch (e) {
+              if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
+              const transient = e?.status == null || e.status >= 500   // network/timeout or 5xx
+              if (transient && attempt < MAX_LOAD_ATTEMPTS) {
+                // Abandon the uncommitted transaction and retry from scratch with a fresh one.
+                setProgress(p => ({ ...p, phase: 'retrying' }))
+                await new Promise(r => setTimeout(r, 1500 * attempt))
+                continue
+              }
+              throw e
             }
           }
-
-          if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-
-          setProgress(p => ({ ...p, phase: 'committing' }))
-          await commitTransaction(connection, session, txId, { signal, csrf })
 
           // SAP commits asynchronously — wait until it finishes applying before
           // reading messages or counting, otherwise we'd see stale data. The
@@ -622,31 +650,38 @@ export default function Migration({ connection, session }) {
             if (dstAfter != null) break
           }
 
-          // Status: errors → error; SAP reported postprocessing error → error;
-          // confirmed PROCESSED → ok; couldn't confirm (TIMEOUT/UNSUPPORTED) →
-          // 'processing' (still applying in SAP — not an honest "ok").
+          // Honest counts reflect what SAP IBP actually reported, not the source
+          // count: rejected = rows SAP refused (one message per rejected row);
+          // sent = rows read from source AND staged (each exactly once now).
+          const rejected = errorMsgs.length
+          const sent     = loadedRows
+
+          // Status mirrors the IBP job outcome:
+          //   ERROR              → error
+          //   PROCESSED, 0 rej.  → ok ("Migrado")
+          //   PROCESSED, rej.>0  → warning ("Procesado con errores")
+          //   couldn't confirm   → processing (still applying in SAP)
           let status
-          if (errorMsgs.length > 0)        status = 'error'
-          else if (procStatus === 'ERROR') status = 'error'
-          else if (procStatus === 'PROCESSED') status = 'ok'
-          else                             status = 'processing'
+          if (procStatus === 'ERROR')          status = 'error'
+          else if (procStatus === 'PROCESSED') status = rejected > 0 ? 'warning' : 'ok'
+          else                                 status = 'processing'
 
           pushResult({
             mdt: srcName, dstName, unverified, txId, procStatus,
             status,
-            total:    totalRows,
-            ok:       totalRows - errorMsgs.length,
-            errors:   errorMsgs.length,
+            total:    sent,
+            ok:       Math.max(0, sent - rejected),
+            errors:   rejected,
             messages: errorMsgs,   // kept for detail panel
             dstBefore, dstAfter,
           })
         } catch (e) {
           // Cancellation: explicit flag, an aborted request, or the cancel ref set.
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
-            pushResult({ mdt: srcName, dstName, unverified, status: 'cancelled', total: totalRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
+            pushResult({ mdt: srcName, dstName, unverified, status: 'cancelled', total: loadedRows, ok: 0, errors: 0, txId, dstBefore, dstAfter: null })
             break
           }
-          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: totalRows, ok: 0, errors: 1, txId, errorMsg: errText(e), dstBefore, dstAfter: null })
+          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: loadedRows, ok: 0, errors: 1, txId, errorMsg: errText(e), dstBefore, dstAfter: null })
         }
       }
     } finally {
@@ -657,7 +692,8 @@ export default function Migration({ connection, session }) {
       const totalRowsMigrated = allResults.reduce((s, r) => s + (r.total || 0), 0)
       const overallStatus = allResults.some(r => r.status === 'cancelled') ? 'cancelled'
         : allResults.some(r => r.status === 'error') ? 'error'
-        : allResults.some(r => r.status === 'processing') ? 'processing' : 'ok'
+        : allResults.some(r => r.status === 'processing') ? 'processing'
+        : allResults.some(r => r.status === 'warning') ? 'warning' : 'ok'
       const entry = {
         date: new Date().toISOString(),
         srcConnId:   srcConn?.id   || '',
@@ -684,14 +720,18 @@ export default function Migration({ connection, session }) {
     committing: t('mig.phaseCommitting'),
     processing: t('mig.phaseProcessing'),
     messages:   t('mig.phaseMessages'),
+    retrying:   t('mig.phaseRetrying'),
   }
 
   // Result status → label / colour / icon (shared by results table and step panel).
   const statusLabel = s => s === 'ok' ? t('mig.statusOk') : s === 'error' ? t('mig.statusError')
+    : s === 'warning' ? t('mig.statusWarning')
     : s === 'processing' ? t('mig.statusProcessing') : t('mig.statusCancelled')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)'
+    : s === 'warning' ? 'var(--yellow, #e6a817)'
     : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
-  const statusIcon  = s => s === 'ok' ? '✓' : s === 'error' ? '✕' : s === 'processing' ? '⧗' : '⊘'
+  const statusIcon  = s => s === 'ok' ? '✓' : s === 'error' ? '✕' : s === 'warning' ? '⚠'
+    : s === 'processing' ? '⧗' : '⊘'
 
   // ─────────────────────────────────────────────────────────────────────────────
 

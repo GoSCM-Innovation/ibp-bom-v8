@@ -260,14 +260,19 @@ export async function postTransChunk(conn, session, name, transactionId, rows, {
     RequestedAttributes: attrs,
     [`Nav${name}`]:      { results: cleanRows },
   }
-  return withRetry(async () => {
-    const resp = await proxyCall({
-      connection: conn, session, com: COM,
-      path: `/${name}Trans`, method: 'POST', body, signal, csrf, timeout: WRITE_TIMEOUT,
-    })
-    if (!resp.ok) throw await httpError(resp)
-    return resp.json().catch(() => ({}))
-  }, { signal })
+  // NO retry here, on purpose. Staging is NOT idempotent: if a POST times out at
+  // the proxy/gateway (5xx) AFTER SAP already staged the rows, re-sending the
+  // same chunk stages a SECOND copy of every key in the SAME transaction. On
+  // commit SAP rejects BOTH copies of each duplicated key (error 119 "Duplicate
+  // master data") → the record is lost, not just the extra. The caller instead
+  // retries at the TRANSACTION level: discard the uncommitted transaction and
+  // re-stage in a fresh one (re-applying upserts across transactions is safe).
+  const resp = await proxyCall({
+    connection: conn, session, com: COM,
+    path: `/${name}Trans`, method: 'POST', body, signal, csrf, timeout: WRITE_TIMEOUT,
+  })
+  if (!resp.ok) throw await httpError(resp)
+  return resp.json().catch(() => ({}))
 }
 
 // Reads ALL records for the given version and returns just their business-key
@@ -393,21 +398,27 @@ export async function readMessages(conn, session, name, transactionId, { signal 
   const filter   = `TransactionID eq %27${encodeURIComponent(transactionId)}%27`
   const basePath = `/${name}Message?$format=json&$filter=${filter}`
 
-  // Attempt with expand first.
-  const expResp = await proxyCall({
-    connection: conn, session, com: COM,
-    path: `${basePath}&$expand=Nav${name}`, signal,
-  })
-  if (expResp.ok) {
-    const data = await expResp.json().catch(() => ({}))
-    return data?.d?.results ?? []
+  // Page through ALL messages (the tenant caps a page at PAGE_SIZE and never
+  // returns __next), so the rejected-row count is complete even on large loads.
+  // Try $expand first; if the tenant rejects it, fall back to the plain read.
+  let useExpand = true
+  const all = []
+  let skip = 0
+  for (;;) {
+    if (signal?.aborted) break
+    const suffix = `&$top=${PAGE_SIZE}&$skip=${skip}${useExpand ? `&$expand=Nav${name}` : ''}`
+    const resp   = await proxyCall({ connection: conn, session, com: COM, path: basePath + suffix, signal })
+    if (!resp.ok) {
+      if (useExpand && skip === 0) { useExpand = false; continue }  // retry first page without expand
+      break
+    }
+    const data = await resp.json().catch(() => ({}))
+    const page = data?.d?.results ?? []
+    all.push(...page)
+    if (page.length < PAGE_SIZE) break
+    skip += PAGE_SIZE
   }
-
-  // Fallback: plain read without expand.
-  const resp = await proxyCall({ connection: conn, session, com: COM, path: basePath, signal })
-  if (!resp.ok) return []
-  const data = await resp.json().catch(() => ({}))
-  return data?.d?.results ?? []
+  return all
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
