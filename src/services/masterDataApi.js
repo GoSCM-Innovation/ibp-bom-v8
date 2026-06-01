@@ -36,16 +36,27 @@ export const CHUNK_SIZE   = 500    // default rows per write POST (overridable, 
 export const PARALLEL_R   = 4      // parallel read pages  (3× speedup measured)
 export const PARALLEL_W   = 4      // parallel write POSTs
 
-// Adaptive batch sizing: the real limit is bytes (~4.5 MB on Vercel), which scales
-// with the field count. Bigger batches for narrow tables, smaller for wide ones.
-// ~120k cells ≈ 4 MB. SAP recommends max 5 000 rows per import request.
+// Adaptive batch sizing. The hard limit is BYTES, not rows: a Vercel serverless
+// function caps the request AND response body at ~4.5 MB. A page/chunk that
+// exceeds it makes the proxy return 500 (which then forces a transaction-level
+// retry). We size every batch to a safe BYTE_BUDGET well under that ceiling.
+//
+// Bytes-per-row is estimated from the field count with a fixed per-row envelope
+// plus a per-field cost — a model fitted to measured rows (e.g. AS1PRODUCT 62
+// fields ≈ 1.7 KB read / 1.2 KB POST; AS1UOMTO 6 fields ≈ 0.57 KB / 44 B). The
+// estimates are deliberately conservative (over-estimate) so text-heavy rows
+// still stay under budget. SAP also recommends max 5 000 rows per import.
+const BYTE_BUDGET = 2_800_000   // safe ceiling, well below Vercel's ~4.5 MB
+const readBytesPerRow  = nFields => 500 + nFields * 30   // GET response (all fields + metadata)
+const writeBytesPerRow = nFields => 150 + nFields * 25   // POST body (projected, no readonly/metadata)
+
 export function chunkSizeFor(nFields) {
   if (!nFields || nFields < 1) return CHUNK_SIZE
-  return Math.max(500, Math.min(5000, Math.floor(120000 / nFields)))
+  return Math.max(500, Math.min(5000, Math.floor(BYTE_BUDGET / writeBytesPerRow(nFields))))
 }
 export function pageSizeFor(nFields) {
   if (!nFields || nFields < 1) return PAGE_SIZE
-  return Math.max(2000, Math.min(10000, Math.floor(150000 / nFields)))
+  return Math.max(500, Math.min(5000, Math.floor(BYTE_BUDGET / readBytesPerRow(nFields))))
 }
 
 // ─── VSMT catalog ────────────────────────────────────────────────────────────
