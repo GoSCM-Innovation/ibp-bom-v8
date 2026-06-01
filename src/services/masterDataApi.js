@@ -337,7 +337,20 @@ export async function commitTransaction(conn, session, transactionId, { signal, 
 // can treat it as a best-effort optimisation.
 // masterDataTypeId is required by the API; planningArea + versionId are optional
 // but needed for version-specific parallel imports (per SAP documentation).
+//
+// Some tenants/service versions don't expose this function import at all (it
+// returns 4xx). Once we learn that for a connection we cache it and skip the
+// call — otherwise it would 404 once per table, spamming the console with
+// handled errors and wasting a round-trip each time. Cached for VSMT_TTL so a
+// later service upgrade is eventually re-probed.
+const PARALLEL_UNSUPPORTED_KEY = id => `ibp:noParallel:${id}`
+
 export async function initiateParallelProcess(conn, session, transactionId, { planningArea, versionId, masterDataTypeId } = {}) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(PARALLEL_UNSUPPORTED_KEY(conn.id)))
+    if (cached && Date.now() - cached.ts < VSMT_TTL) return null
+  } catch { /* ignore cache read errors */ }
+
   const enc = v => `%27${encodeURIComponent(v)}%27`
   let path = `/InitiateParallelProcess?P_TransactionID=${enc(transactionId)}`
   if (masterDataTypeId) path += `&P_MasterDataTypeID=${enc(masterDataTypeId)}`
@@ -351,7 +364,11 @@ export async function initiateParallelProcess(conn, session, transactionId, { pl
     method: 'POST', timeout: 20000,
   })
   if (!resp.ok) {
-    if (resp.status >= 400 && resp.status < 500) return null
+    if (resp.status >= 400 && resp.status < 500) {
+      // Endpoint unavailable on this tenant — remember it so we stop calling.
+      try { localStorage.setItem(PARALLEL_UNSUPPORTED_KEY(conn.id), JSON.stringify({ ts: Date.now() })) } catch { /* ignore */ }
+      return null
+    }
     throw await httpError(resp)
   }
   return resp.json().catch(() => ({}))
