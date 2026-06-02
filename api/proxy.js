@@ -112,6 +112,12 @@ export default async function handler(req, res) {
       return res.setHeader('Content-Type', 'text/xml').send(text)
     }
 
+    // A genuinely EMPTY 2xx body (e.g. 204-style commits) is fine — don't confuse
+    // it with a truncated response. Forward it as an empty JSON object.
+    if (text.length === 0) {
+      return res.setHeader('Content-Type', 'application/json').send('{}')
+    }
+
     try {
       JSON.parse(text)
     } catch (parseErr) {

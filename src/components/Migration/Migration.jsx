@@ -8,8 +8,8 @@ import {
   fetchCount, readEntityPage, readKeyRows, fetchFieldNames, fetchKeyNames, fetchCsrf,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
-  PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
-  chunkSizeFor, pageSizeFor, measureRowBytes, pageSizeForBytes, chunkSizeForBytes,
+  PAGE_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
+  pageSizeFor, measureRowBytes, pageSizeForBytes,
   chunkByBytes, MAX_POST_BYTES,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
@@ -171,31 +171,6 @@ function fmtDuration(ms) {
   if (m < 60) return `${m}m ${String(rem).padStart(2, '0')}s`
   const h = Math.floor(m / 60)
   return `${h}h ${String(m % 60).padStart(2, '0')}m`
-}
-
-// Per-table phase timer: accumulates elapsed ms into the current phase bucket.
-// Call mark(phase) on every phase change; finish() seals the last phase and
-// returns { phases: { reading, writing, ... }, total }. Pure wall-clock — adds
-// no SAP calls.
-function makePhaseTimer() {
-  const phases = {}
-  const start = Date.now()
-  let cur = null
-  let last = start
-  return {
-    mark(phase) {
-      const now = Date.now()
-      if (cur) phases[cur] = (phases[cur] || 0) + (now - last)
-      cur = phase
-      last = now
-    },
-    finish() {
-      const now = Date.now()
-      if (cur) phases[cur] = (phases[cur] || 0) + (now - last)
-      cur = null
-      return { phases, total: now - start }
-    },
-  }
 }
 
 // Phases shown in the per-table breakdown, in execution order.
@@ -555,33 +530,35 @@ export default function Migration({ connection, session }) {
         // import (the common fields) via $select — smaller payloads, bigger pages.
         // Unverifiable → selectFields null → read all columns (current behaviour).
         const selectFields = (entry?.common && entry.common.length) ? entry.common : null
-        // Adaptive batch sizes by field count (fewer fields → bigger batches → fewer calls).
-        const writeFields = entry?.common?.length || 0
         // With $select we download only the common fields, so size the page by those;
         // without it (unverifiable) we download every column (common + omitted).
         const readFields  = selectFields ? selectFields.length : ((entry?.common?.length || 0) + (entry?.omitted?.length || 0))
-        // Field-count estimates — used only as a FALLBACK if the live measurement
-        // (below) fails. The estimate badly underestimates value-heavy tables (few
-        // columns but long strings / time series), so we override it with measured
-        // bytes/row once we can read a sample.
-        let writeChunk = writeFields ? chunkSizeFor(writeFields) : CHUNK_SIZE
-        let readPage   = pageSizeFor(readFields || 60)
+        // Field-count estimate — only a FALLBACK if the live measurement (below)
+        // fails. (Write chunks don't need sizing here: they are built byte-accurate
+        // at write time via chunkByBytes.)
+        let readPage = pageSizeFor(readFields || 60)
 
-        // Per-table phase timer — measures how long each phase takes (shown in
-        // results + saved to history). Mark on every phase change below.
-        const timer = makePhaseTimer()
-        timer.mark('reading')
-        setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading', tableStart: Date.now(), segsDone: 0, totalSegs: 0 })
+        // Per-table timing: `tableStart` gives the WALL total; `phaseAcc` accumulates
+        // ms per phase, summed across the concurrent workers (each worker times its
+        // own reads/writes/commits — a shared single-cursor timer would get corrupted
+        // by 6 workers marking phases at once).
+        const tableStart = Date.now()
+        const phaseAcc = {}
+        const addPhase = (k, ms) => { phaseAcc[k] = (phaseAcc[k] || 0) + ms }
+        setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading', tableStart, segsDone: 0, totalSegs: 0 })
 
         let totalRows = 0
         let loadedRows = 0   // rows actually read from source AND staged (sent to IBP)
         let dstBefore = null
 
         try {
-          totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal })
+          // Bounded count (1 retry, 60 s) — fails fast instead of retrying ~8 min.
+          const t0 = Date.now()
+          try {
+            totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal, retries: 1, timeout: 60000 })
+          } finally { addPhase('reading', Date.now() - t0) }
         } catch (e) {
-          const { phases: phaseTimes, total: durationMs } = timer.finish()
-          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: errText(e), phaseTimes, durationMs })
+          pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: errText(e), phaseTimes: { ...phaseAcc }, durationMs: Date.now() - tableStart })
           continue
         }
 
@@ -597,7 +574,7 @@ export default function Migration({ connection, session }) {
         if (totalRows > 0) {
           try {
             const m = await measureRowBytes(srcConn, srcSession, srcName, { select: selectFields, planningArea: srcPa, versionId: srcVersion, signal })
-            if (m) { readPage = pageSizeForBytes(m.readBpr); writeChunk = chunkSizeForBytes(m.writeBpr) }
+            if (m) readPage = pageSizeForBytes(m.readBpr)
           } catch { /* keep field-count fallback */ }
         }
 
@@ -618,7 +595,7 @@ export default function Migration({ connection, session }) {
           // load — otherwise a re-added (upserted) key could be removed by a still-
           // pending delete.
           if (deleteEntries) {
-            timer.mark('deleting')
+            const tDel = Date.now()
             setProgress(p => ({ ...p, phase: 'deleting' }))
             const { keyNames, rows: keyRows } = await readKeyRows(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion, signal })
             if (keyRows.length > 0 && keyNames.length > 0) {
@@ -658,6 +635,7 @@ export default function Migration({ connection, session }) {
                 await waitForProcessed(connection, session, tx, { timeoutMs: Math.min(1800000, Math.max(120000, SEGMENT_SIZE * 4)), signal })
               }
             }
+            addPhase('deleting', Date.now() - tDel)
           }
 
           if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
@@ -714,6 +692,7 @@ export default function Migration({ connection, session }) {
 
                   // Read the whole segment (effParR pages at a time) → buffer.
                   const segBuf = []
+                  const tRead = Date.now()
                   for (let pageStart = segStart; pageStart < segEnd; pageStart += readPage * effParR) {
                     if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                     const batchPageCount = Math.min(effParR, Math.ceil((segEnd - pageStart) / readPage))
@@ -725,7 +704,6 @@ export default function Migration({ connection, session }) {
                         select: selectFields, orderby: srcKeys, signal,
                       })
                     })
-                    timer.mark('reading')
                     setProgress(p => ({ ...p, phase: 'reading' }))
                     const batchRows = (await Promise.all(readBatch)).flat()
                     if (batchRows.length === 0) break
@@ -737,12 +715,13 @@ export default function Migration({ connection, session }) {
                       setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
                     }
                   }
+                  addPhase('reading', Date.now() - tRead)
 
                   // Write the whole segment as byte-accurate chunks, PARALLEL_W in parallel.
                   if (segBuf.length > 0) {
                     const chunks = chunkByBytes(segBuf, MAX_POST_BYTES, 5000)
-                    timer.mark('writing')
                     setProgress(p => ({ ...p, phase: 'writing' }))
+                    const tWrite = Date.now()
                     for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
                       if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                       await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
@@ -751,13 +730,15 @@ export default function Migration({ connection, session }) {
                         })
                       ))
                     }
+                    addPhase('writing', Date.now() - tWrite)
                   }
 
                   if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
-                  timer.mark('committing')
                   setProgress(p => ({ ...p, phase: 'committing' }))
+                  const tCommit = Date.now()
                   await commitTransaction(connection, session, myTx, { signal, csrf })
+                  addPhase('committing', Date.now() - tCommit)
 
                   // Segment committed → durable. Advance the baseline (single-threaded
                   // event loop → these shared-state updates don't race).
@@ -773,9 +754,9 @@ export default function Migration({ connection, session }) {
                   if (e?.status === 403) { try { csrf = await fetchCsrf(connection, session, { signal }) } catch { /* ignore */ } }
                   const transient = e?.status === 403 || e?.status == null || e.status >= 500
                   if (transient && attempt < MAX_SEGMENT_ATTEMPTS) {
-                    timer.mark('retrying')
                     setProgress(p => ({ ...p, phase: 'retrying' }))
                     await new Promise(r => setTimeout(r, 1500 * attempt))
+                    addPhase('retrying', 1500 * attempt)
                     continue
                   }
                   throw e
@@ -783,14 +764,17 @@ export default function Migration({ connection, session }) {
               }
             }
           }
-          await Promise.all(Array.from({ length: Math.min(CONCURRENT_SEGMENTS, segStarts.length || 1) }, () => worker()))
+          // Without a stable $orderby, concurrent $skip windows could overlap or skip
+          // rows → run fully serial (1 worker) in that rare case (#2).
+          const workerCount = srcKeys.length ? Math.min(CONCURRENT_SEGMENTS, segStarts.length || 1) : 1
+          await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
           // SAP commits asynchronously — each segment was committed independently,
           // so wait for processing and read messages across ALL segment
           // transactions before counting (otherwise we'd see stale data). By now
           // the earlier segments are typically already processed.
-          timer.mark('processing')
           setProgress(p => ({ ...p, phase: 'processing' }))
+          const tProc = Date.now()
           let anyError = false, anyUnconfirmed = false
           const errorMsgs = []
           for (const tx of segmentTxIds) {
@@ -798,11 +782,11 @@ export default function Migration({ connection, session }) {
             const st = await waitForProcessed(connection, session, tx, { timeoutMs: Math.min(1800000, Math.max(120000, SEGMENT_SIZE * 4)), signal })
             if (st === 'ERROR') anyError = true
             else if (st !== 'PROCESSED') anyUnconfirmed = true
-            timer.mark('messages')
             setProgress(p => ({ ...p, phase: 'messages' }))
             const msgs = await readMessages(connection, session, dstName, tx, { signal })
             errorMsgs.push(...msgs.filter(m => ['E', 'A'].includes(m.Severity)))
           }
+          addPhase('processing', Date.now() - tProc)
 
           // Count destination AFTER processing. If anything wasn't confirmed
           // PROCESSED, retry a few times while the count catches up.
@@ -829,7 +813,8 @@ export default function Migration({ connection, session }) {
           else if (anyUnconfirmed) status = 'processing'
           else                     status = 'ok'
 
-          const { phases: phaseTimes, total: durationMs } = timer.finish()
+          const phaseTimes = { ...phaseAcc }
+          const durationMs = Date.now() - tableStart
           pushResult({
             mdt: srcName, dstName, unverified,
             txId: segmentTxIds[segmentTxIds.length - 1] || null,
@@ -843,7 +828,8 @@ export default function Migration({ connection, session }) {
             phaseTimes, durationMs,
           })
         } catch (e) {
-          const { phases: phaseTimes, total: durationMs } = timer.finish()
+          const phaseTimes = { ...phaseAcc }
+          const durationMs = Date.now() - tableStart
           const lastTx = segmentTxIds.length ? segmentTxIds[segmentTxIds.length - 1] : null
           // Cancellation: explicit flag, an aborted request, or the cancel ref set.
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {

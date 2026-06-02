@@ -218,17 +218,19 @@ const READ_TIMEOUT  = 90000
 const WRITE_TIMEOUT = 110000   // headroom under Vercel maxDuration (120s) for larger POST chunks
 
 // Returns total record count using $inlinecount (no extra $count endpoint needed).
-export async function fetchCount(conn, session, name, { planningArea, versionId, signal } = {}) {
+export async function fetchCount(conn, session, name, { planningArea, versionId, signal, retries = 5, timeout } = {}) {
   const filter = buildFilter(planningArea, versionId)
   let path = `/${name}?$format=json&$top=0&$inlinecount=allpages`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
-  // Idempotent read → retry transient failures (5xx / truncated-relay 502 / network).
+  // Idempotent read → retry transient failures by default. Callers on the critical
+  // UI path (the pre-load count) pass retries: 1 + a short timeout so a slow count
+  // fails in ~2 min instead of retrying for ~8.
   return withRetry(async () => {
-    const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
+    const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: timeout || READ_TIMEOUT })
     if (!resp.ok) throw await httpError(resp)
     const data = await resp.json()
     return parseInt(data?.d?.__count ?? '0', 10)
-  }, { retries: 5, signal })
+  }, { retries, signal })
 }
 
 // Fetches one page of rows (2 000 by default). Uses explicit $skip — this tenant

@@ -608,7 +608,9 @@ export default function KeyFigureMigration({ connection, session }) {
               }
             }
           }
-          await Promise.all(Array.from({ length: CONCURRENT_SEGMENTS }, () => worker()))
+          // Without a stable $orderby, concurrent $skip windows could overlap or skip
+          // rows → run fully serial (1 worker) in that rare case (#2).
+          await Promise.all(Array.from({ length: orderby.length ? CONCURRENT_SEGMENTS : 1 }, () => worker()))
 
           // Nothing had a value → nothing migrated (and nothing committed).
           if (totalWritten === 0) {
