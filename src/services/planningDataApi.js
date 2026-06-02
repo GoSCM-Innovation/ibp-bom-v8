@@ -24,6 +24,7 @@
 
 import { proxyCall } from './proxyCall.js'
 import { fetchVsmt } from './masterDataApi.js'
+export { chunkByBytes, MAX_POST_BYTES } from './masterDataApi.js'   // byte-accurate POST chunking (shared)
 
 const COM = '0720'
 const READ_TIMEOUT  = 90000

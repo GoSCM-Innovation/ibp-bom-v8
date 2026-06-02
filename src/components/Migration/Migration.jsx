@@ -10,6 +10,7 @@ import {
   commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
   chunkSizeFor, pageSizeFor, measureRowBytes, pageSizeForBytes, chunkSizeForBytes,
+  chunkByBytes, MAX_POST_BYTES,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
 
@@ -680,9 +681,9 @@ export default function Migration({ connection, session }) {
                   // Project to common fields (drop fields the destination lacks).
                   const projected = batchRows.map(r => projectRow(srcName, r))
 
-                  // Split into adaptive-size chunks, write PARALLEL_W at a time.
-                  const chunks = []
-                  for (let c = 0; c < projected.length; c += writeChunk) chunks.push(projected.slice(c, c + writeChunk))
+                  // Byte-accurate chunks (≤ MAX_POST_BYTES, ≤ 5000 rows) → every POST
+                  // stays under Vercel's limit regardless of row-size variance.
+                  const chunks = chunkByBytes(projected, MAX_POST_BYTES, 5000)
 
                   timer.mark('writing')
                   setProgress(p => ({ ...p, phase: 'writing' }))

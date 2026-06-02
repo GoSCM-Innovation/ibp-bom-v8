@@ -82,6 +82,29 @@ export function pageSizeForBytes(bytesPerRow) {
   return Math.max(250, Math.min(5000, Math.floor(READ_BYTE_BUDGET / bytesPerRow)))
 }
 
+// Hard cap for a single POST body, well under Vercel's ~4.5 MB request limit.
+export const MAX_POST_BYTES = 3_500_000
+
+// Splits rows into chunks each ≤ maxBytes (measured, serialized) AND ≤ maxRows.
+// Byte-accurate, so it is SAFE regardless of per-row size variance — some tables
+// have few columns but very large/variable values (e.g. time series), where a
+// fixed row count occasionally produces a POST body over the Vercel limit (413,
+// non-retryable). Accumulating real bytes guarantees every POST stays under cap.
+export function chunkByBytes(rows, maxBytes = MAX_POST_BYTES, maxRows = 5000) {
+  const enc = new TextEncoder()
+  const chunks = []
+  let cur = [], curBytes = 0
+  for (const r of rows) {
+    const b = enc.encode(JSON.stringify(r)).length + 1
+    if (cur.length > 0 && (curBytes + b > maxBytes || cur.length >= maxRows)) {
+      chunks.push(cur); cur = []; curBytes = 0
+    }
+    cur.push(r); curBytes += b
+  }
+  if (cur.length) chunks.push(cur)
+  return chunks
+}
+
 // Measures ACTUAL bytes/row from a small live sample (the same $select the load
 // will use): the GET response size (wire bytes, what drives read truncation) and
 // the POST body size (what drives the Vercel ~4.5 MB request limit). Returns

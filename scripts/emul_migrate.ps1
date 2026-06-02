@@ -10,10 +10,12 @@ Add-Type -AssemblyName System.Net.Http
 # ── Tunables (defaults = exact web baseline) ──
 function EnvInt($name,$def){ $v=[Environment]::GetEnvironmentVariable($name); if($v){ [int]$v } else { $def } }
 $SEGMENT  = EnvInt 'SEG' 10000
-$READPAGE = EnvInt 'RP'  1224
+$READPAGE = EnvInt 'RP'  0    # 0 = derive from measured bytes/row (faithful to fixed web)
 $PAR_R    = EnvInt 'PR'  3
-$WCHUNK   = EnvInt 'WC'  5000
+$WCHUNK   = EnvInt 'WC'  0    # 0 = derive from measured bytes/row
 $PAR_W    = EnvInt 'PW'  4
+$RBUDGET  = 900000
+$WBUDGET  = 3500000
 $LABEL    = if ($env:LABEL) { $env:LABEL } else { 'baseline' }
 $MAX_ATT  = 5
 
@@ -58,6 +60,18 @@ $obE=[Uri]::EscapeDataString('CUSTID,LOCID,PRDID')
 $filE=[Uri]::EscapeDataString("PlanningAreaID eq 'ASIBPTS'")
 $reqAttr=($common -join ',')
 RefreshCsrf
+
+# Measure real bytes/row from a 200-row sample (same $select the load uses) and
+# derive read/write batch sizes — faithful to the fixed web's measured sizing.
+$smpTxt=$cli.GetStringAsync("$prd/AS1SOURCECUSTOMER?" + '$format=json&$top=200&$skip=0&$orderby=' + $obE + '&$select=' + $selE + '&$filter=' + $filE).Result
+$smpRows=($smpTxt | ConvertFrom-Json).d.results
+$readBpr=[Math]::Ceiling($smpTxt.Length/$smpRows.Count)
+$smpClean=@($smpRows | ForEach-Object { $o=[ordered]@{}; foreach($k in $common){ $o[$k]=$_.$k }; $o })
+$writeBpr=[Math]::Ceiling((($smpClean | ConvertTo-Json -Depth 12).Length)/$smpRows.Count)
+if($READPAGE -le 0){ $READPAGE=[int][Math]::Max(250,[Math]::Min(5000,[Math]::Floor($RBUDGET/$readBpr))) }
+if($WCHUNK   -le 0){ $WCHUNK  =[int][Math]::Max(250,[Math]::Min(5000,[Math]::Floor($WBUDGET/$writeBpr))) }
+"[$LABEL] measured readBpr=$readBpr writeBpr=$writeBpr -> readPage=$READPAGE writeChunk=$WCHUNK"
+
 $totalRows=[int](GetJ ("$prd/AS1SOURCECUSTOMER?" + '$format=json&$top=0&$inlinecount=allpages&$filter=' + $filE)).d.__count
 $maxRows=EnvInt 'MAXROWS' 0
 if($maxRows -gt 0 -and $totalRows -gt $maxRows){ $totalRows=$maxRows }

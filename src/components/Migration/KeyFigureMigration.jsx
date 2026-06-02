@@ -9,7 +9,7 @@ import {
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
   odataDateToIso, rowsPerChunk, readRowsPerPage, measureKfRowBytes, readRowsPerPageBytes, rowsPerChunkBytes,
-  PARALLEL_R, PARALLEL_W, SEGMENT_SIZE, MAX_SEGMENT_ATTEMPTS,
+  chunkByBytes, MAX_POST_BYTES, PARALLEL_R, PARALLEL_W, SEGMENT_SIZE, MAX_SEGMENT_ATTEMPTS,
 } from '../../services/planningDataApi'
 
 // ── Styles (shared visual language with Migration.jsx) ──────────────────────────
@@ -416,8 +416,10 @@ export default function KeyFigureMigration({ connection, session }) {
                     const projected = projectBatch(rowsRead)
                     if (projected.length > 0) {
                       setProgress(p => ({ ...p, phase: 'writing' }))
-                      const chunks = []
-                      for (let c = 0; c < projected.length; c += chunkRows) chunks.push(projected.slice(c, c + chunkRows))
+                      // Byte-accurate chunks (≤ MAX_POST_BYTES) AND ≤ chunkRows (the
+                      // ≤5000-KF-values/POST cap) → safe under Vercel's limit despite
+                      // variable time-series row sizes.
+                      const chunks = chunkByBytes(projected, MAX_POST_BYTES, chunkRows)
                       for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
                         if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                         await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
