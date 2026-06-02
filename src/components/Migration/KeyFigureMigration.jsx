@@ -328,7 +328,22 @@ export default function KeyFigureMigration({ connection, session }) {
         setProgress({ cur: done + 1, total: steps.length, name: label, rows: 0, totalRows: 0, phase: 'count' })
 
         try {
-          const totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: filter || undefined, signal })
+          // Source-side NON-ZERO filter: read only rows where ANY group KF is
+          // non-zero — positives AND negatives. (`ne 0` is silently ignored by SAP,
+          // so we use `gt 0 or lt 0`; verified the OR count = gt0 + lt0.) This reads
+          // far less than the whole planning level. Falls back to the base filter if
+          // a tenant rejects the KF-value filter; the client-side empty/0/null skip
+          // in projectBatch stays as a safety net either way.
+          const baseFilter = filter
+          const nzClause = '(' + srcKfs.map(kf => `${kf} gt 0 or ${kf} lt 0`).join(' or ') + ')'
+          const nzFilter = baseFilter ? `${baseFilter} and ${nzClause}` : nzClause
+          let totalRows
+          try {
+            totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: nzFilter, signal })
+            filter = nzFilter   // adopt for time buckets + reads + measurement below
+          } catch {
+            totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: baseFilter || undefined, signal })
+          }
           setProgress(p => ({ ...p, totalRows }))
 
           // Batch sizes by MEASURED bytes/row (small live sample), not column count
