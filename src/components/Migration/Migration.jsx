@@ -210,11 +210,13 @@ export default function Migration({ connection, session }) {
   // Refresh trigger — increment to force allConns/connById to re-read localStorage
   const [connsTick, setConnsTick] = useState(0)
 
-  // Other connections with SAP_COM_0720 (potential sources)
-  const allConns = useMemo(() =>
-    getAll().filter(c => c.id !== connection.id && c.com0720?.url && c.com0720?.user),
-    [connection.id, connsTick] // eslint-disable-line react-hooks/exhaustive-deps
-  )
+  // Source candidates: OTHER connections with SAP_COM_0720, plus THIS connection
+  // itself (listed first) — to migrate between areas/versions of the same system.
+  const allConns = useMemo(() => {
+    const others = getAll().filter(c => c.id !== connection.id && c.com0720?.url && c.com0720?.user)
+    const self   = (connection.com0720?.url && connection.com0720?.user) ? [connection] : []
+    return [...self, ...others]
+  }, [connection, connsTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // All connections by ID — for resolving names in history even after rename
   const connById = useMemo(() => {
@@ -234,11 +236,12 @@ export default function Migration({ connection, session }) {
 
   const srcSession = useMemo(() => {
     if (!srcConnId) return null
+    if (srcConnId === connection.id) return session   // same system → reuse the active session (no extra login)
     const stored   = getSession(srcConnId)
     const com0720  = srcTempCreds || stored?.com0720
     if (!com0720?.password) return null
     return { ...(stored || {}), com0720 }
-  }, [srcConnId, srcTempCreds])
+  }, [srcConnId, srcTempCreds, connection.id, session])
 
   const needsSrcLogin = !!(srcConn && !srcSession)
 
@@ -879,7 +882,11 @@ export default function Migration({ connection, session }) {
   }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, resolveDst, deleteEntries, connection, session])
 
   // ── Derived ──
-  const canMigrate = !running && !!srcConn && !!srcSession && !!srcPa && !!dstPa && mdtOrder.length > 0
+  // Identical origin/target is BLOCKED: with "delete destination first" it would
+  // wipe the source before reading it (total data loss). Same system with a
+  // DIFFERENT area or version is the supported intra-system migration.
+  const sameTarget = !!srcConn && srcConn.id === connection.id && !!srcPa && srcPa === dstPa && (srcVersion || '') === (dstVersion || '')
+  const canMigrate = !running && !!srcConn && !!srcSession && !!srcPa && !!dstPa && mdtOrder.length > 0 && !sameTarget
   const oneSel     = !running && mdtOrder.length === 1
 
   const PHASE_LABEL = {
@@ -959,7 +966,7 @@ export default function Migration({ connection, session }) {
               >
                 <option value="">{t('mig.noSource')}</option>
                 {allConns.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id}>{c.id === connection.id ? t('mig.srcSelf', { name: c.name }) : c.name}</option>
                 ))}
               </select>
             )}
@@ -1303,6 +1310,9 @@ export default function Migration({ connection, session }) {
             <button style={btnPrimary(!canMigrate || analyzing)} disabled={!canMigrate || analyzing} onClick={handleMigrateClick}>
               {analyzing ? t('mig.analyzing') : t('mig.migrateBtn')}
             </button>
+          )}
+          {sameTarget && (
+            <span style={{ fontSize: 11, color: 'var(--red)', alignSelf: 'center' }}>✕ {t('mig.sameTargetWarning')}</span>
           )}
         </div>
       )}

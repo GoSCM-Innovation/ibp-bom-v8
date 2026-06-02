@@ -606,6 +606,8 @@
   "mig.colDst": "Destino (antes→después)",
   "mig.versionIndepWarning": "⚠ Estos tipos no son específicos de la versión destino y se escribirán en la versión base: {mdts}",
   "mig.colTime": "Tiempo",
+  "mig.srcSelf": "{name} — este sistema",
+  "mig.sameTargetWarning": "Origen y destino son idénticos (mismo sistema, área y versión). Elige una versión o área distinta.",
   "mig.histTime": "Tiempo",
   "mig.summaryTotal": "Tiempo total: {dur}",
   "mig.summarySlowest": "· Más lenta: {name} ({dur})",

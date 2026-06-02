@@ -156,7 +156,13 @@ export default function KeyFigureMigration({ connection, session }) {
   const { t } = useI18n()
 
   // Destination = current connection; source = another connection with SAP_COM_0720.
-  const allConns = useMemo(() => getAll().filter(c => c.id !== connection.id && c.com0720?.url && c.com0720?.user), [connection.id])
+  // Other connections with COM_0720, plus THIS connection itself (listed first) —
+  // to migrate between areas/versions of the same system.
+  const allConns = useMemo(() => {
+    const others = getAll().filter(c => c.id !== connection.id && c.com0720?.url && c.com0720?.user)
+    const self   = (connection.com0720?.url && connection.com0720?.user) ? [connection] : []
+    return [...self, ...others]
+  }, [connection])
 
   // ── Source connection + inline login ──
   const [srcConnId, setSrcConnId]       = useState(null)
@@ -167,11 +173,12 @@ export default function KeyFigureMigration({ connection, session }) {
   const srcConn = useMemo(() => allConns.find(c => c.id === srcConnId) || null, [allConns, srcConnId])
   const srcSession = useMemo(() => {
     if (!srcConnId) return null
+    if (srcConnId === connection.id) return session   // same system → reuse the active session (no extra login)
     const stored = getSession(srcConnId)
     const com0720 = srcTempCreds || stored?.com0720
     if (!com0720?.password) return null
     return { ...(stored || {}), com0720 }
-  }, [srcConnId, srcTempCreds])
+  }, [srcConnId, srcTempCreds, connection.id, session])
   const needsSrcLogin = !!(srcConn && !srcSession)
 
   // ── Catalogs + planning-area selection ──
@@ -337,9 +344,13 @@ export default function KeyFigureMigration({ connection, session }) {
   // ── Migration engine ──
   const needsUom  = steps.some(s => s.conv === 'UOM')
   const needsCurr = steps.some(s => s.conv === 'CURR')
+  // Identical origin/target (same system + area + version) is blocked — it would
+  // just overwrite values with themselves. Same system with a different area or
+  // version is the supported intra-system migration.
+  const sameTarget = !!srcConn && srcConn.id === connection.id && !!srcPa && srcPa === dstPa && (srcVersion || '') === (dstVersion || '')
   const canMigrate = !running && !!srcConn && !!srcSession && !!dstCat && !!srcCat &&
     levelAttrs.length > 0 && steps.length > 0 && steps.every(s => s.srcKf) && unmappedAttrs.length === 0 &&
-    (!needsUom || selUom) && (!needsCurr || selCurr)
+    (!needsUom || selUom) && (!needsCurr || selCurr) && !sameTarget
 
   // Opens the confirmation INSTANTLY. The old pre-migration "level analysis"
   // (counting the level with/without each dimension per KF) was removed: on big
@@ -704,7 +715,7 @@ export default function KeyFigureMigration({ connection, session }) {
                 setSrcVersion('')
               }}>
                 <option value="">{t('kfm.selectSource')}</option>
-                {allConns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {allConns.map(c => <option key={c.id} value={c.id}>{c.id === connection.id ? t('mig.srcSelf', { name: c.name }) : c.name}</option>)}
               </select>
             )}
             {needsSrcLogin && (
@@ -927,6 +938,7 @@ export default function KeyFigureMigration({ connection, session }) {
           ) : (
             <button style={btnPrimary(!canMigrate)} disabled={!canMigrate} onClick={handleMigrateClick}>{t('kfm.migrateBtn')}</button>
           )}
+          {sameTarget && <span style={{ fontSize: 11, color: 'var(--red)' }}>✕ {t('mig.sameTargetWarning')}</span>}
           {!dstVersion && <span style={{ fontSize: 11, color: 'var(--yellow, #e6a817)' }}>{t('kfm.baseWarning')}</span>}
         </div>
       )}

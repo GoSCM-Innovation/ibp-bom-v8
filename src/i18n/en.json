@@ -606,6 +606,8 @@
   "mig.colDst": "Destination (before→after)",
   "mig.versionIndepWarning": "⚠ These types are not version-specific in the destination version and will be written to the base version: {mdts}",
   "mig.colTime": "Time",
+  "mig.srcSelf": "{name} — this system",
+  "mig.sameTargetWarning": "Origin and destination are identical (same system, area and version). Pick a different version or area.",
   "mig.histTime": "Time",
   "mig.summaryTotal": "Total time: {dur}",
   "mig.summarySlowest": "· Slowest: {name} ({dur})",
