@@ -185,8 +185,6 @@ export default function KeyFigureMigration({ connection, session }) {
   const [expanded, setExpanded] = useState(null)
 
   // ── Pre-migration level check (deduce each KF's level from the chosen dims) ──
-  const [analyzing, setAnalyzing]   = useState(false)
-  const [analysis, setAnalysis]     = useState(null)   // { byKf, error? }
   const [showConfirm, setShowConfirm] = useState(false)
 
   // ── Discover destination planning areas on mount (auto-select if only one) ──
@@ -300,64 +298,12 @@ export default function KeyFigureMigration({ connection, session }) {
     levelAttrs.length > 0 && steps.length > 0 && steps.every(s => s.srcKf) && unmappedAttrs.length === 0 &&
     (!needsUom || selUom) && (!needsCurr || selCurr)
 
-  // Deduce each KF's planning level USING ONLY the level the user configured:
-  // for every chosen dimension, count with vs without it — if removing it lowers
-  // the count, the dimension is a genuine root of the KF; if not, it doesn't
-  // apply (the KF's level is more aggregated). Verdict per KF: identical to the
-  // proposed level, or different (which chosen dims don't apply). Advisory only.
-  async function analyzeLevels() {
-    const srcPa = srcCat.pa
-    const byKf = {}
-    // ADVISORY check — it must NEVER hang the UI. Counts at a detailed level on a
-    // big version can exceed the proxy timeout; with countKf's default retries that
-    // froze the button for ~10 min per count. So here: NO retries + short timeout
-    // (a failure just marks the KF "unverifiable" in the modal and the user can
-    // proceed), all KFs AND all per-dimension counts in PARALLEL, and counting the
-    // much smaller NON-ZERO set first (base-filter fallback if rejected).
-    const CNT = { retries: 0, timeout: 45000 }
-    await Promise.all(steps.map(async s => {
-      let conv = s.conv
-      if (conv === undefined) { try { conv = await detectConversion(srcConn, srcSession, srcPa, s.srcKf) } catch { conv = null } }
-      const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
-      const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
-      let filter = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
-      if (convAttr && convVal) filter += `${filter ? ' and ' : ''}${convAttr} eq '${convVal}'`
-      const srcLevelCols = levelAttrs.map(resolveSrcAttr)
-      const fixed = convAttr ? [convAttr] : []
-      const sel = cols => [...cols, ...fixed, timeField, s.srcKf].join(',')
-      const count = (cols, flt) => countKf(srcConn, srcSession, srcPa, { select: sel(cols), filter: flt || undefined, ...CNT })
-      try {
-        const nz = `(${s.srcKf} gt 0 or ${s.srcKf} lt 0)`
-        let flt = filter ? `${filter} and ${nz}` : nz
-        let full
-        try { full = await count(srcLevelCols, flt) }
-        catch { flt = filter; full = await count(srcLevelCols, flt) }   // tenant rejected the KF-value filter
-        const dimResults = await Promise.all(levelAttrs.map(async (dstDim, i) => {
-          const without = srcLevelCols.filter((_, j) => j !== i)
-          const c = await count(without, flt)
-          return { dstDim, root: full > c }
-        }))
-        const extra = dimResults.filter(d => !d.root).map(d => d.dstDim)   // chosen but not a root
-        byKf[s.dstKf] = {
-          verifiable: true,
-          proposed: [...levelAttrs],
-          deduced:  dimResults.filter(d => d.root).map(d => d.dstDim),
-          extra,
-          identical: extra.length === 0,
-        }
-      } catch (e) {
-        byKf[s.dstKf] = { verifiable: false, error: errText(e) }
-      }
-    }))
-    return { byKf }
-  }
-
-  async function handleMigrateClick() {
-    setAnalyzing(true); setAnalysis(null)
-    let result
-    try { result = await analyzeLevels() } catch (e) { result = { byKf: {}, error: errText(e) } }
-    setAnalysis(result); setAnalyzing(false); setShowConfirm(true)
-  }
+  // Opens the confirmation INSTANTLY. The old pre-migration "level analysis"
+  // (counting the level with/without each dimension per KF) was removed: on big
+  // versions those counts were far too slow for the UI and usually ended in
+  // "unverifiable" — a useless gate. The migration itself validates everything
+  // that matters (SAP rejects bad levels per row and the result reports it).
+  function handleMigrateClick() { setShowConfirm(true) }
 
   // Human label of the selected time level (for the proposed/deduced level display).
   const timeLabel = t(`kfm.time_${(TIME_LEVELS.find(x => x.field === timeField) || {}).key}`)
@@ -886,7 +832,7 @@ export default function KeyFigureMigration({ connection, session }) {
           {running ? (
             <button style={BTN_DANGER} onClick={() => { cancelledRef.current = true; abortRef.current?.abort() }}>{t('kfm.cancelBtn')}</button>
           ) : (
-            <button style={btnPrimary(!canMigrate || analyzing)} disabled={!canMigrate || analyzing} onClick={handleMigrateClick}>{analyzing ? t('kfm.analyzing') : t('kfm.migrateBtn')}</button>
+            <button style={btnPrimary(!canMigrate)} disabled={!canMigrate} onClick={handleMigrateClick}>{t('kfm.migrateBtn')}</button>
           )}
           {!dstVersion && <span style={{ fontSize: 11, color: 'var(--yellow, #e6a817)' }}>{t('kfm.baseWarning')}</span>}
         </div>
@@ -942,48 +888,44 @@ export default function KeyFigureMigration({ connection, session }) {
         </div>
       )}
 
-      {/* ── Pre-migration level confirmation (deduced level vs proposed) ── */}
-      {showConfirm && analysis && (
+      {/* ── Pre-migration confirmation — INSTANT summary (no slow pre-analysis) ── */}
+      {showConfirm && (() => {
+        const isProd = ['Producción', 'Production'].includes(connection.ambiente)
+        return (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--overlay)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 12, padding: 24, width: 580, maxWidth: '92vw', maxHeight: '82vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)' }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>{t('kfm.confirmTitle')}</div>
-            {analysis.error ? (
-              <div style={{ fontSize: 12, color: 'var(--red)' }}>✕ {analysis.error}</div>
-            ) : (
-              <>
-                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>{t('kfm.confirmIntro')}</div>
-                <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {steps.map(s => {
-                    const a = analysis.byKf[s.dstKf] || {}
-                    return (
-                      <div key={s.dstKf} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', background: 'var(--bg)' }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--text)', marginBottom: 4 }}>
-                          {s.srcKf && s.srcKf !== s.dstKf ? `${s.srcKf} → ${s.dstKf}` : s.dstKf}
-                        </div>
-                        {!a.verifiable ? (
-                          <div style={{ fontSize: 11, color: 'var(--yellow, #e6a817)' }}>⚠ {t('kfm.levelUnverifiable')}</div>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11 }}>
-                            <div style={{ color: 'var(--text2)' }}>{t('kfm.proposedLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(a.proposed)}</span></div>
-                            <div style={{ color: 'var(--text2)' }}>{t('kfm.deducedLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(a.deduced)}</span></div>
-                            {a.identical
-                              ? <div style={{ color: 'var(--green)' }}>✓ {t('kfm.levelIdentical')}</div>
-                              : <div style={{ color: 'var(--yellow, #e6a817)' }}>⚠ {t('kfm.levelDiffers', { dims: a.extra.join(', ') })}</div>}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </>
+            {isProd && (
+              <div style={{
+                fontSize: 11, color: 'var(--red)', lineHeight: 1.5, marginBottom: 12,
+                background: 'color-mix(in srgb, var(--red) 10%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)',
+                borderRadius: 6, padding: '7px 10px',
+              }}>
+                ⚠ {t('mig.confirmMsg', { name: connection.name })}
+              </div>
             )}
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>
+              {t('kfm.confirmSimpleIntro', { n: steps.length, ver: dstVersion || 'Base' })}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
+              {t('kfm.confirmLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(levelAttrs)}</span>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {steps.map(s => (
+                <div key={s.dstKf} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '7px 10px', background: 'var(--bg)', fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text)' }}>
+                  {s.srcKf && s.srcKf !== s.dstKf ? `${s.srcKf} → ${s.dstKf}` : s.dstKf}
+                </div>
+              ))}
+            </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
               <button style={BTN_SEC} onClick={() => setShowConfirm(false)}>{t('kfm.confirmCancel')}</button>
-              <button style={btnPrimary(false)} onClick={runMigration}>{t('kfm.confirmMigrate')}</button>
+              <button style={isProd ? { ...btnPrimary(false), background: 'var(--red)', color: '#fff' } : btnPrimary(false)} onClick={runMigration}>{t('kfm.confirmMigrate')}</button>
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
