@@ -387,97 +387,99 @@ export default function KeyFigureMigration({ connection, session }) {
           const segmentTxIds = []   // one committed transaction per non-empty segment
           let committedRows = 0     // read rows confirmed — durable baseline (never reset)
           let totalWritten  = 0     // values actually written across all segments
-          const effParR     = orderby.length ? PARALLEL_R : 1   // serial reads if no stable $orderby (#4)
-          const batchSize   = effParR * readPageSize
+          const effParR = orderby.length ? PARALLEL_R : 1   // serial reads if no stable $orderby (#4)
 
-          // ── Concurrent time-bucket workers ──
-          // Each time bucket is an independent key range (distinct period), so
-          // CONCURRENT_SEGMENTS workers process buckets in parallel: while one writes,
-          // another reads → reads overlap writes and POSTs run concurrently across
-          // transactions. Within a bucket, segments still commit one at a time
-          // (durable, duplicate-safe). With a single bucket this stays sequential.
-          let nextBucket = 0
-          const bucketWorker = async () => {
+          // ── Concurrent COMMITTED segments (position-segmented per bucket) ──
+          // K workers pull (bucket, segStart) work items from a shared cursor and
+          // process each segment independently (own transaction, durable, dedupe-safe).
+          // Each bucket is segmented BY POSITION, so the same bucket is read by several
+          // workers at disjoint $skip windows → full K-way concurrency even with a
+          // SINGLE bucket (parity with master data). A bucket is marked done when a
+          // segment read comes up short (no rows beyond it); workers that already
+          // grabbed a past-the-end window just read empty (harmless, duplicate-safe).
+          const buckets = segFilters.map(f => ({ filter: f, skip: 0, done: false }))
+          const nextWork = () => {
+            for (const b of buckets) {
+              if (!b.done) { const segStart = b.skip; b.skip += SEGMENT_SIZE; return { b, segStart } }
+            }
+            return null
+          }
+          const worker = async () => {
             for (;;) {
               if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-              const bi = nextBucket++
-              if (bi >= segFilters.length) return
-              const segFilter = segFilters[bi]
-              let bucketSkip = 0, bucketDone = false
-              while (!bucketDone) {
+              const w = nextWork()
+              if (!w) return
+              const { b, segStart } = w
+              const segEnd = segStart + SEGMENT_SIZE
+
+              for (let attempt = 1; ; attempt++) {
                 if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                let segLoaded = 0, segWritten = 0, reachedEnd = false
+                try {
+                  const txId = await getTransactionId(connection, session, { signal })
+                  try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
 
-                for (let attempt = 1; ; attempt++) {
-                  if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                  let segLoaded = 0, segWritten = 0, reachedEnd = false
-                  try {
-                    const txId = await getTransactionId(connection, session, { signal })
-                    try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
-
-                    // Phase 1 — READ this segment (≤ SEGMENT_SIZE rows from bucketSkip),
-                    // effParR pages at a time, accumulating projected (non-empty) rows.
-                    let skip = bucketSkip
-                    const segBuf = []
-                    while (segLoaded < SEGMENT_SIZE) {
-                      if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                      setProgress(p => ({ ...p, phase: 'reading' }))
-                      const batch = Array.from({ length: effParR }, (_, j) =>
-                        readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: segFilter || undefined, skip: skip + j * readPageSize, top: readPageSize, orderby, signal })
-                      )
-                      const rowsRead = (await Promise.all(batch)).flat()
-                      if (rowsRead.length === 0) { reachedEnd = true; break }
-                      for (const r of projectBatch(rowsRead)) segBuf.push(r)
-                      segLoaded += rowsRead.length
-                      skip += batchSize
-                      setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
-                      if (rowsRead.length < batchSize) { reachedEnd = true; break }
-                    }
-
-                    // Phase 2 — WRITE the whole segment as byte-accurate chunks (≤ MAX_POST_BYTES,
-                    // ≤ chunkRows = the ≤5000-KF-values/POST cap), POSTing PARALLEL_W at a time.
-                    if (segBuf.length > 0) {
-                      setProgress(p => ({ ...p, phase: 'writing' }))
-                      const chunks = chunkByBytes(segBuf, MAX_POST_BYTES, chunkRows)
-                      for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
-                        if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                        await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
-                          postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
-                        ))
-                      }
-                      segWritten = segBuf.length
-                    }
-
-                    // Commit this segment (only if it staged something; an all-empty
-                    // segment is abandoned — SAP saves nothing without commit).
-                    if (segWritten > 0) {
-                      setProgress(p => ({ ...p, phase: 'committing' }))
-                      await commitTransaction(connection, session, txId, { signal, csrf })
-                      segmentTxIds.push(txId)
-                      totalWritten += segWritten
-                    }
-                    committedRows += segLoaded
-                    bucketSkip    += segLoaded
-                    setProgress(p => ({ ...p, rows: committedRows }))
-                    if (reachedEnd) bucketDone = true
-                    break   // segment done
-                  } catch (e) {
-                    if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
-                    if (e.isCalculated) throw e   // permanent (calculated KF) — don't retry
-                    // CSRF expired → refresh and retry (a 403 stages nothing, safe) (#2).
-                    if (e?.status === 403) { try { csrf = await fetchCsrf(connection, session, { signal }) } catch { /* ignore */ } }
-                    const transient = e?.status === 403 || e?.status == null || e.status >= 500
-                    if (transient && attempt < MAX_SEGMENT_ATTEMPTS) {
-                      setProgress(p => ({ ...p, phase: 'retrying' }))
-                      await new Promise(r => setTimeout(r, 1500 * attempt))
-                      continue
-                    }
-                    throw e
+                  // Read this segment [segStart, segEnd) of the bucket, effParR pages at a time.
+                  const segBuf = []
+                  for (let pageStart = segStart; pageStart < segEnd; pageStart += readPageSize * effParR) {
+                    if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                    const batchPageCount = Math.min(effParR, Math.ceil((segEnd - pageStart) / readPageSize))
+                    const batch = Array.from({ length: batchPageCount }, (_, j) => {
+                      const sk = pageStart + j * readPageSize
+                      const tp = Math.min(readPageSize, segEnd - sk)
+                      return readKfPage(srcConn, srcSession, srcPa, { select: srcSelect, filter: b.filter || undefined, skip: sk, top: tp, orderby, signal })
+                    })
+                    setProgress(p => ({ ...p, phase: 'reading' }))
+                    const rowsRead = (await Promise.all(batch)).flat()
+                    if (rowsRead.length === 0) { reachedEnd = true; break }
+                    for (const r of projectBatch(rowsRead)) segBuf.push(r)
+                    segLoaded += rowsRead.length
+                    setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
+                    const want = Math.min(readPageSize * effParR, segEnd - pageStart)
+                    if (rowsRead.length < want) { reachedEnd = true; break }   // bucket ended within this segment
                   }
+                  if (reachedEnd) b.done = true
+
+                  // Write the whole segment as byte-accurate chunks, PARALLEL_W in parallel.
+                  if (segBuf.length > 0) {
+                    setProgress(p => ({ ...p, phase: 'writing' }))
+                    const chunks = chunkByBytes(segBuf, MAX_POST_BYTES, chunkRows)
+                    for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                      if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                      await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
+                        postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
+                      ))
+                    }
+                    segWritten = segBuf.length
+                  }
+
+                  // Commit (only if it staged something; an all-empty segment is abandoned).
+                  if (segWritten > 0) {
+                    setProgress(p => ({ ...p, phase: 'committing' }))
+                    await commitTransaction(connection, session, txId, { signal, csrf })
+                    segmentTxIds.push(txId)
+                    totalWritten += segWritten
+                  }
+                  committedRows += segLoaded
+                  setProgress(p => ({ ...p, rows: committedRows }))
+                  break   // segment done; pull the next one
+                } catch (e) {
+                  if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
+                  if (e.isCalculated) throw e   // permanent (calculated KF) — don't retry
+                  // CSRF expired → refresh and retry (a 403 stages nothing, safe) (#2).
+                  if (e?.status === 403) { try { csrf = await fetchCsrf(connection, session, { signal }) } catch { /* ignore */ } }
+                  const transient = e?.status === 403 || e?.status == null || e.status >= 500
+                  if (transient && attempt < MAX_SEGMENT_ATTEMPTS) {
+                    setProgress(p => ({ ...p, phase: 'retrying' }))
+                    await new Promise(r => setTimeout(r, 1500 * attempt))
+                    continue
+                  }
+                  throw e
                 }
               }
             }
           }
-          await Promise.all(Array.from({ length: Math.min(CONCURRENT_SEGMENTS, segFilters.length || 1) }, () => bucketWorker()))
+          await Promise.all(Array.from({ length: CONCURRENT_SEGMENTS }, () => worker()))
 
           // Nothing had a value → nothing migrated (and nothing committed).
           if (totalWritten === 0) {

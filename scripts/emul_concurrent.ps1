@@ -33,7 +33,7 @@ $tok=$null;[void]$cz.Headers.TryGetValues('x-csrf-token',[ref]$tok);$tok=($tok-j
 $sc=$null;[void]$cz.Headers.TryGetValues('set-cookie',[ref]$sc); $cookie=(@($sc)|ForEach-Object{$_.Split(';')[0]})-join'; '
 
 $total=[int](($c0.GetStringAsync("$prd/AS1SOURCECUSTOMER?" + '$format=json&$top=0&$inlinecount=allpages&$filter=' + $filE).Result | ConvertFrom-Json).d.__count)
-if($total -gt $MAXROWS){ $total=$MAXROWS }
+if($MAXROWS -gt 0 -and $total -gt $MAXROWS){ $total=$MAXROWS }
 $queue=New-Object System.Collections.Concurrent.ConcurrentQueue[int]
 for($s=0;$s -lt $total;$s+=$SEG){ $queue.Enqueue($s) }
 $sync=[hashtable]::Synchronized(@{ committed=0; errors=0 })
