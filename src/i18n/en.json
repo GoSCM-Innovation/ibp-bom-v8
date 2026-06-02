@@ -653,6 +653,7 @@
   "kfm.sectionKf": "Destination key figures to fill ({n})",
   "kfm.kfHint": "Check the DESTINATION key figures ({dst}) you want to fill. Then, per step, choose which SOURCE key figure ({src}) feeds each one.",
   "kfm.kfSearch": "Search key figure…",
+  "kfm.typeToFilter": "Type to filter…",
   "kfm.orderTitle": "Order and mapping (source -> destination)",
   "kfm.colSrc": "Source ({sys})",
   "kfm.colDst": "Destination ({sys})",

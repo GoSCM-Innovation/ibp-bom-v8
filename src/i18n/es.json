@@ -653,6 +653,7 @@
   "kfm.sectionKf": "Key figures del destino a llenar ({n})",
   "kfm.kfHint": "Marca los key figures del DESTINO ({dst}) que quieres llenar. Luego, en cada paso, eliges de qué key figure del ORIGEN ({src}) sale cada uno.",
   "kfm.kfSearch": "Buscar key figure…",
+  "kfm.typeToFilter": "Escribir para filtrar…",
   "kfm.orderTitle": "Orden y mapeo (origen → destino)",
   "kfm.colSrc": "Origen ({sys})",
   "kfm.colDst": "Destino ({sys})",

@@ -46,6 +46,87 @@ function errText(e) {
   return (typeof e.message === 'string' && e.message) || String(e)
 }
 
+// Dropdown with a built-in TEXT SEARCH — for very long option lists (hundreds of
+// key figures, units…) where a native <select> is hard to scan. Click opens a
+// panel with a filter input + scrollable list; Enter picks the first match;
+// Escape / outside click closes. options: [{ value, label }].
+function SearchSelect({ value, options, onChange, placeholder, searchPlaceholder, invalid, style, btnStyle, mono = true }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const boxRef = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const h = e => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  const sel = options.find(o => o.value === value)
+  const ql = q.toLowerCase()
+  const filtered = !q ? options : options.filter(o =>
+    String(o.value).toLowerCase().includes(ql) || String(o.label || '').toLowerCase().includes(ql))
+  const pick = v => { onChange(v); setOpen(false); setQ('') }
+  return (
+    <div ref={boxRef} style={{ position: 'relative', ...style }}>
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); setQ('') }}
+        style={{
+          background: 'var(--bg)', border: `1px solid ${invalid ? 'var(--red)' : 'var(--border)'}`, borderRadius: 6,
+          color: sel ? 'var(--text)' : 'var(--text3)', fontSize: 12, padding: '7px 10px', width: '100%',
+          textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+          fontFamily: mono ? 'var(--mono)' : 'inherit', ...btnStyle,
+        }}
+      >
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {sel ? sel.label : (placeholder || '—')}
+        </span>
+        <span style={{ color: 'var(--text3)', fontSize: 9, flexShrink: 0 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, marginTop: 3,
+          background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 8,
+          boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
+        }}>
+          <input
+            autoFocus
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') setOpen(false)
+              if (e.key === 'Enter' && filtered.length > 0) pick(filtered[0].value)
+            }}
+            placeholder={searchPlaceholder || '…'}
+            style={{
+              background: 'var(--bg)', border: 'none', borderBottom: '1px solid var(--border)',
+              color: 'var(--text)', fontSize: 12, padding: '8px 10px', width: '100%', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--text3)' }}>—</div>}
+            {filtered.map(o => (
+              <div
+                key={o.value}
+                onClick={() => pick(o.value)}
+                style={{
+                  padding: '6px 10px', fontSize: 11, cursor: 'pointer',
+                  fontFamily: mono ? 'var(--mono)' : 'inherit',
+                  color: o.value === value ? 'var(--accent)' : 'var(--text)',
+                  background: o.value === value ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 16%, transparent)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = o.value === value ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent' }}
+              >
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function KeyFigureMigration({ connection, session }) {
   const { t } = useI18n()
 
@@ -177,6 +258,8 @@ export default function KeyFigureMigration({ connection, session }) {
   const dstAttrs = useMemo(() => (dstCat?.dims || []).filter(a => !a.startsWith('PERIODID') && !READONLY_ATTRS.has(a)).sort(), [dstCat])
   const dstKfs   = useMemo(() => (dstCat?.measures || []).slice().sort(), [dstCat])
   const srcKfSet = useMemo(() => new Set(srcCat?.measures || []), [srcCat])
+  // Options for the searchable source-KF picker (label = name, like the list).
+  const srcKfOptions = useMemo(() => [...srcKfSet].sort().map(sk => ({ value: sk, label: sk })), [srcKfSet])
   const srcAttrSet = useMemo(() => new Set(srcCat?.dims || []), [srcCat])
 
   const filteredAttrs = useMemo(() => dstAttrs.filter(a => !attrSearch || a.toLowerCase().includes(attrSearch.toLowerCase()) || (dstCat?.labels?.[a] || '').toLowerCase().includes(attrSearch.toLowerCase())), [dstAttrs, attrSearch, dstCat])
@@ -737,12 +820,17 @@ export default function KeyFigureMigration({ connection, session }) {
               {steps.map((s, idx) => (
                 <div key={s.dstKf} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', marginBottom: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7 }}>
                   <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: 'var(--text2)', background: 'var(--bg2)', border: '1px solid var(--border)' }}>{idx + 1}</div>
-                  {/* source KF select */}
-                  <select value={s.srcKf} onChange={e => setSteps(p => p.map(x => x.dstKf === s.dstKf ? { ...x, srcKf: e.target.value } : x))}
-                    style={{ ...SELECT, flex: 1, minWidth: 0, fontSize: 11, padding: '3px 6px', fontFamily: 'var(--mono)', borderColor: s.srcKf ? 'var(--border)' : 'var(--red)' }}>
-                    <option value="">{t('kfm.selectSrcKf')}</option>
-                    {[...srcKfSet].sort().map(sk => <option key={sk} value={sk}>{sk}</option>)}
-                  </select>
+                  {/* source KF picker — searchable (hundreds of KFs make a native select unusable) */}
+                  <SearchSelect
+                    value={s.srcKf}
+                    options={srcKfOptions}
+                    onChange={v => setSteps(p => p.map(x => x.dstKf === s.dstKf ? { ...x, srcKf: v } : x))}
+                    placeholder={t('kfm.selectSrcKf')}
+                    searchPlaceholder={t('kfm.typeToFilter')}
+                    invalid={!s.srcKf}
+                    style={{ flex: 1, minWidth: 0 }}
+                    btnStyle={{ fontSize: 11, padding: '3px 6px' }}
+                  />
                   <span style={{ color: 'var(--text3)', fontSize: 12 }}>→</span>
                   <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)', flex: '0 0 38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.dstKf}>{s.dstKf}</span>
                   <button disabled={idx === 0} onClick={() => setSteps(p => { const a = [...p];[a[idx], a[idx - 1]] = [a[idx - 1], a[idx]]; return a })} style={{ ...BTN_SEC, padding: '2px 7px', fontSize: 10, opacity: idx === 0 ? 0.25 : 1 }}>↑</button>
@@ -763,19 +851,29 @@ export default function KeyFigureMigration({ connection, session }) {
             {needsUom && (
               <div style={{ flex: 1 }}>
                 <label style={LABEL}>{t('kfm.uomLabel')}</label>
-                <select style={{ ...SELECT, borderColor: selUom ? 'var(--border)' : 'var(--red)' }} value={selUom} onChange={e => setSelUom(e.target.value)}>
-                  <option value="">{t('kfm.selectUom')}</option>
-                  {units.map(u => <option key={u.id} value={u.id}>{u.id}{u.desc && u.desc !== u.id ? ` — ${u.desc}` : ''}</option>)}
-                </select>
+                <SearchSelect
+                  value={selUom}
+                  options={units.map(u => ({ value: u.id, label: u.id + (u.desc && u.desc !== u.id ? ` — ${u.desc}` : '') }))}
+                  onChange={setSelUom}
+                  placeholder={t('kfm.selectUom')}
+                  searchPlaceholder={t('kfm.typeToFilter')}
+                  invalid={!selUom}
+                  mono={false}
+                />
               </div>
             )}
             {needsCurr && (
               <div style={{ flex: 1 }}>
                 <label style={LABEL}>{t('kfm.currLabel')}</label>
-                <select style={{ ...SELECT, borderColor: selCurr ? 'var(--border)' : 'var(--red)' }} value={selCurr} onChange={e => setSelCurr(e.target.value)}>
-                  <option value="">{t('kfm.selectCurr')}</option>
-                  {currencies.map(c => <option key={c.id} value={c.id}>{c.id}{c.desc && c.desc !== c.id ? ` — ${c.desc}` : ''}</option>)}
-                </select>
+                <SearchSelect
+                  value={selCurr}
+                  options={currencies.map(c => ({ value: c.id, label: c.id + (c.desc && c.desc !== c.id ? ` — ${c.desc}` : '') }))}
+                  onChange={setSelCurr}
+                  placeholder={t('kfm.selectCurr')}
+                  searchPlaceholder={t('kfm.typeToFilter')}
+                  invalid={!selCurr}
+                  mono={false}
+                />
               </div>
             )}
           </div>
