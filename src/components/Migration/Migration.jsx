@@ -568,7 +568,7 @@ export default function Migration({ connection, session }) {
         // results + saved to history). Mark on every phase change below.
         const timer = makePhaseTimer()
         timer.mark('reading')
-        setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading' })
+        setProgress({ datasetCur: di + 1, datasetTotal: mdtList.length, datasetName: label, rows: 0, totalRows: 0, phase: 'reading', tableStart: Date.now(), segsDone: 0, totalSegs: 0 })
 
         let totalRows = 0
         let loadedRows = 0   // rows actually read from source AND staged (sent to IBP)
@@ -685,6 +685,7 @@ export default function Migration({ connection, session }) {
           // re-POSTs a chunk in a live tx (duplicate-safe).
           const segStarts = []
           for (let s = 0; s < totalRows; s += SEGMENT_SIZE) segStarts.push(s)
+          setProgress(p => ({ ...p, totalSegs: segStarts.length }))
           let nextSeg = 0
           let committedRows = 0     // durable baseline — never reset on a retry (segmentTxIds declared at table scope above)
 
@@ -760,7 +761,7 @@ export default function Migration({ connection, session }) {
                   committedRows += segLoaded
                   loadedRows = committedRows
                   segmentTxIds.push(myTx)
-                  setProgress(p => ({ ...p, rows: committedRows }))
+                  setProgress(p => ({ ...p, rows: committedRows, segsDone: (p.segsDone || 0) + 1 }))
                   break   // segment done; pull the next one
                 } catch (e) {
                   if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
@@ -1342,22 +1343,35 @@ export default function Migration({ connection, session }) {
                       {(done.total || 0).toLocaleString()} {t('mig.colTotal').toLowerCase()}
                       {done.errors > 0 ? ` · ${done.errors} ${t('mig.colErrors').toLowerCase()}` : ''}
                       {deltaStr ? ` · ${deltaStr}` : ''}
+                      {done.durationMs != null ? ` · ${fmtDuration(done.durationMs)}` : ''}
                     </div>
                   )}
-                  {isCurrent && progress.totalRows > 0 && (
-                    <div style={{ marginLeft: 22, marginTop: 5 }}>
-                      <div style={{ background: 'var(--border)', borderRadius: 4, height: 5, overflow: 'hidden', marginBottom: 3 }}>
-                        <div style={{
-                          background: 'var(--accent)', height: '100%', borderRadius: 4,
-                          width: `${Math.min(100, (progress.rows / progress.totalRows) * 100)}%`,
-                          transition: 'width .3s',
-                        }} />
+                  {isCurrent && (() => {
+                    const elapsedS = Math.max(1, (Date.now() - (progress.tableStart || Date.now())) / 1000)
+                    const rate = progress.rows > 0 ? Math.round(progress.rows / elapsedS) : 0
+                    const pct  = progress.totalRows > 0 ? Math.min(100, (progress.rows / progress.totalRows) * 100) : null
+                    const etaS = (pct != null && rate > 0) ? Math.max(0, (progress.totalRows - progress.rows) / rate) : null
+                    return (
+                      <div style={{ marginLeft: 22, marginTop: 5 }}>
+                        {pct != null && (
+                          <div style={{ background: 'var(--border)', borderRadius: 4, height: 5, overflow: 'hidden', marginBottom: 3 }}>
+                            <div style={{
+                              background: 'var(--accent)', height: '100%', borderRadius: 4,
+                              width: `${pct}%`, transition: 'width .3s',
+                            }} />
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10, color: 'var(--text3)', display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
+                          <span style={{ fontFamily: 'var(--mono)' }}>
+                            {progress.rows.toLocaleString()}{progress.totalRows > 0 ? ` / ${progress.totalRows.toLocaleString()} (${Math.floor(pct)}%)` : ` ${t('kfm.rowsNoTotal')}`}
+                          </span>
+                          {rate > 0 && <span>{t('kfm.rate', { n: rate.toLocaleString() })}</span>}
+                          {etaS != null && etaS > 1 && <span>{t('kfm.eta', { t: fmtDuration(etaS * 1000) })}</span>}
+                          {(progress.segsDone || 0) > 0 && <span>{t('kfm.segs', { a: progress.segsDone, b: progress.totalSegs > 0 ? progress.totalSegs : '?' })}</span>}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--text3)' }}>
-                        {t('mig.progressRows', { rows: progress.rows.toLocaleString(), total: progress.totalRows.toLocaleString() })}
-                      </div>
-                    </div>
-                  )}
+                    )
+                  })()}
                 </div>
               )
             })}
