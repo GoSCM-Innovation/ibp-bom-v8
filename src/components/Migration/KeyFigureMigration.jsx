@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
@@ -45,6 +45,22 @@ function errText(e) {
   if (typeof e === 'string') return e
   return (typeof e.message === 'string' && e.message) || String(e)
 }
+
+// Formats a millisecond duration compactly: "1h 02m", "2m 14s", "4,2 s", "850 ms".
+function fmtDuration(ms) {
+  if (ms == null || !isFinite(ms)) return '—'
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1).replace('.', ',')} s`
+  const m = Math.floor(s / 60)
+  const rem = Math.round(s % 60)
+  if (m < 60) return `${m}m ${String(rem).padStart(2, '0')}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${String(m % 60).padStart(2, '0')}m`
+}
+
+// Phases shown in the per-KF timing breakdown, in execution order.
+const KF_TIMED_PHASES = ['count', 'reading', 'writing', 'committing', 'processing', 'messages']
 
 // Dropdown with a built-in TEXT SEARCH — for very long option lists (hundreds of
 // key figures, units…) where a native <select> is hard to scan. Click opens a
@@ -187,6 +203,12 @@ export default function KeyFigureMigration({ connection, session }) {
   // ── Pre-migration level check (deduce each KF's level from the chosen dims) ──
   const [showConfirm, setShowConfirm] = useState(false)
 
+  // ── Live elapsed clock (ticks once per second while a run is active) ──
+  const runStartRef = useRef(0)
+  const [runElapsed, setRunElapsed] = useState(0)
+  // ── Phase-timing detail expand (per result row) ──
+  const [expandedTimeKf, setExpandedTimeKf] = useState(null)
+
   // ── Discover destination planning areas on mount (auto-select if only one) ──
   useEffect(() => {
     let alive = true
@@ -239,6 +261,14 @@ export default function KeyFigureMigration({ connection, session }) {
   // ── Leave guard while running ──
   useEffect(() => { setMigrationGuard(running, t('mig.leaveWarning')); return () => setMigrationGuard(false) }, [running, t])
   useEffect(() => () => { cancelledRef.current = true; abortRef.current?.abort() }, [])
+
+  // Tick the live elapsed clock every second while running (also drives the live
+  // rate/ETA re-render in the progress panel).
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => setRunElapsed(Date.now() - runStartRef.current), 1000)
+    return () => clearInterval(id)
+  }, [running])
 
   // Reset selections when catalogs change
   useEffect(() => { setLevelAttrs([]); setSteps([]); setAttrMap({}) }, [dstCat])
@@ -315,6 +345,8 @@ export default function KeyFigureMigration({ connection, session }) {
     cancelledRef.current = false
     abortRef.current = new AbortController()
     const signal = abortRef.current.signal
+    runStartRef.current = Date.now()
+    setRunElapsed(0)
     const dstPa = dstCat.pa, srcPa = srcCat.pa
     const all = []
     const push = r => { all.push(r); setResults([...all]) }
@@ -366,7 +398,10 @@ export default function KeyFigureMigration({ connection, session }) {
         const srcSelect = [...srcLevelCols, ...srcKfs, timeField].join(',')
         const dstFields = [...dstLevelCols, ...dstKfs, timeField].join(',')
 
-        setProgress({ cur: done + 1, total: steps.length, name: label, rows: 0, totalRows: 0, phase: 'count' })
+        const groupStart = Date.now()
+        const phaseAcc = {}   // cumulative ms per phase (summed across concurrent workers)
+        const addPhase = (k, ms) => { phaseAcc[k] = (phaseAcc[k] || 0) + ms }
+        setProgress({ cur: done + 1, total: steps.length, name: label, rows: 0, totalRows: 0, phase: 'count', groupStart, segsDone: 0, totalSegs: 0 })
 
         try {
           // Source-side NON-ZERO filter: read only rows where ANY group KF is
@@ -375,17 +410,25 @@ export default function KeyFigureMigration({ connection, session }) {
           // far less than the whole planning level. Falls back to the base filter if
           // a tenant rejects the KF-value filter; the client-side empty/0/null skip
           // in projectBatch stays as a safety net either way.
+          //
+          // The count is BOUNDED (1 retry, 60 s): if it still fails, the migration
+          // STARTS ANYWAY with an unknown total — progress shows rows + speed
+          // without a percentage instead of blocking on a slow count.
           const baseFilter = filter
           const nzClause = '(' + srcKfs.map(kf => `${kf} gt 0 or ${kf} lt 0`).join(' or ') + ')'
           const nzFilter = baseFilter ? `${baseFilter} and ${nzClause}` : nzClause
-          let totalRows
+          let totalRows = 0   // 0 = unknown (count failed) — the cursor reads until exhausted anyway
+          const t0count = Date.now()
           try {
-            totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: nzFilter, signal })
+            totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: nzFilter, signal, retries: 1, timeout: 60000 })
             filter = nzFilter   // adopt for time buckets + reads + measurement below
           } catch {
-            totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: baseFilter || undefined, signal })
+            try {
+              totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: baseFilter || undefined, signal, retries: 1, timeout: 60000 })
+            } catch { /* unknown total — proceed anyway */ }
           }
-          setProgress(p => ({ ...p, totalRows }))
+          addPhase('count', Date.now() - t0count)
+          setProgress(p => ({ ...p, totalRows, totalSegs: totalRows > 0 ? Math.ceil(totalRows / SEGMENT_SIZE) : 0 }))
 
           // Batch sizes by MEASURED bytes/row (small live sample), not column count
           // — the estimate underestimates value-heavy rows (time series), producing
@@ -477,6 +520,7 @@ export default function KeyFigureMigration({ connection, session }) {
 
                   // Read this segment [segStart, segEnd) of the bucket, effParR pages at a time.
                   const segBuf = []
+                  const tRead = Date.now()
                   for (let pageStart = segStart; pageStart < segEnd; pageStart += readPageSize * effParR) {
                     if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                     const batchPageCount = Math.min(effParR, Math.ceil((segEnd - pageStart) / readPageSize))
@@ -495,10 +539,12 @@ export default function KeyFigureMigration({ connection, session }) {
                     if (rowsRead.length < want) { reachedEnd = true; break }   // bucket ended within this segment
                   }
                   if (reachedEnd) b.done = true
+                  addPhase('reading', Date.now() - tRead)
 
                   // Write the whole segment as byte-accurate chunks, PARALLEL_W in parallel.
                   if (segBuf.length > 0) {
                     setProgress(p => ({ ...p, phase: 'writing' }))
+                    const tWrite = Date.now()
                     const chunks = chunkByBytes(segBuf, MAX_POST_BYTES, chunkRows)
                     for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
                       if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
@@ -507,17 +553,20 @@ export default function KeyFigureMigration({ connection, session }) {
                       ))
                     }
                     segWritten = segBuf.length
+                    addPhase('writing', Date.now() - tWrite)
                   }
 
                   // Commit (only if it staged something; an all-empty segment is abandoned).
                   if (segWritten > 0) {
                     setProgress(p => ({ ...p, phase: 'committing' }))
+                    const tCommit = Date.now()
                     await commitTransaction(connection, session, txId, { signal, csrf })
+                    addPhase('committing', Date.now() - tCommit)
                     segmentTxIds.push(txId)
                     totalWritten += segWritten
                   }
                   committedRows += segLoaded
-                  setProgress(p => ({ ...p, rows: committedRows }))
+                  setProgress(p => ({ ...p, rows: committedRows, segsDone: (p.segsDone || 0) + 1 }))
                   break   // segment done; pull the next one
                 } catch (e) {
                   if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
@@ -539,13 +588,14 @@ export default function KeyFigureMigration({ connection, session }) {
 
           // Nothing had a value → nothing migrated (and nothing committed).
           if (totalWritten === 0) {
-            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId: null, status: 'ok', total: 0, ok: 0, errors: 0 })
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId: null, status: 'ok', total: 0, ok: 0, errors: 0, durationMs: Date.now() - groupStart, phaseTimes: { ...phaseAcc } })
             done += g.length
             continue
           }
 
           // Confirm processing + collect messages across ALL segment transactions.
           setProgress(p => ({ ...p, phase: 'processing' }))
+          const tProc = Date.now()
           let anyError = false, anyWarning = false, anyUnconfirmed = false
           const msgs = []
           for (const tx of segmentTxIds) {
@@ -559,23 +609,28 @@ export default function KeyFigureMigration({ connection, session }) {
             // Severity field, keep all (preserves prior behaviour) (#5).
             msgs.push(...m.filter(x => x.Severity == null || ['E', 'A'].includes(x.Severity)))
           }
+          addPhase('processing', Date.now() - tProc)
           // Honest status: any ERROR → error; rejections/warnings → warning;
           // unconfirmed → processing; else ok.
           const st = anyError ? 'error'
                    : (msgs.length > 0 || anyWarning) ? 'warning'
                    : anyUnconfirmed ? 'processing' : 'ok'
           // One result row per KF of the group. total = values actually written.
+          // durationMs = group wall time; phaseTimes = cumulative effort per phase
+          // (summed across concurrent workers — can exceed wall time, by design).
           const lastTx = segmentTxIds[segmentTxIds.length - 1] || null
-          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId: lastTx, status: st, total: totalWritten, ok: Math.max(0, totalWritten - msgs.length), errors: msgs.length, messages: msgs })
+          const groupDur = Date.now() - groupStart
+          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, txId: lastTx, status: st, total: totalWritten, ok: Math.max(0, totalWritten - msgs.length), errors: msgs.length, messages: msgs, durationMs: groupDur, phaseTimes: { ...phaseAcc }, segments: segmentTxIds.length })
         } catch (e) {
+          const groupDur = Date.now() - groupStart
           if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) {
-            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'cancelled', total: 0, ok: 0, errors: 0 })
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'cancelled', total: 0, ok: 0, errors: 0, durationMs: groupDur, phaseTimes: { ...phaseAcc } })
             break
           }
           // A calculated KF in the group fails the whole group's POST; report the
           // offending KF (from "invalid column name") so the user can remove it.
           const msg = e.isCalculated ? t('kfm.errCalculated', { kf: e.calculatedKf || label }) : errText(e)
-          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: msg })
+          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: msg, durationMs: groupDur, phaseTimes: { ...phaseAcc } })
         }
         done += g.length
       }
@@ -587,6 +642,8 @@ export default function KeyFigureMigration({ connection, session }) {
   const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'warning' ? t('kfm.stWarning') : s === 'processing' ? t('kfm.stProc') : t('kfm.stCancel')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'warning' ? 'var(--yellow, #e6a817)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
   const PHASE = { detect: t('kfm.phDetect'), count: t('kfm.phCount'), reading: t('kfm.phReading'), writing: t('kfm.phWriting'), committing: t('kfm.phCommit'), processing: t('kfm.phProcessing'), retrying: t('kfm.phRetrying') }
+  // Concise phase names for the timing breakdown (reuses the master-data keys).
+  const PHASE_SHORT = { count: t('kfm.tCount'), reading: t('mig.tReading'), writing: t('mig.tWriting'), committing: t('mig.tCommitting'), processing: t('mig.tProcessing'), messages: t('mig.tMessages') }
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
@@ -838,44 +895,148 @@ export default function KeyFigureMigration({ connection, session }) {
         </div>
       )}
 
-      {/* ── Progress ── */}
+      {/* ── Progress — live clock, per-KF step list, %, rate, ETA, durable segments ── */}
       {running && progress && (
         <div style={{ ...SECTION, background: 'color-mix(in srgb, var(--accent) 5%, var(--bg2))' }}>
-          <div style={{ ...SECTION_HDR, marginBottom: 10 }}>{t('kfm.progressTitle', { cur: progress.cur, total: progress.total })}</div>
-          <div style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'var(--mono)', marginBottom: 6 }}>{progress.name} — {PHASE[progress.phase] || ''}</div>
-          {progress.totalRows > 0 && (
-            <>
-              <div style={{ background: 'var(--border)', borderRadius: 4, height: 6, overflow: 'hidden', marginBottom: 4 }}>
-                <div style={{ background: 'var(--accent)', height: '100%', width: `${Math.min(100, (progress.rows / progress.totalRows) * 100)}%`, transition: 'width .3s' }} />
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--text3)' }}>{progress.rows.toLocaleString()} / {progress.totalRows.toLocaleString()}</div>
-            </>
-          )}
+          <div style={{ ...SECTION_HDR, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{t('kfm.progressTitle', { cur: progress.cur, total: progress.total })}</span>
+            <span style={{ fontFamily: 'var(--mono)', color: 'var(--text2)', letterSpacing: 0 }}>⏱ {fmtDuration(runElapsed)}</span>
+          </div>
+
+          {/* Step list — every selected KF with its live status */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+            {steps.map(s => {
+              const doneR = (results || []).find(r => r.kf === s.dstKf)
+              const isCurrent = !doneR && String(progress.name || '').split(', ').includes(s.dstKf)
+              const icon = doneR
+                ? (doneR.status === 'ok' ? '✓' : doneR.status === 'error' ? '✕' : doneR.status === 'warning' ? '⚠' : doneR.status === 'processing' ? '⧗' : '⊘')
+                : isCurrent ? '⏳' : '○'
+              const color = doneR ? statusColor(doneR.status) : isCurrent ? 'var(--accent)' : 'var(--text3)'
+              return (
+                <div key={s.dstKf} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '6px 10px', background: 'var(--bg)', opacity: (!doneR && !isCurrent) ? 0.55 : 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color, fontSize: 12, width: 14, textAlign: 'center', flexShrink: 0 }}>{icon}</span>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.srcKf && s.srcKf !== s.dstKf ? `${s.srcKf} → ${s.dstKf}` : s.dstKf}
+                  </span>
+                  <span style={{ fontSize: 11, color, flexShrink: 0 }}>
+                    {doneR
+                      ? `${statusLabel(doneR.status)} · ${(doneR.total || 0).toLocaleString()} · ${fmtDuration(doneR.durationMs)}`
+                      : isCurrent ? (PHASE[progress.phase] || '') : t('mig.stepPending')}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Current group — bar + %, live speed, ETA and committed segments */}
+          {(() => {
+            const elapsedS = Math.max(1, (Date.now() - (progress.groupStart || Date.now())) / 1000)
+            const rate = progress.rows > 0 ? Math.round(progress.rows / elapsedS) : 0
+            const pct = progress.totalRows > 0 ? Math.min(100, (progress.rows / progress.totalRows) * 100) : null
+            const etaS = (pct != null && rate > 0) ? Math.max(0, (progress.totalRows - progress.rows) / rate) : null
+            return (
+              <>
+                {pct != null && (
+                  <div style={{ background: 'var(--border)', borderRadius: 4, height: 6, overflow: 'hidden', marginBottom: 4 }}>
+                    <div style={{ background: 'var(--accent)', height: '100%', width: `${pct}%`, transition: 'width .3s' }} />
+                  </div>
+                )}
+                <div style={{ fontSize: 10, color: 'var(--text3)', display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
+                  <span style={{ fontFamily: 'var(--mono)' }}>
+                    {progress.rows.toLocaleString()}{progress.totalRows > 0 ? ` / ${progress.totalRows.toLocaleString()} (${Math.floor(pct)}%)` : ` ${t('kfm.rowsNoTotal')}`}
+                  </span>
+                  {rate > 0 && <span>{t('kfm.rate', { n: rate.toLocaleString() })}</span>}
+                  {etaS != null && etaS > 1 && <span>{t('kfm.eta', { t: fmtDuration(etaS * 1000) })}</span>}
+                  {(progress.segsDone || 0) > 0 && <span>{t('kfm.segs', { a: progress.segsDone, b: progress.totalSegs > 0 ? progress.totalSegs : '?' })}</span>}
+                </div>
+              </>
+            )
+          })()}
         </div>
       )}
 
-      {/* ── Results ── */}
+      {/* ── Results — with per-KF timing, expandable phase breakdown and a summary ── */}
       {!running && results && results.length > 0 && (
         <div style={SECTION}>
           <div style={SECTION_HDR}>{t('kfm.resultsTitle')}</div>
+
+          {/* Timing summary (groups share a transaction → dedupe by txId) */}
+          {(() => {
+            const seen = new Set()
+            const phaseTotals = {}
+            let slowest = null
+            for (const r of results) {
+              const key = r.txId || r.kf
+              if (seen.has(key)) continue
+              seen.add(key)
+              Object.entries(r.phaseTimes || {}).forEach(([p, ms]) => { phaseTotals[p] = (phaseTotals[p] || 0) + ms })
+              if ((r.durationMs || 0) > (slowest?.durationMs || 0)) slowest = r
+            }
+            return (
+              <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 12 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', alignItems: 'baseline' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>{t('mig.summaryTotal', { dur: fmtDuration(runElapsed) })}</span>
+                  {slowest && <span style={{ color: 'var(--text2)' }}>{t('mig.summarySlowest', { name: slowest.kf, dur: fmtDuration(slowest.durationMs) })}</span>}
+                </div>
+                {Object.keys(phaseTotals).length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 6, color: 'var(--text3)', fontSize: 11 }}>
+                    {KF_TIMED_PHASES.filter(p => phaseTotals[p]).map(p => (
+                      <span key={p}>{PHASE_SHORT[p]}: <span style={{ color: 'var(--text2)', fontFamily: 'var(--mono)' }}>{fmtDuration(phaseTotals[p])}</span></span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr>
               <th style={TH}>{t('kfm.colKf')}</th><th style={TH}>{t('kfm.colStatus')}</th>
-              <th style={TH}>{t('kfm.colTotal')}</th><th style={TH}>{t('kfm.colErrors')}</th><th style={TH}>{t('kfm.colTx')}</th>
+              <th style={TH}>{t('kfm.colTotal')}</th><th style={TH}>{t('kfm.colErrors')}</th>
+              <th style={TH}>{t('mig.colTime')}</th><th style={TH}>{t('kfm.colTx')}</th>
             </tr></thead>
             <tbody>
-              {results.map(r => (
-                <tr key={r.kf}>
-                  <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text)' })}>{r.srcKf && r.srcKf !== r.kf ? `${r.srcKf} → ${r.kf}` : r.kf}</td>
-                  <td style={td({ fontWeight: 600, color: statusColor(r.status) })}>{statusLabel(r.status)}</td>
-                  <td style={td({ color: 'var(--text2)' })}>{(r.total || 0).toLocaleString()}</td>
-                  <td style={td({ color: r.errors > 0 ? 'var(--red)' : 'var(--text3)' })}>
-                    {r.errors > 0 ? <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 11, fontWeight: 600 }} onClick={() => setExpanded(expanded === r.kf ? null : r.kf)}>{r.errors}</button> : (r.errors || 0)}
-                    {r.errorMsg && <div style={{ fontSize: 10, color: 'var(--red)' }}>{r.errorMsg}</div>}
-                  </td>
-                  <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text3)', fontSize: 10 })}>{r.txId || '—'}</td>
-                </tr>
-              ))}
+              {results.map(r => {
+                const isTimeOpen = expandedTimeKf === r.kf
+                return (
+                  <Fragment key={r.kf}>
+                    <tr>
+                      <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text)' })}>{r.srcKf && r.srcKf !== r.kf ? `${r.srcKf} → ${r.kf}` : r.kf}</td>
+                      <td style={td({ fontWeight: 600, color: statusColor(r.status) })}>{statusLabel(r.status)}</td>
+                      <td style={td({ color: 'var(--text2)' })}>{(r.total || 0).toLocaleString()}</td>
+                      <td style={td({ color: r.errors > 0 ? 'var(--red)' : 'var(--text3)' })}>
+                        {r.errors > 0 ? <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 11, fontWeight: 600 }} onClick={() => setExpanded(expanded === r.kf ? null : r.kf)}>{r.errors}</button> : (r.errors || 0)}
+                        {r.errorMsg && <div style={{ fontSize: 10, color: 'var(--red)' }}>{r.errorMsg}</div>}
+                      </td>
+                      <td style={td({ color: 'var(--text2)', fontSize: 11, whiteSpace: 'nowrap' })}>
+                        {r.durationMs == null ? '—' : (
+                          <button
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', fontSize: 11, padding: 0, fontFamily: 'var(--mono)' }}
+                            title={t('mig.timeBreakdownHint')}
+                            onClick={() => setExpandedTimeKf(isTimeOpen ? null : r.kf)}
+                          >
+                            {fmtDuration(r.durationMs)} {isTimeOpen ? '▾' : '▸'}
+                          </button>
+                        )}
+                      </td>
+                      <td style={td({ fontFamily: 'var(--mono)', color: 'var(--text3)', fontSize: 10 })}>{r.txId || '—'}</td>
+                    </tr>
+                    {isTimeOpen && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '4px 0 8px 24px', borderBottom: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 11, color: 'var(--text3)' }}>
+                            {KF_TIMED_PHASES.filter(p => r.phaseTimes?.[p]).map(p => (
+                              <span key={p}>{PHASE_SHORT[p]}: <span style={{ color: 'var(--text2)', fontFamily: 'var(--mono)' }}>{fmtDuration(r.phaseTimes[p])}</span></span>
+                            ))}
+                            {r.segments > 0 && <span>{t('kfm.segs', { a: r.segments, b: r.segments })}</span>}
+                            {(!r.phaseTimes || Object.keys(r.phaseTimes).length === 0) && <span>{t('mig.noTimeDetail')}</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
           {expanded && (results.find(r => r.kf === expanded)?.messages || []).length > 0 && (
