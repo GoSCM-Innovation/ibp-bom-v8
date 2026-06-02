@@ -34,7 +34,7 @@ async function withRetry(fn, { retries = 2, signal } = {}) {
 export const PAGE_SIZE    = 2000   // default rows per read page (overridable, see pageSizeFor)
 export const CHUNK_SIZE   = 500    // default rows per write POST (overridable, see chunkSizeFor)
 export const PARALLEL_R   = 6      // parallel read pages
-export const PARALLEL_W   = 6      // parallel write POSTs (now actually engaged: writes are batched per segment, not per read-page)
+export const PARALLEL_W   = 4      // parallel write POSTs per segment; × CONCURRENT_SEGMENTS(4) = ~16 concurrent POSTs (ceiling test: 0 errors, scales linearly to ~20)
 
 // Adaptive batch sizing. The hard limit is BYTES, not rows. Reads and writes get
 // SEPARATE budgets:

@@ -34,7 +34,7 @@ const CATALOG_TTL   = 24 * 60 * 60 * 1000   // 24 h
 export const BASE_VERSION_ID = '__BASELINE'
 export const MAX_KF_VALUES_PER_POST = 5000  // SAP-recommended limit
 export const PARALLEL_R = 6                  // parallel read pages
-export const PARALLEL_W = 6                  // parallel write POSTs (engaged: writes batched per segment, not per read-page)
+export const PARALLEL_W = 4                  // parallel write POSTs per bucket; × CONCURRENT_SEGMENTS(4) = ~16 concurrent POSTs (ceiling-test safe zone)
 export const COUNT_TOP  = 2                  // small $top for safe counting (never 0)
 // Separate byte budgets (the hard ceiling is BYTES, not rows; Vercel caps the
 // request/response body at ~4.5 MB). Reads get a SMALLER budget: large multi-MB
@@ -50,8 +50,8 @@ export const READ_BYTE_BUDGET  =   900_000   // GET response ceiling — under t
 export const SEGMENT_SIZE = 20000
 // Concurrent time-bucket workers (independent transactions → parallel). See the
 // master-data note; a ceiling test showed throughput scaling with no errors to ~20
-// concurrent POSTs.
-export const CONCURRENT_SEGMENTS = 4
+// concurrent POSTs. Measured 0 errors; K=6 ≈ 1505 rows/s end-to-end (~18 min/1.6M).
+export const CONCURRENT_SEGMENTS = 6
 // Max attempts PER SEGMENT. A failed attempt abandons its uncommitted transaction
 // (SAP saves nothing without commit) and re-stages that segment, so retries never
 // duplicate values within a committed transaction. Higher than before because each

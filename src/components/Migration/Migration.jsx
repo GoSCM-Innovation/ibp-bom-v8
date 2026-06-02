@@ -72,8 +72,9 @@ const MAX_SEGMENT_ATTEMPTS = 5
 // (distinct key ranges), so K workers run in parallel: while one writes, another
 // reads → reads overlap writes and POSTs run concurrently across transactions. A
 // live ceiling test showed throughput scaling linearly with no errors up to ~20
-// concurrent POSTs (K=4 × ~5 chunks); 4 lifts write throughput ~4× (~490→~2000 rows/s).
-const CONCURRENT_SEGMENTS = 4
+// concurrent POSTs. Measured end-to-end (read+write+commit) over 240k rows with 0
+// errors: K=4 → 821 rows/s, K=6 → 1505 rows/s (~18 min for 1.6M). 6 hits the target.
+const CONCURRENT_SEGMENTS = 6
 
 const MIN_ROOT_LEN = 4
 function rootCandidates(name) {
