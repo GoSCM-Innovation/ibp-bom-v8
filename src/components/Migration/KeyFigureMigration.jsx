@@ -225,7 +225,14 @@ export default function KeyFigureMigration({ connection, session }) {
   async function analyzeLevels() {
     const srcPa = srcCat.pa
     const byKf = {}
-    for (const s of steps) {
+    // ADVISORY check — it must NEVER hang the UI. Counts at a detailed level on a
+    // big version can exceed the proxy timeout; with countKf's default retries that
+    // froze the button for ~10 min per count. So here: NO retries + short timeout
+    // (a failure just marks the KF "unverifiable" in the modal and the user can
+    // proceed), all KFs AND all per-dimension counts in PARALLEL, and counting the
+    // much smaller NON-ZERO set first (base-filter fallback if rejected).
+    const CNT = { retries: 0, timeout: 45000 }
+    await Promise.all(steps.map(async s => {
       let conv = s.conv
       if (conv === undefined) { try { conv = await detectConversion(srcConn, srcSession, srcPa, s.srcKf) } catch { conv = null } }
       const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
@@ -235,11 +242,16 @@ export default function KeyFigureMigration({ connection, session }) {
       const srcLevelCols = levelAttrs.map(resolveSrcAttr)
       const fixed = convAttr ? [convAttr] : []
       const sel = cols => [...cols, ...fixed, timeField, s.srcKf].join(',')
+      const count = (cols, flt) => countKf(srcConn, srcSession, srcPa, { select: sel(cols), filter: flt || undefined, ...CNT })
       try {
-        const full = await countKf(srcConn, srcSession, srcPa, { select: sel(srcLevelCols), filter: filter || undefined })
+        const nz = `(${s.srcKf} gt 0 or ${s.srcKf} lt 0)`
+        let flt = filter ? `${filter} and ${nz}` : nz
+        let full
+        try { full = await count(srcLevelCols, flt) }
+        catch { flt = filter; full = await count(srcLevelCols, flt) }   // tenant rejected the KF-value filter
         const dimResults = await Promise.all(levelAttrs.map(async (dstDim, i) => {
           const without = srcLevelCols.filter((_, j) => j !== i)
-          const c = await countKf(srcConn, srcSession, srcPa, { select: sel(without), filter: filter || undefined })
+          const c = await count(without, flt)
           return { dstDim, root: full > c }
         }))
         const extra = dimResults.filter(d => !d.root).map(d => d.dstDim)   // chosen but not a root
@@ -253,7 +265,7 @@ export default function KeyFigureMigration({ connection, session }) {
       } catch (e) {
         byKf[s.dstKf] = { verifiable: false, error: errText(e) }
       }
-    }
+    }))
     return { byKf }
   }
 

@@ -17,7 +17,7 @@ $SEG=EnvInt 'SEG' 20000; $K=EnvInt 'K' 6; $PW=EnvInt 'PW' 4; $RP=EnvInt 'RP' 4; 
 $selE=[Uri]::EscapeDataString('PRDID,LOCID,CUSTID,UOMTOID,ACTUALSQTY,PERIODID4_TSTAMP')
 $obE=[Uri]::EscapeDataString('PRDID,LOCID,CUSTID,PERIODID4_TSTAMP')
 $VER = if($env:VER){ $env:VER } else { 'DOWNSIDE' }
-$filE=[Uri]::EscapeDataString("VERSIONID eq '$VER' and UOMTOID eq 'KG' and ACTUALSQTY gt 0")   # only real (>0) values at source
+$filE=[Uri]::EscapeDataString("VERSIONID eq '$VER' and UOMTOID eq 'KG' and (ACTUALSQTY gt 0 or ACTUALSQTY lt 0)")   # all non-zero (pos + neg)
 $aggFields='PRDID,LOCID,CUSTID,ACTUALSQTY,PERIODID4_TSTAMP'
 
 $c0=New-Object System.Net.Http.HttpClient; $c0.DefaultRequestHeaders.Add('Authorization',"Basic $auth"); $c0.DefaultRequestHeaders.Add('Accept','application/json')

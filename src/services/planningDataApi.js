@@ -224,16 +224,18 @@ export function invalidateKfCatalog(connId) {
 // Total record count at the requested level. Uses a small $top (never 0) so the
 // inlinecount is computed without materialising the whole set (avoids ABAP TSV
 // TNEW_PAGE_ALLOC_FAILED on detailed levels).
-export async function countKf(conn, session, pa, { select, filter, signal } = {}) {
+export async function countKf(conn, session, pa, { select, filter, signal, retries = 5, timeout } = {}) {
   let path = `/${pa}?$format=json&$top=${COUNT_TOP}&$inlinecount=allpages&$select=${qenc(select)}`
   if (filter) path += `&$filter=${qenc(filter)}`
-  // Idempotent read → retry transient failures (5xx / truncated-relay 502 / network).
+  // Idempotent read → retry transient failures by default. Callers doing ADVISORY
+  // checks (e.g. the level analysis) pass retries: 0 + a short timeout so a slow
+  // detailed-level count fails fast instead of retrying for ~10 minutes.
   return withRetry(async () => {
-    const resp = await pcall(conn, session, { path, signal })
+    const resp = await pcall(conn, session, { path, signal, ...(timeout ? { timeout } : {}) })
     if (!resp.ok) throw await httpError(resp)
     const data = await resp.json()
     return parseInt(data?.d?.__count ?? '0', 10)
-  }, { retries: 5, signal })
+  }, { retries, signal })
 }
 
 // One page of key-figure rows. Caller drives pagination via skip/top.
