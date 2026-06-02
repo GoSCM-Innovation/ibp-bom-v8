@@ -109,8 +109,8 @@ export function chunkByBytes(rows, maxBytes = MAX_POST_BYTES, maxRows = 5000) {
 // will use): the GET response size (wire bytes, what drives read truncation) and
 // the POST body size (what drives the Vercel ~4.5 MB request limit). Returns
 // { readBpr, writeBpr, n } or null if the entity is empty.
-export async function measureRowBytes(conn, session, name, { select, planningArea, versionId, signal, sample = 200 } = {}) {
-  const filter = buildFilter(planningArea, versionId)
+export async function measureRowBytes(conn, session, name, { select, planningArea, versionId, extraFilter, signal, sample = 200 } = {}) {
+  const filter = buildFilter(planningArea, versionId, extraFilter)
   let path = `/${name}?$format=json&$top=${sample}&$skip=0`
   if (select && select.length) path += `&$select=${encodeURIComponent(select.join(','))}`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
@@ -218,8 +218,8 @@ const READ_TIMEOUT  = 90000
 const WRITE_TIMEOUT = 110000   // headroom under Vercel maxDuration (120s) for larger POST chunks
 
 // Returns total record count using $inlinecount (no extra $count endpoint needed).
-export async function fetchCount(conn, session, name, { planningArea, versionId, signal, retries = 5, timeout } = {}) {
-  const filter = buildFilter(planningArea, versionId)
+export async function fetchCount(conn, session, name, { planningArea, versionId, extraFilter, signal, retries = 5, timeout } = {}) {
+  const filter = buildFilter(planningArea, versionId, extraFilter)
   let path = `/${name}?$format=json&$top=0&$inlinecount=allpages`
   if (filter) path += `&$filter=${encodeURIComponent(filter)}`
   // Idempotent read → retry transient failures by default. Callers on the critical
@@ -243,8 +243,8 @@ export async function fetchCount(conn, session, name, { planningArea, versionId,
 //   to read all columns (used by schema discovery and the preview).
 // - orderby (string[]): stable sort via $orderby (the business keys), so the
 //   $skip/$top windows can't overlap or skip rows under concurrent reads.
-export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE_SIZE, planningArea, versionId, signal, select, orderby } = {}) {
-  const filter = buildFilter(planningArea, versionId)
+export async function readEntityPage(conn, session, name, { skip = 0, top = PAGE_SIZE, planningArea, versionId, extraFilter, signal, select, orderby } = {}) {
+  const filter = buildFilter(planningArea, versionId, extraFilter)
   let path = `/${name}?$format=json&$top=${top}&$skip=${skip}`
   if (orderby && orderby.length) path += `&$orderby=${encodeURIComponent(orderby.join(','))}`
   if (select  && select.length)  path += `&$select=${encodeURIComponent(select.join(','))}`
@@ -303,6 +303,73 @@ export async function fetchFieldNames(conn, session, name, { planningArea, versi
     }
   }
   throw lastErr
+}
+
+// Distinct values of ONE field of an MDT. The MASTER_DATA service DEDUPLICATES
+// server-side when $select projects a non-key field (verified live against PRD:
+// AS1PRODUCT?$select=BRAND returned 26 distinct rows out of 8 037 in ~0.5 s), so
+// this is a cheap way to populate filter-value dropdowns. Client-side dedupe is
+// kept as a safety net in case a tenant doesn't collapse duplicates. The
+// PLANNING_DATA service can NOT be used for this: it rejects attribute-only
+// $select with "This service cannot be used to extract master data".
+export async function fetchDistinctValues(conn, session, name, field, { planningArea, versionId, signal, top = 5000 } = {}) {
+  const filter = buildFilter(planningArea, versionId)
+  let path = `/${name}?$format=json&$top=${top}&$select=${encodeURIComponent(field)}`
+  if (filter) path += `&$filter=${encodeURIComponent(filter)}`
+  const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
+  if (!resp.ok) throw await httpError(resp)
+  const data = await resp.json()
+  const seen = new Set(), out = []
+  for (const r of (data?.d?.results ?? [])) {
+    const v = r[field]
+    if (v == null || v === '' || seen.has(v)) continue
+    seen.add(v); out.push(String(v))
+  }
+  return out.sort()
+}
+
+// Locates an MDT (of the given planning area) exposing `field` and returns its
+// DISTINCT values via fetchDistinctValues. Used by the KF migration to populate
+// attribute-filter dropdowns (BRAND, family…): the planning service refuses
+// attribute-only reads, while master data answers in <1 s. Candidates are probed
+// with a $top=1 $select read (a 4xx means the MDT lacks the field); the field→MDT
+// match is cached per connection (24 h). Returns [] if no MDT exposes the field.
+const ATTR_MDT_KEY = (id, pa, field) => `ibp:attrmdt:${id}:${pa || ''}:${field}`
+
+export async function fetchAttrDistinctValues(conn, session, field, { planningArea, signal } = {}) {
+  const ck = ATTR_MDT_KEY(conn.id, planningArea, field)
+  let mdt = null
+  try {
+    const cached = JSON.parse(localStorage.getItem(ck))
+    if (cached && Date.now() - cached.ts < VSMT_TTL) mdt = cached.mdt
+  } catch { /* ignore cache read errors */ }
+
+  if (!mdt) {
+    const vsmt = await fetchVsmt(conn, session)
+    const candidates = [...new Set(vsmt
+      .filter(r => !planningArea || r.PlanningAreaID === planningArea)
+      .map(r => r.MasterDataTypeID))].sort()
+    const PROBE = 4   // parallel probes per batch — failed probes are cheap 4xx
+    for (let i = 0; i < candidates.length && !mdt; i += PROBE) {
+      const batch = candidates.slice(i, i + PROBE)
+      const hits = await Promise.all(batch.map(async name => {
+        try {
+          const resp = await proxyCall({
+            connection: conn, session, com: COM,
+            path: `/${name}?$format=json&$top=1&$select=${encodeURIComponent(field)}`,
+            signal, timeout: 30000,
+          })
+          if (!resp.ok) return null
+          const data = await resp.json()
+          return (data?.d?.results ?? []).length > 0 ? name : null
+        } catch { return null }
+      }))
+      mdt = hits.find(Boolean) || null
+    }
+    if (!mdt) return []
+    try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), mdt })) } catch { /* quota */ }
+  }
+  return fetchDistinctValues(conn, session, mdt, field, { signal })
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────
@@ -585,11 +652,14 @@ function parseKeyNames(uri) {
     .filter(k => k && !VERSION_CONTEXT_KEYS.has(k))
 }
 
-function buildFilter(planningArea, versionId) {
+function buildFilter(planningArea, versionId, extraFilter) {
   const esc  = v => v.replace(/'/g, "''")  // OData: single quote → doubled
   const parts = []
   if (planningArea) parts.push(`PlanningAreaID eq '${esc(planningArea)}'`)
   if (versionId)    parts.push(`VersionID eq '${esc(versionId)}'`)
+  // User-defined record filter (selective migration) — already a valid OData
+  // fragment built by buildConditionFilter; parenthesised so the AND binds safely.
+  if (extraFilter)  parts.push(`(${extraFilter})`)
   return parts.join(' and ')
 }
 

@@ -11,6 +11,9 @@ import {
   odataDateToIso, rowsPerChunk, readRowsPerPage, measureKfRowBytes, readRowsPerPageBytes, rowsPerChunkBytes,
   chunkByBytes, MAX_POST_BYTES, PARALLEL_R, PARALLEL_W, SEGMENT_SIZE, MAX_SEGMENT_ATTEMPTS, CONCURRENT_SEGMENTS,
 } from '../../services/planningDataApi'
+import { fetchAttrDistinctValues } from '../../services/masterDataApi'
+import { buildConditionFilter, condChip } from '../../services/filterUtils'
+import { MultiValueSelect } from './FilterControls'
 
 // ── Styles (shared visual language with Migration.jsx) ──────────────────────────
 const SECTION     = { background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }
@@ -202,6 +205,14 @@ export default function KeyFigureMigration({ connection, session }) {
   const [kfSearch, setKfSearch]     = useState('')
   // Per-destination-attribute → source attribute mapping (only when names differ)
   const [attrMap, setAttrMap]       = useState({})
+  // ── Pre-migration source filters (selective migration) ──
+  // Attribute conditions use SOURCE attribute names (the filter only travels in the
+  // source read); validated live: a derived attribute (e.g. BRAND) NOT in $select
+  // still filters correctly. Date range applies to the chosen time level field.
+  const [attrFilters, setAttrFilters] = useState([])   // [{ field, op: 'in'|'sw', value }]
+  const [dateFrom, setDateFrom]       = useState('')   // YYYY-MM-DD
+  const [dateTo, setDateTo]           = useState('')
+  const [fltCount, setFltCount]       = useState(null) // { loading?, n?, kf?, error? }
   // Conversion (UOM / currency) — values from the SOURCE master data, user-selected
   const [units, setUnits]           = useState([])
   const [currencies, setCurrencies] = useState([])
@@ -292,6 +303,19 @@ export default function KeyFigureMigration({ connection, session }) {
 
   // Reset selections when catalogs change
   useEffect(() => { setLevelAttrs([]); setSteps([]); setAttrMap({}) }, [dstCat])
+  useEffect(() => { setAttrFilters([]); setDateFrom(''); setDateTo(''); setFltCount(null) }, [srcCat])
+
+  // Combined OData fragment for the selective filters ('' = no filter → full level).
+  const extraKfFilter = useMemo(() => {
+    const parts = []
+    const cond = buildConditionFilter(attrFilters)
+    if (cond) parts.push(cond)
+    if (dateFrom) parts.push(`${timeField} ge datetime'${dateFrom}T00:00:00'`)
+    if (dateTo)   parts.push(`${timeField} le datetime'${dateTo}T23:59:59'`)
+    return parts.join(' and ')
+  }, [attrFilters, dateFrom, dateTo, timeField])
+  // Stale count guard: the preview belongs to the filters it was computed with.
+  useEffect(() => { setFltCount(null) }, [extraKfFilter, srcVersion])
 
   // Load conversion master data (units & currencies) from the SOURCE when available
   useEffect(() => {
@@ -309,6 +333,16 @@ export default function KeyFigureMigration({ connection, session }) {
   // Options for the searchable source-KF picker (label = name, like the list).
   const srcKfOptions = useMemo(() => [...srcKfSet].sort().map(sk => ({ value: sk, label: sk })), [srcKfSet])
   const srcAttrSet = useMemo(() => new Set(srcCat?.dims || []), [srcCat])
+
+  // Source attributes offered for FILTERS (any dim of the source area, level or
+  // derived — a derived attr like BRAND filters fine without being in the level).
+  const srcFilterAttrs = useMemo(() =>
+    (srcCat?.dims || []).filter(a => !a.startsWith('PERIODID') && !READONLY_ATTRS.has(a)).sort(), [srcCat])
+  const srcFilterAttrOptions = useMemo(() =>
+    srcFilterAttrs.map(a => {
+      const lbl = srcCat?.labels?.[a]
+      return { value: a, label: lbl && lbl !== a ? `${a} — ${lbl}` : a }
+    }), [srcFilterAttrs, srcCat])
 
   const filteredAttrs = useMemo(() => dstAttrs.filter(a => !attrSearch || a.toLowerCase().includes(attrSearch.toLowerCase()) || (dstCat?.labels?.[a] || '').toLowerCase().includes(attrSearch.toLowerCase())), [dstAttrs, attrSearch, dstCat])
   const filteredKfs   = useMemo(() => dstKfs.filter(k => !kfSearch || k.toLowerCase().includes(kfSearch.toLowerCase()) || (dstCat?.labels?.[k] || '').toLowerCase().includes(kfSearch.toLowerCase())), [dstKfs, kfSearch, dstCat])
@@ -358,6 +392,32 @@ export default function KeyFigureMigration({ connection, session }) {
   // "unverifiable" — a useless gate. The migration itself validates everything
   // that matters (SAP rejects bad levels per row and the result reports it).
   function handleMigrateClick() { setShowConfirm(true) }
+
+  // ── Filter count preview ──
+  // Counts the source rows matching the filters at the configured level, using the
+  // first mapped KF (the planning service requires a KF in $select; the non-zero
+  // clause mirrors what the migration will read). Advisory: errors don't block.
+  async function handleFilterCount() {
+    const step = steps.find(s => s.srcKf)
+    if (!step || !srcCat) return
+    setFltCount({ loading: true })
+    try {
+      const srcLevelCols = levelAttrs.map(resolveSrcAttr).filter(Boolean)
+      const conv = step.conv
+      const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
+      const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
+      let f = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
+      const cols = [...srcLevelCols]
+      if (convAttr && convVal) { f += `${f ? ' and ' : ''}${convAttr} eq '${convVal}'`; cols.push(convAttr) }
+      if (extraKfFilter) f += `${f ? ' and ' : ''}(${extraKfFilter})`
+      f += `${f ? ' and ' : ''}(${step.srcKf} gt 0 or ${step.srcKf} lt 0)`
+      const select = [...cols, step.srcKf, timeField].join(',')
+      const n = await countKf(srcConn, srcSession, srcCat.pa, { select, filter: f, retries: 0, timeout: 60000 })
+      setFltCount({ n, kf: step.srcKf })
+    } catch (e) {
+      setFltCount({ error: errText(e) })
+    }
+  }
 
   // Human label of the selected time level (for the proposed/deduced level display).
   const timeLabel = t(`kfm.time_${(TIME_LEVELS.find(x => x.field === timeField) || {}).key}`)
@@ -411,6 +471,9 @@ export default function KeyFigureMigration({ connection, session }) {
         const srcLevelCols = levelAttrs.map(resolveSrcAttr)
         const dstLevelCols = [...levelAttrs]
         let filter = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
+        // Selective migration: user filters (attribute values + date range) travel in
+        // every source read of the group — count, time buckets, sizing and pages.
+        if (extraKfFilter) filter += `${filter ? ' and ' : ''}(${extraKfFilter})`
         if (convAttr) {
           if (!convVal) {
             for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: t('kfm.errNoUnit', { kf: s.srcKf }) })
@@ -677,6 +740,7 @@ export default function KeyFigureMigration({ connection, session }) {
         srcConnId: srcConn?.id || '', srcConnName: srcConn?.name || '',
         srcPa, srcVersion, dstPa, dstVersion,
         kfs: steps.map(s => s.dstKf),
+        filters: extraKfFilter || '',
         totalRows: totalRowsMigrated,
         status: overallStatus,
         durationMs: Date.now() - runStartRef.current,
@@ -686,7 +750,7 @@ export default function KeyFigureMigration({ connection, session }) {
       saveKfHistory(connection.id, updated)
       setHistory(updated)
     }
-  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr, extraKfFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'warning' ? t('kfm.stWarning') : s === 'processing' ? t('kfm.stProc') : t('kfm.stCancel')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'warning' ? 'var(--yellow, #e6a817)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
@@ -824,6 +888,110 @@ export default function KeyFigureMigration({ connection, session }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Filtros previos (migración selectiva) ── */}
+      {dstCat && srcCat && (
+        <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ ...SECTION_HDR, marginBottom: 0 }}>⧩ {t('flt.title')}</div>
+            {extraKfFilter && (
+              <span style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700 }}>
+                {t('kfm.fltActive')}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 12 }}>{t('kfm.fltHint')}</div>
+
+          {/* Rango de fechas (nivel de tiempo elegido) */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 12 }}>
+            <div style={{ flex: '0 0 170px' }}>
+              <label style={LABEL}>{t('kfm.fltDateFrom')}</label>
+              <input type="date" style={INPUT} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            </div>
+            <div style={{ flex: '0 0 170px' }}>
+              <label style={LABEL}>{t('kfm.fltDateTo')}</label>
+              <input type="date" style={INPUT} value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text3)', paddingBottom: 8 }}>
+              {t('kfm.fltDateHint', { time: timeLabel })}
+            </div>
+          </div>
+
+          {/* Condiciones por atributo del origen */}
+          {attrFilters.map((c, ci) => (
+            <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <SearchSelect
+                value={c.field}
+                options={srcFilterAttrOptions}
+                onChange={v => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, field: v, value: '' } : x))}
+                placeholder={t('kfm.fltAttrPh')}
+                searchPlaceholder={t('kfm.typeToFilter')}
+                style={{ flex: '0 0 32%', minWidth: 0 }}
+                btnStyle={{ fontSize: 11, padding: '4px 8px' }}
+              />
+              <select
+                value={c.op}
+                onChange={e => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, op: e.target.value } : x))}
+                style={{ ...SELECT, flex: '0 0 130px', fontSize: 11, padding: '4px 6px' }}
+              >
+                <option value="in">{t('flt.opIn')}</option>
+                <option value="sw">{t('flt.opSw')}</option>
+              </select>
+              {c.op === 'sw' ? (
+                <input
+                  value={c.value}
+                  onChange={e => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, value: e.target.value } : x))}
+                  placeholder={t('flt.valuePh')}
+                  style={{ ...INPUT, flex: 1, minWidth: 0, fontSize: 11, padding: '4px 8px', fontFamily: 'var(--mono)' }}
+                />
+              ) : (
+                <MultiValueSelect
+                  value={c.value}
+                  onChange={v => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, value: v } : x))}
+                  loadValues={() => fetchAttrDistinctValues(srcConn, srcSession, c.field, { planningArea: srcCat.pa })}
+                  placeholder={t('flt.valuesPh')}
+                  disabled={!c.field}
+                />
+              )}
+              <button
+                onClick={() => setAttrFilters(p => p.filter((_, xi) => xi !== ci))}
+                title={t('flt.remove')}
+                style={{ ...BTN_SEC, padding: '2px 7px', fontSize: 10, flexShrink: 0, color: 'var(--red)', borderColor: 'var(--red)' }}
+              >✕</button>
+            </div>
+          ))}
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setAttrFilters(p => [...p, { field: '', op: 'in', value: '' }])}
+              style={{ ...BTN_SEC, padding: '3px 10px', fontSize: 10 }}
+            >
+              {t('kfm.fltAddAttr')}
+            </button>
+            {extraKfFilter && (
+              <button
+                onClick={handleFilterCount}
+                disabled={fltCount?.loading || !steps.some(s => s.srcKf)}
+                title={!steps.some(s => s.srcKf) ? t('kfm.fltCountNeedKf') : ''}
+                style={{ ...BTN_SEC, padding: '3px 10px', fontSize: 10, borderColor: 'var(--accent)', color: 'var(--accent)', opacity: !steps.some(s => s.srcKf) ? 0.5 : 1 }}
+              >
+                {fltCount?.loading ? t('flt.testing') : t('kfm.fltCountBtn')}
+              </button>
+            )}
+            {extraKfFilter && !steps.some(s => s.srcKf) && (
+              <span style={{ fontSize: 10, color: 'var(--text3)' }}>{t('kfm.fltCountNeedKf')}</span>
+            )}
+            {fltCount?.n != null && (
+              <span style={{ fontSize: 11, color: 'var(--green)', fontFamily: 'var(--mono)' }}>
+                ✓ {t('kfm.fltCountResult', { n: fltCount.n.toLocaleString(), kf: fltCount.kf })}
+              </span>
+            )}
+            {fltCount?.error && (
+              <span style={{ fontSize: 11, color: 'var(--red)' }}>✕ {t('flt.testErr', { msg: fltCount.error })}</span>
+            )}
+          </div>
         </div>
       )}
 
@@ -1164,6 +1332,25 @@ export default function KeyFigureMigration({ connection, session }) {
             <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
               {t('kfm.confirmLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(levelAttrs)}</span>
             </div>
+            {extraKfFilter && (
+              <div style={{
+                fontSize: 11, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 10,
+                background: 'color-mix(in srgb, var(--accent) 6%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
+                borderRadius: 6, padding: '7px 10px',
+              }}>
+                <div style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: 3 }}>⧩ {t('flt.confirmTitle')}</div>
+                {attrFilters.map((c, ci) => {
+                  const chip = condChip(c)
+                  return chip ? <div key={ci} style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{chip}</div> : null
+                })}
+                {(dateFrom || dateTo) && (
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>
+                    {timeLabel}: {dateFrom || '…'} → {dateTo || '…'}
+                  </div>
+                )}
+              </div>
+            )}
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {steps.map(s => (
                 <div key={s.dstKf} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '7px 10px', background: 'var(--bg)', fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text)' }}>

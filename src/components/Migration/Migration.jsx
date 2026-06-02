@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { getAll } from '../../services/connectionStorage'
@@ -10,9 +10,11 @@ import {
   commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
   pageSizeFor, measureRowBytes, pageSizeForBytes,
-  chunkByBytes, MAX_POST_BYTES,
+  chunkByBytes, MAX_POST_BYTES, fetchDistinctValues,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
+import { buildConditionFilter, condChip } from '../../services/filterUtils'
+import { MultiValueSelect } from './FilterControls'
 
 // ── History persistence ───────────────────────────────────────────────────────
 
@@ -249,6 +251,14 @@ export default function Migration({ connection, session }) {
   const dragId  = useRef(null)
   const [dragOver, setDragOver] = useState(null)
 
+  // ── Per-MDT source filters (selective migration) ──
+  // { [srcMdt]: [{ field, op: 'in'|'sw', value: 'A,B' }] } — applied to the SOURCE
+  // read only (count + measurement + pages); the destination is untouched by them.
+  const [mdtFilters, setMdtFilters]     = useState({})
+  const [filterOpen, setFilterOpen]     = useState(null)   // srcMdt with the editor expanded
+  const [mdtFieldOpts, setMdtFieldOpts] = useState({})     // { [srcMdt]: string[] | 'loading' | 'error' }
+  const [filterTest, setFilterTest]     = useState({})     // { [srcMdt]: { loading?, n?, total?, error? } }
+
   // ── Options ──
   const [deleteEntries, setDeleteEntries] = useState(true)
 
@@ -352,6 +362,22 @@ export default function Migration({ connection, session }) {
   useEffect(() => { setSrcPa(''); setSrcVersion(''); setMdtOrder([]); setMdtMapping({}) }, [srcCatalog])
   useEffect(() => { setDstPa(''); setDstVersion(''); setMdtOrder([]); setMdtMapping({}) }, [dstCatalog])
   useEffect(() => { setMdtOrder([]); setMdtMapping({}) }, [srcPa, srcVersion, dstPa, dstVersion])
+  // Filters are per source table: drop them whenever the selection context changes.
+  useEffect(() => { setMdtFilters({}); setFilterOpen(null); setMdtFieldOpts({}); setFilterTest({}) },
+    [srcCatalog, dstCatalog, srcPa, srcVersion, dstPa, dstVersion])
+
+  // The effective OData fragment per selected MDT ('' when no complete condition).
+  const mdtExtraFilter = useCallback(mdt => buildConditionFilter(mdtFilters[mdt]), [mdtFilters])
+  const hasAnyFilter = useMemo(() => mdtOrder.some(m => mdtExtraFilter(m)), [mdtOrder, mdtExtraFilter])
+
+  // Filters + full-replace is dangerous (the delete clears EVERYTHING, the load
+  // restores only the filtered rows): auto-uncheck "delete destination" the moment
+  // filters become active. The user may re-check it — the confirm modal warns in red.
+  const prevHadFilterRef = useRef(false)
+  useEffect(() => {
+    if (hasAnyFilter && !prevHadFilterRef.current) setDeleteEntries(false)
+    prevHadFilterRef.current = hasAnyFilter
+  }, [hasAnyFilter])
 
   // ── Available MDTs ──
   const srcMdts = useMemo(() => getMdts(srcCatalog, srcPa, srcVersion), [srcCatalog, srcPa, srcVersion])
@@ -444,6 +470,38 @@ export default function Migration({ connection, session }) {
     }
   }
 
+  // ── Per-MDT filter editor ──
+  // Opens/closes the inline editor; field names are read once per table (a 1-row
+  // sample of the SOURCE) and cached in state for the session.
+  function handleToggleFilter(mdt) {
+    const opening = filterOpen !== mdt
+    setFilterOpen(opening ? mdt : null)
+    if (!opening) return
+    // Seed an empty condition so the editor opens ready to use.
+    if (!(mdtFilters[mdt] || []).length) setMdtFilters(p => ({ ...p, [mdt]: [{ field: '', op: 'in', value: '' }] }))
+    if (mdtFieldOpts[mdt]) return
+    setMdtFieldOpts(p => ({ ...p, [mdt]: 'loading' }))
+    fetchFieldNames(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: '' })
+      .then(fields => setMdtFieldOpts(p => ({ ...p, [mdt]: (fields || []).filter(f => !READONLY_FIELDS.has(f)).sort() })))
+      .catch(() => setMdtFieldOpts(p => ({ ...p, [mdt]: 'error' })))
+  }
+
+  // Counts how many SOURCE records match the filter (vs the unfiltered total) so
+  // the user validates the filter BEFORE migrating.
+  async function handleTestFilter(mdt) {
+    const extra = mdtExtraFilter(mdt)
+    setFilterTest(p => ({ ...p, [mdt]: { loading: true } }))
+    try {
+      const [n, total] = await Promise.all([
+        fetchCount(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion, extraFilter: extra || undefined, retries: 1, timeout: 60000 }),
+        fetchCount(srcConn, srcSession, mdt, { planningArea: srcPa, versionId: srcVersion, retries: 1, timeout: 60000 }),
+      ])
+      setFilterTest(p => ({ ...p, [mdt]: { n, total } }))
+    } catch (e) {
+      setFilterTest(p => ({ ...p, [mdt]: { error: errText(e) } }))
+    }
+  }
+
   // ── Migration ──
   // Compares source vs destination fields per MDT (one sample row each) so we can
   // send only the common fields (avoids HTTP 400) and show the user what differs.
@@ -530,6 +588,10 @@ export default function Migration({ connection, session }) {
         // import (the common fields) via $select — smaller payloads, bigger pages.
         // Unverifiable → selectFields null → read all columns (current behaviour).
         const selectFields = (entry?.common && entry.common.length) ? entry.common : null
+        // Selective migration: user-defined record filter, applied to every SOURCE
+        // read of this table (count, sizing sample, pages). Destination reads/deletes
+        // are deliberately NOT filtered.
+        const extraFilter = mdtExtraFilter(srcName) || undefined
         // With $select we download only the common fields, so size the page by those;
         // without it (unverifiable) we download every column (common + omitted).
         const readFields  = selectFields ? selectFields.length : ((entry?.common?.length || 0) + (entry?.omitted?.length || 0))
@@ -555,7 +617,7 @@ export default function Migration({ connection, session }) {
           // Bounded count (1 retry, 60 s) — fails fast instead of retrying ~8 min.
           const t0 = Date.now()
           try {
-            totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, signal, retries: 1, timeout: 60000 })
+            totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, extraFilter, signal, retries: 1, timeout: 60000 })
           } finally { addPhase('reading', Date.now() - t0) }
         } catch (e) {
           pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: errText(e), phaseTimes: { ...phaseAcc }, durationMs: Date.now() - tableStart })
@@ -573,7 +635,7 @@ export default function Migration({ connection, session }) {
         // bodies over Vercel's ~4.5 MB limit (413, non-retryable → table fails).
         if (totalRows > 0) {
           try {
-            const m = await measureRowBytes(srcConn, srcSession, srcName, { select: selectFields, planningArea: srcPa, versionId: srcVersion, signal })
+            const m = await measureRowBytes(srcConn, srcSession, srcName, { select: selectFields, planningArea: srcPa, versionId: srcVersion, extraFilter, signal })
             if (m) readPage = pageSizeForBytes(m.readBpr)
           } catch { /* keep field-count fallback */ }
         }
@@ -700,7 +762,7 @@ export default function Migration({ connection, session }) {
                       const skip = pageStart + i * readPage
                       const top  = Math.min(readPage, segEnd - skip)
                       return readEntityPage(srcConn, srcSession, srcName, {
-                        skip, top, planningArea: srcPa, versionId: srcVersion,
+                        skip, top, planningArea: srcPa, versionId: srcVersion, extraFilter,
                         select: selectFields, orderby: srcKeys, signal,
                       })
                     })
@@ -856,6 +918,7 @@ export default function Migration({ connection, session }) {
         srcConnName: srcConn?.name || '',
         srcPa, srcVersion, dstPa, dstVersion,
         mdts: mdtList,
+        filters: Object.fromEntries(mdtList.map(m => [m, mdtExtraFilter(m)]).filter(([, f]) => f)),
         totalRows: totalRowsMigrated,
         status: overallStatus,
         durationMs: runDurationMs,
@@ -865,7 +928,7 @@ export default function Migration({ connection, session }) {
       saveHistory(connection.id, updated)
       setHistory(updated)
     }
-  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, resolveDst, deleteEntries, connection, session])
+  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, resolveDst, deleteEntries, mdtExtraFilter, connection, session])
 
   // ── Derived ──
   // Identical origin/target is BLOCKED: with "delete destination first" it would
@@ -1087,7 +1150,7 @@ export default function Migration({ connection, session }) {
                 {t('mig.mdtSelectAll')}
               </button>
               <button style={{ ...BTN_SEC, padding: '4px 10px', fontSize: 11 }}
-                onClick={() => { setMdtOrder([]); setMdtMapping({}) }}>
+                onClick={() => { setMdtOrder([]); setMdtMapping({}); setMdtFilters({}); setFilterOpen(null) }}>
                 {t('mig.mdtNone')}
               </button>
             </div>
@@ -1129,6 +1192,8 @@ export default function Migration({ connection, session }) {
                       } else {
                         setMdtOrder(prev => prev.filter(m => m !== mdt))
                         setMdtMapping(prev => { const n = { ...prev }; delete n[mdt]; return n })
+                        setMdtFilters(prev => { const n = { ...prev }; delete n[mdt]; return n })
+                        if (filterOpen === mdt) setFilterOpen(null)
                       }
                     }}
                   />
@@ -1153,9 +1218,12 @@ export default function Migration({ connection, session }) {
               {mdtOrder.map((mdt, idx) => {
                 const isOver  = dragOver?.id === mdt
                 const overPos = isOver ? dragOver.pos : null
+                const conds      = mdtFilters[mdt] || []
+                const hasFilter  = !!mdtExtraFilter(mdt)
+                const editorOpen = filterOpen === mdt
                 return (
+                  <Fragment key={mdt}>
                   <div
-                    key={mdt}
                     draggable={!isMobile}
                     onDragStart={e => { dragId.current = mdt; e.dataTransfer.effectAllowed = 'move' }}
                     onDragEnd={() => setDragOver(null)}
@@ -1236,6 +1304,20 @@ export default function Migration({ connection, session }) {
                     >
                       {dstCandidates.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
+                    {/* Filtro de registros (migración selectiva) */}
+                    <button
+                      onPointerDown={e => e.stopPropagation()}
+                      onClick={() => handleToggleFilter(mdt)}
+                      title={t('flt.btn')}
+                      style={{
+                        ...BTN_SEC, padding: '2px 8px', fontSize: 10, flexShrink: 0,
+                        borderColor: hasFilter ? 'var(--accent)' : 'var(--border2)',
+                        color: hasFilter ? 'var(--accent)' : 'var(--text2)',
+                        background: editorOpen ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'none',
+                      }}
+                    >
+                      ⧩ {hasFilter ? conds.filter(c => condChip(c)).length : ''}
+                    </button>
                     {/* ↑ ↓ */}
                     <button
                       disabled={idx === 0}
@@ -1252,6 +1334,116 @@ export default function Migration({ connection, session }) {
                       style={{ ...BTN_SEC, padding: '2px 7px', fontSize: 10, opacity: idx === mdtOrder.length - 1 ? 0.25 : 1 }}
                     >↓</button>
                   </div>
+
+                  {/* Chips del filtro activo (editor cerrado) */}
+                  {hasFilter && !editorOpen && (
+                    <div style={{ margin: '-2px 0 6px 36px', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {conds.map((c, ci) => {
+                        const chip = condChip(c)
+                        return chip ? (
+                          <span key={ci} style={{
+                            fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--accent)',
+                            background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                            borderRadius: 5, padding: '1px 7px',
+                          }}>{chip}</span>
+                        ) : null
+                      })}
+                    </div>
+                  )}
+
+                  {/* Editor de filtro */}
+                  {editorOpen && (
+                    <div style={{
+                      margin: '-2px 0 8px 36px', padding: '10px 12px',
+                      background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                      borderRadius: 7,
+                    }}>
+                      <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 8 }}>{t('flt.note')}</div>
+                      {mdtFieldOpts[mdt] === 'loading' && (
+                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>{t('flt.fieldsLoading')}</div>
+                      )}
+                      {mdtFieldOpts[mdt] === 'error' && (
+                        <div style={{ fontSize: 11, color: 'var(--red)' }}>✕ {t('flt.fieldsErr')}</div>
+                      )}
+                      {Array.isArray(mdtFieldOpts[mdt]) && (
+                        <>
+                          {conds.map((c, ci) => (
+                            <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <select
+                                value={c.field}
+                                onChange={e => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, field: e.target.value, value: '' } : x) }))}
+                                style={{ ...SELECT, flex: '0 0 32%', fontSize: 11, padding: '4px 6px', fontFamily: 'var(--mono)' }}
+                              >
+                                <option value="">{t('flt.fieldPh')}</option>
+                                {mdtFieldOpts[mdt].map(f => <option key={f} value={f}>{f}</option>)}
+                              </select>
+                              <select
+                                value={c.op}
+                                onChange={e => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, op: e.target.value } : x) }))}
+                                style={{ ...SELECT, flex: '0 0 130px', fontSize: 11, padding: '4px 6px' }}
+                              >
+                                <option value="in">{t('flt.opIn')}</option>
+                                <option value="sw">{t('flt.opSw')}</option>
+                              </select>
+                              {c.op === 'sw' ? (
+                                <input
+                                  value={c.value}
+                                  onChange={e => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, value: e.target.value } : x) }))}
+                                  placeholder={t('flt.valuePh')}
+                                  style={{ ...INPUT, flex: 1, minWidth: 0, fontSize: 11, padding: '4px 8px', fontFamily: 'var(--mono)' }}
+                                />
+                              ) : (
+                                <MultiValueSelect
+                                  value={c.value}
+                                  onChange={v => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, value: v } : x) }))}
+                                  loadValues={() => fetchDistinctValues(srcConn, srcSession, mdt, c.field, { planningArea: srcPa, versionId: srcVersion })}
+                                  placeholder={t('flt.valuesPh')}
+                                  disabled={!c.field}
+                                />
+                              )}
+                              <button
+                                onClick={() => setMdtFilters(p => {
+                                  const next = conds.filter((_, xi) => xi !== ci)
+                                  const n = { ...p }
+                                  if (next.length) n[mdt] = next; else delete n[mdt]
+                                  return n
+                                })}
+                                title={t('flt.remove')}
+                                style={{ ...BTN_SEC, padding: '2px 7px', fontSize: 10, flexShrink: 0, color: 'var(--red)', borderColor: 'var(--red)' }}
+                              >✕</button>
+                            </div>
+                          ))}
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+                            <button
+                              onClick={() => setMdtFilters(p => ({ ...p, [mdt]: [...conds, { field: '', op: 'in', value: '' }] }))}
+                              style={{ ...BTN_SEC, padding: '3px 10px', fontSize: 10 }}
+                            >
+                              {t('flt.addCond')}
+                            </button>
+                            {hasFilter && (
+                              <button
+                                onClick={() => handleTestFilter(mdt)}
+                                disabled={filterTest[mdt]?.loading}
+                                style={{ ...BTN_SEC, padding: '3px 10px', fontSize: 10, borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                              >
+                                {filterTest[mdt]?.loading ? t('flt.testing') : t('flt.test')}
+                              </button>
+                            )}
+                            {filterTest[mdt]?.n != null && (
+                              <span style={{ fontSize: 11, color: 'var(--green)', fontFamily: 'var(--mono)' }}>
+                                ✓ {t('flt.testResult', { n: filterTest[mdt].n.toLocaleString(), total: (filterTest[mdt].total ?? 0).toLocaleString() })}
+                              </span>
+                            )}
+                            {filterTest[mdt]?.error && (
+                              <span style={{ fontSize: 11, color: 'var(--red)' }}>✕ {t('flt.testErr', { msg: filterTest[mdt].error })}</span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  </Fragment>
                 )
               })}
             </div>
@@ -1282,6 +1474,22 @@ export default function Migration({ connection, session }) {
               <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>{t('mig.deleteEntriesNote')}</div>
             </div>
           </label>
+
+          {hasAnyFilter && !deleteEntries && (
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8, marginLeft: 26 }}>
+              ⓘ {t('flt.deleteAutoOff')}
+            </div>
+          )}
+          {hasAnyFilter && deleteEntries && (
+            <div style={{
+              fontSize: 11, color: 'var(--red)', lineHeight: 1.5, marginTop: 10,
+              background: 'color-mix(in srgb, var(--red) 10%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)',
+              borderRadius: 6, padding: '7px 10px',
+            }}>
+              ⚠ {t('flt.deleteConflict')}
+            </div>
+          )}
         </div>
       )}
 
@@ -1728,6 +1936,33 @@ export default function Migration({ connection, session }) {
                 borderRadius: 6, padding: '7px 10px',
               }}>
                 ⚠ {t('mig.confirmMsg', { name: connection.name })}
+              </div>
+            )}
+
+            {hasAnyFilter && (
+              <div style={{
+                fontSize: 11, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 12,
+                background: 'color-mix(in srgb, var(--accent) 6%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
+                borderRadius: 6, padding: '7px 10px',
+              }}>
+                <div style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: 3 }}>⧩ {t('flt.confirmTitle')}</div>
+                {mdtOrder.filter(m => mdtExtraFilter(m)).map(m => (
+                  <div key={m} style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>
+                    {m}: {(mdtFilters[m] || []).map(condChip).filter(Boolean).join(' · ')}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {hasAnyFilter && deleteEntries && (
+              <div style={{
+                fontSize: 11, color: 'var(--red)', lineHeight: 1.5, marginBottom: 12,
+                background: 'color-mix(in srgb, var(--red) 10%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)',
+                borderRadius: 6, padding: '7px 10px',
+              }}>
+                ⚠ {t('flt.deleteConflict')}
               </div>
             )}
 
