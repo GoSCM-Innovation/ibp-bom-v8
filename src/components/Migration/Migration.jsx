@@ -62,7 +62,7 @@ function getMdts(catalog, pa, version) {
 // committed before the next — so a transient failure only re-does the CURRENT
 // segment (in a fresh transaction), never the whole table, and already-committed
 // segments are kept. Smaller = more durable but more commits.
-const SEGMENT_SIZE = 10000
+const SEGMENT_SIZE = 20000
 // Max attempts PER SEGMENT. A failed attempt abandons its uncommitted transaction
 // (SAP discards it) and re-stages that segment, so retries never duplicate keys
 // within a committed transaction. Higher than before because each retry is now
@@ -658,7 +658,9 @@ export default function Migration({ connection, session }) {
                 // Best-effort: enable server-side parallel processing (must not abort the run).
                 try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
 
-                // Read + stage ONLY this segment's rows, PARALLEL_R pages at a time.
+                // Phase 1 — READ the whole segment (PARALLEL_R pages at a time),
+                // accumulating projected rows into a buffer.
+                const segBuf = []
                 for (let pageStart = segStart; pageStart < segEnd; pageStart += readPage * PARALLEL_R) {
                   if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
 
@@ -674,17 +676,24 @@ export default function Migration({ connection, session }) {
                   })
                   timer.mark('reading')
                   setProgress(p => ({ ...p, phase: 'reading' }))
-                  const pageResults = await Promise.all(readBatch)
-                  const batchRows = pageResults.flat()
+                  const batchRows = (await Promise.all(readBatch)).flat()
                   if (batchRows.length === 0) break
+                  for (const r of batchRows) segBuf.push(projectRow(srcName, r))   // project to common fields
+                  segLoaded += batchRows.length
+                  // Throttle row-count re-renders to 500 ms. Show committed baseline + in-flight.
+                  const now = Date.now()
+                  if (now - lastProgressUpdateRef.current >= 500) {
+                    lastProgressUpdateRef.current = now
+                    setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
+                  }
+                }
 
-                  // Project to common fields (drop fields the destination lacks).
-                  const projected = batchRows.map(r => projectRow(srcName, r))
-
-                  // Byte-accurate chunks (≤ MAX_POST_BYTES, ≤ 5000 rows) → every POST
-                  // stays under Vercel's limit regardless of row-size variance.
-                  const chunks = chunkByBytes(projected, MAX_POST_BYTES, 5000)
-
+                // Phase 2 — WRITE the whole segment as byte-accurate chunks (≤ MAX_POST_BYTES,
+                // ≤ 5000 rows), POSTing PARALLEL_W at a time. Decoupling writes from the read
+                // batches is what makes the POSTs ACTUALLY run in parallel — previously one
+                // chunk per read-batch meant the POSTs ran effectively serially.
+                if (segBuf.length > 0) {
+                  const chunks = chunkByBytes(segBuf, MAX_POST_BYTES, 5000)
                   timer.mark('writing')
                   setProgress(p => ({ ...p, phase: 'writing' }))
                   for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
@@ -695,14 +704,6 @@ export default function Migration({ connection, session }) {
                         deleteEntries: false, planningArea: dstPa, versionId: dstVersion, signal, csrf,
                       })
                     ))
-                  }
-
-                  segLoaded += batchRows.length
-                  // Throttle row-count re-renders to 500 ms. Show committed baseline + in-flight.
-                  const now = Date.now()
-                  if (now - lastProgressUpdateRef.current >= 500) {
-                    lastProgressUpdateRef.current = now
-                    setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
                   }
                 }
 

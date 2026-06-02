@@ -402,8 +402,10 @@ export default function KeyFigureMigration({ connection, session }) {
                   const txId = await getTransactionId(connection, session, { signal })
                   try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
 
-                  // Read + stage one segment: up to ~SEGMENT_SIZE rows from bucketSkip.
+                  // Phase 1 — READ this segment (≤ SEGMENT_SIZE rows from bucketSkip),
+                  // PARALLEL_R pages at a time, accumulating projected (non-empty) rows.
                   let skip = bucketSkip
+                  const segBuf = []
                   while (segLoaded < SEGMENT_SIZE) {
                     if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                     setProgress(p => ({ ...p, phase: 'reading' }))
@@ -412,26 +414,27 @@ export default function KeyFigureMigration({ connection, session }) {
                     )
                     const rowsRead = (await Promise.all(batch)).flat()
                     if (rowsRead.length === 0) { reachedEnd = true; break }
-
-                    const projected = projectBatch(rowsRead)
-                    if (projected.length > 0) {
-                      setProgress(p => ({ ...p, phase: 'writing' }))
-                      // Byte-accurate chunks (≤ MAX_POST_BYTES) AND ≤ chunkRows (the
-                      // ≤5000-KF-values/POST cap) → safe under Vercel's limit despite
-                      // variable time-series row sizes.
-                      const chunks = chunkByBytes(projected, MAX_POST_BYTES, chunkRows)
-                      for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
-                        if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
-                        await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
-                          postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
-                        ))
-                      }
-                      segWritten += projected.length
-                    }
+                    for (const r of projectBatch(rowsRead)) segBuf.push(r)
                     segLoaded += rowsRead.length
                     skip += batchSize
                     setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
                     if (rowsRead.length < batchSize) { reachedEnd = true; break }
+                  }
+
+                  // Phase 2 — WRITE the whole segment as byte-accurate chunks (≤ MAX_POST_BYTES,
+                  // ≤ chunkRows = the ≤5000-KF-values/POST cap), POSTing PARALLEL_W at a time.
+                  // Decoupling writes from read batches makes the POSTs ACTUALLY parallel
+                  // (previously one chunk per read-batch ran them effectively serially).
+                  if (segBuf.length > 0) {
+                    setProgress(p => ({ ...p, phase: 'writing' }))
+                    const chunks = chunkByBytes(segBuf, MAX_POST_BYTES, chunkRows)
+                    for (let ci = 0; ci < chunks.length; ci += PARALLEL_W) {
+                      if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
+                      await Promise.all(chunks.slice(ci, ci + PARALLEL_W).map(chunk =>
+                        postKfChunk(connection, session, dstPa, txId, chunk, { fields: dstFields, versionId: dstVersion, doCommit: false, signal, csrf })
+                      ))
+                    }
+                    segWritten = segBuf.length
                   }
 
                   // Commit this segment (only if it staged something; an all-empty

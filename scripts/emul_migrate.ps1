@@ -61,16 +61,22 @@ $filE=[Uri]::EscapeDataString("PlanningAreaID eq 'ASIBPTS'")
 $reqAttr=($common -join ',')
 RefreshCsrf
 
-# Measure real bytes/row from a 200-row sample (same $select the load uses) and
-# derive read/write batch sizes — faithful to the fixed web's measured sizing.
-$smpTxt=$cli.GetStringAsync("$prd/AS1SOURCECUSTOMER?" + '$format=json&$top=200&$skip=0&$orderby=' + $obE + '&$select=' + $selE + '&$filter=' + $filE).Result
-$smpRows=($smpTxt | ConvertFrom-Json).d.results
-$readBpr=[Math]::Ceiling($smpTxt.Length/$smpRows.Count)
-$smpClean=@($smpRows | ForEach-Object { $o=[ordered]@{}; foreach($k in $common){ $o[$k]=$_.$k }; $o })
-$writeBpr=[Math]::Ceiling((($smpClean | ConvertTo-Json -Depth 12).Length)/$smpRows.Count)
+# Measure real bytes/row from samples at TWO offsets (head + deep) and take the MAX
+# — row size varies a lot (time-series fields), so a head-only sample underestimates.
+$readBpr=0; $writeBpr=0
+foreach($sk in 0,800000){
+  $t=$cli.GetStringAsync("$prd/AS1SOURCECUSTOMER?" + '$format=json&$top=300&$skip=' + $sk + '&$orderby=' + $obE + '&$select=' + $selE + '&$filter=' + $filE).Result
+  $rws=($t | ConvertFrom-Json).d.results
+  if($rws.Count -eq 0){ continue }
+  $rbpr=[Math]::Ceiling($t.Length/$rws.Count)
+  $cl=@($rws | ForEach-Object { $o=[ordered]@{}; foreach($k in $common){ $o[$k]=$_.$k }; $o })
+  $wbpr=[Math]::Ceiling((($cl | ConvertTo-Json -Depth 12).Length)/$rws.Count)
+  if($rbpr -gt $readBpr){ $readBpr=$rbpr }
+  if($wbpr -gt $writeBpr){ $writeBpr=$wbpr }
+}
 if($READPAGE -le 0){ $READPAGE=[int][Math]::Max(250,[Math]::Min(5000,[Math]::Floor($RBUDGET/$readBpr))) }
 if($WCHUNK   -le 0){ $WCHUNK  =[int][Math]::Max(250,[Math]::Min(5000,[Math]::Floor($WBUDGET/$writeBpr))) }
-"[$LABEL] measured readBpr=$readBpr writeBpr=$writeBpr -> readPage=$READPAGE writeChunk=$WCHUNK"
+"[$LABEL] measured(max) readBpr=$readBpr writeBpr=$writeBpr -> readPage=$READPAGE writeChunk=$WCHUNK"
 
 $totalRows=[int](GetJ ("$prd/AS1SOURCECUSTOMER?" + '$format=json&$top=0&$inlinecount=allpages&$filter=' + $filE)).d.__count
 $maxRows=EnvInt 'MAXROWS' 0
@@ -92,8 +98,11 @@ for($segStart=0; $segStart -lt $totalRows; $segStart+=$SEGMENT){
       [void]$cli.SendAsync($m).Result
       $sw.Stop(); $txMs+=$sw.Elapsed.TotalMilliseconds
 
+      # Read the WHOLE segment first (PAR_R pages in parallel), accumulating into a
+      # buffer, THEN POST all chunks PAR_W in parallel. This makes writes genuinely
+      # parallel (the per-batch path posted ~1 chunk at a time = effectively serial).
+      $buf=New-Object System.Collections.ArrayList
       for($pageStart=$segStart; $pageStart -lt $segEnd; $pageStart+=$READPAGE*$PAR_R){
-        # read PAR_R pages in parallel (bounded to segEnd)
         $sw=[Diagnostics.Stopwatch]::StartNew()
         $tasks=@()
         for($i=0;$i -lt $PAR_R;$i++){
@@ -107,32 +116,30 @@ for($segStart=0; $segStart -lt $totalRows; $segStart+=$SEGMENT){
         $rows=@(); foreach($tk in $tasks){ $rows+=($tk.Result | ConvertFrom-Json).d.results }
         $sw.Stop(); $readMs+=$sw.Elapsed.TotalMilliseconds
         if($rows.Count -eq 0){ break }
-
-        # project to common fields
-        $clean=@($rows | ForEach-Object { $o=[ordered]@{}; foreach($k in $common){ $o[$k]=$_.$k }; $o })
-
-        # chunk + POST PAR_W in parallel
-        $sw=[Diagnostics.Stopwatch]::StartNew()
-        for($c=0;$c -lt $clean.Count;$c+=$WCHUNK*$PAR_W){
-          $wtasks=@()
-          for($w=0;$w -lt $PAR_W;$w++){
-            $cs=$c+$w*$WCHUNK
-            if($cs -ge $clean.Count){ break }
-            $slice=$clean[$cs..([Math]::Min($cs+$WCHUNK,$clean.Count)-1)]
-            $body=@{ TransactionID=$tx; PlanningAreaID='ASIBPTS'; VersionID='ZPRUEBA'; DoCommit=$false; DeleteEntries=$false; RequestedAttributes=$reqAttr; NavAS1SOURCECUSTOMER=@{ results=$slice } } | ConvertTo-Json -Depth 12
-            $wtasks+=$cli.SendAsync((NewPost "$cal/AS1SOURCECUSTOMERTrans" $body))
-          }
-          [Threading.Tasks.Task]::WaitAll($wtasks)
-          foreach($wt in $wtasks){
-            $st=[int]$wt.Result.StatusCode
-            if($st -eq 403){ RefreshCsrf; throw "CSRF-403" }
-            if($st -ne 201){ $eb=$wt.Result.Content.ReadAsStringAsync().Result; throw "POST $st $($eb.Substring(0,[Math]::Min(200,$eb.Length)))" }
-          }
-        }
-        $sw.Stop(); $writeMs+=$sw.Elapsed.TotalMilliseconds
+        foreach($r in $rows){ $o=[ordered]@{}; foreach($k in $common){ $o[$k]=$r.$k }; [void]$buf.Add($o) }
         $segLoaded+=$rows.Count
         if($rows.Count -lt $READPAGE*$PAR_R){ break }
       }
+
+      # Chunk the whole segment (row-count) and POST PAR_W in parallel (waves).
+      $sw=[Diagnostics.Stopwatch]::StartNew()
+      $chunks=@()
+      for($c=0;$c -lt $buf.Count;$c+=$WCHUNK){ $chunks+=,($buf.GetRange($c,[Math]::Min($WCHUNK,$buf.Count-$c))) }
+      for($ci=0;$ci -lt $chunks.Count;$ci+=$PAR_W){
+        $wtasks=@()
+        for($w=0;$w -lt $PAR_W -and ($ci+$w) -lt $chunks.Count;$w++){
+          $slice=$chunks[$ci+$w]
+          $body=@{ TransactionID=$tx; PlanningAreaID='ASIBPTS'; VersionID='ZPRUEBA'; DoCommit=$false; DeleteEntries=$false; RequestedAttributes=$reqAttr; NavAS1SOURCECUSTOMER=@{ results=$slice } } | ConvertTo-Json -Depth 12
+          $wtasks+=$cli.SendAsync((NewPost "$cal/AS1SOURCECUSTOMERTrans" $body))
+        }
+        [Threading.Tasks.Task]::WaitAll($wtasks)
+        foreach($wt in $wtasks){
+          $st=[int]$wt.Result.StatusCode
+          if($st -eq 403){ RefreshCsrf; throw "CSRF-403" }
+          if($st -ne 201){ $eb=$wt.Result.Content.ReadAsStringAsync().Result; throw "POST $st $($eb.Substring(0,[Math]::Min(200,$eb.Length)))" }
+        }
+      }
+      $sw.Stop(); $writeMs+=$sw.Elapsed.TotalMilliseconds
 
       # commit segment
       $sw=[Diagnostics.Stopwatch]::StartNew()
