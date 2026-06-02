@@ -41,7 +41,7 @@ export const COUNT_TOP  = 2                  // small $top for safe counting (ne
 // keep each read page well under the size where truncation appears (and page
 // reads retry — see readKfPage). Mirrors the master-data fix.
 export const WRITE_BYTE_BUDGET = 3_500_000   // POST body ceiling, well below ~4.5 MB
-export const READ_BYTE_BUDGET  = 1_200_000   // GET response ceiling — moderate; reads retry on truncation
+export const READ_BYTE_BUDGET  =   900_000   // GET response ceiling — under the ~1 MB truncation zone
 // Rows per COMMITTED segment. A KF group is loaded in segments of this size, each
 // committed before the next — so a transient failure only re-does the CURRENT
 // segment (in a fresh transaction), never the whole group, and committed segments
@@ -483,7 +483,8 @@ const readBytesPerRow  = nFields => 500 + (nFields || 1) * 30   // GET response/
 const writeBytesPerRow = nFields => 150 + (nFields || 1) * 25   // POST body/row estimate
 
 // Rows per read page: bounded by the (smaller) read byte budget to survive the
-// proxy relay without truncation.
+// proxy relay without truncation. Field-count FALLBACK (underestimates value-heavy
+// rows); prefer readRowsPerPageBytes with a measured bytes/row.
 export function readRowsPerPage(nFields) {
   return Math.max(250, Math.min(10000, Math.floor(READ_BYTE_BUDGET / readBytesPerRow(nFields))))
 }
@@ -495,4 +496,36 @@ export function rowsPerChunk(nKf, nFields) {
   if (!nFields) return byValues
   const byBytes = Math.max(1, Math.floor(WRITE_BYTE_BUDGET / writeBytesPerRow(nFields)))
   return Math.max(1, Math.min(byValues, byBytes))
+}
+
+// Byte-accurate sizing from a MEASURED bytes-per-row (see measureKfRowBytes).
+export function readRowsPerPageBytes(bytesPerRow) {
+  if (!bytesPerRow || bytesPerRow < 1) return readRowsPerPage(0)
+  return Math.max(250, Math.min(10000, Math.floor(READ_BYTE_BUDGET / bytesPerRow)))
+}
+// nKf still caps by SAP's ≤5000 key-figure-values/POST rule; bytes cap the rest.
+export function rowsPerChunkBytes(nKf, bytesPerRow) {
+  const byValues = Math.max(1, Math.min(5000, Math.floor(MAX_KF_VALUES_PER_POST / Math.max(1, nKf || 1))))
+  if (!bytesPerRow || bytesPerRow < 1) return byValues
+  const byBytes = Math.max(1, Math.floor(WRITE_BYTE_BUDGET / bytesPerRow))
+  return Math.max(1, Math.min(byValues, byBytes))
+}
+
+// Measures ACTUAL bytes/row from a small live sample with the SAME $select the read
+// will use: GET response size (drives read truncation) and an approximate POST body
+// size (drives Vercel's ~4.5 MB limit). Returns { readBpr, writeBpr, n } or null.
+export async function measureKfRowBytes(conn, session, pa, { select, filter, signal, sample = 200 } = {}) {
+  let path = `/${pa}?$format=json&$select=${qenc(select)}&$top=${sample}&$skip=0`
+  if (filter) path += `&$filter=${qenc(filter)}`
+  const text = await withRetry(async () => {
+    const resp = await pcall(conn, session, { path, signal })
+    if (!resp.ok) throw await httpError(resp)
+    return resp.text()
+  }, { retries: 5, signal })
+  const rows = (JSON.parse(text)?.d?.results ?? []).map(stripMeta)
+  if (rows.length === 0) return null
+  const enc        = new TextEncoder()
+  const readBytes  = enc.encode(text).length
+  const writeBytes = enc.encode(JSON.stringify(rows)).length
+  return { readBpr: Math.ceil(readBytes / rows.length), writeBpr: Math.ceil(writeBytes / rows.length), n: rows.length }
 }

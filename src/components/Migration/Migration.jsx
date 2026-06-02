@@ -9,7 +9,7 @@ import {
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, CHUNK_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
-  chunkSizeFor, pageSizeFor,
+  chunkSizeFor, pageSizeFor, measureRowBytes, pageSizeForBytes, chunkSizeForBytes,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
 
@@ -549,10 +549,12 @@ export default function Migration({ connection, session }) {
         // With $select we download only the common fields, so size the page by those;
         // without it (unverifiable) we download every column (common + omitted).
         const readFields  = selectFields ? selectFields.length : ((entry?.common?.length || 0) + (entry?.omitted?.length || 0))
-        const writeChunk  = writeFields ? chunkSizeFor(writeFields) : CHUNK_SIZE
-        // Unknown schema (unverified) reads ALL columns → assume ~60 fields so the
-        // page stays small instead of falling back to a large 2000-row page.
-        const readPage    = pageSizeFor(readFields || 60)
+        // Field-count estimates — used only as a FALLBACK if the live measurement
+        // (below) fails. The estimate badly underestimates value-heavy tables (few
+        // columns but long strings / time series), so we override it with measured
+        // bytes/row once we can read a sample.
+        let writeChunk = writeFields ? chunkSizeFor(writeFields) : CHUNK_SIZE
+        let readPage   = pageSizeFor(readFields || 60)
 
         // Per-table phase timer — measures how long each phase takes (shown in
         // results + saved to history). Mark on every phase change below.
@@ -576,6 +578,17 @@ export default function Migration({ connection, session }) {
         try {
           dstBefore = await fetchCount(connection, session, dstName, { planningArea: dstPa, versionId: dstVersion || BASE_VERSION_ID, signal })
         } catch { /* ignore */ }
+
+        // Size batches by MEASURED bytes/row (a small live sample), not by column
+        // count. Crucial for value-heavy tables: a column-count estimate picked
+        // read pages/POST bodies far larger than reality → read truncation and POST
+        // bodies over Vercel's ~4.5 MB limit (413, non-retryable → table fails).
+        if (totalRows > 0) {
+          try {
+            const m = await measureRowBytes(srcConn, srcSession, srcName, { select: selectFields, planningArea: srcPa, versionId: srcVersion, signal })
+            if (m) { readPage = pageSizeForBytes(m.readBpr); writeChunk = chunkSizeForBytes(m.writeBpr) }
+          } catch { /* keep field-count fallback */ }
+        }
 
         let txId = null
         try {

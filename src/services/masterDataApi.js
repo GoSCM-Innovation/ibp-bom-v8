@@ -54,10 +54,14 @@ export const PARALLEL_W   = 4      // parallel write POSTs
 // estimates are deliberately conservative (over-estimate) so text-heavy rows
 // still stay under budget. SAP also recommends max 5 000 rows per import.
 const WRITE_BYTE_BUDGET = 3_500_000   // POST body ceiling, still well below Vercel's ~4.5 MB
-const READ_BYTE_BUDGET  = 1_200_000   // GET response ceiling — moderate; page reads retry on truncation
+const READ_BYTE_BUDGET  =   900_000   // GET response ceiling — under the ~1 MB truncation zone
 const readBytesPerRow  = nFields => 500 + nFields * 30   // GET response (all fields + metadata)
 const writeBytesPerRow = nFields => 150 + nFields * 25   // POST body (projected, no readonly/metadata)
 
+// Field-count sizing — a rough FALLBACK. It estimates bytes from the number of
+// columns, which badly UNDERESTIMATES value-heavy tables (few columns but long
+// strings / time series). Prefer the measured variants below when a sample is
+// available; these remain for empty tables / measurement failures.
 export function chunkSizeFor(nFields) {
   if (!nFields || nFields < 1) return CHUNK_SIZE
   return Math.max(500, Math.min(5000, Math.floor(WRITE_BYTE_BUDGET / writeBytesPerRow(nFields))))
@@ -65,6 +69,40 @@ export function chunkSizeFor(nFields) {
 export function pageSizeFor(nFields) {
   if (!nFields || nFields < 1) return PAGE_SIZE
   return Math.max(250, Math.min(5000, Math.floor(READ_BYTE_BUDGET / readBytesPerRow(nFields))))
+}
+
+// Byte-accurate sizing from a MEASURED bytes-per-row (see measureRowBytes). This
+// is what keeps real payloads under the limits regardless of column count.
+export function chunkSizeForBytes(bytesPerRow) {
+  if (!bytesPerRow || bytesPerRow < 1) return CHUNK_SIZE
+  return Math.max(250, Math.min(5000, Math.floor(WRITE_BYTE_BUDGET / bytesPerRow)))
+}
+export function pageSizeForBytes(bytesPerRow) {
+  if (!bytesPerRow || bytesPerRow < 1) return PAGE_SIZE
+  return Math.max(250, Math.min(5000, Math.floor(READ_BYTE_BUDGET / bytesPerRow)))
+}
+
+// Measures ACTUAL bytes/row from a small live sample (the same $select the load
+// will use): the GET response size (wire bytes, what drives read truncation) and
+// the POST body size (what drives the Vercel ~4.5 MB request limit). Returns
+// { readBpr, writeBpr, n } or null if the entity is empty.
+export async function measureRowBytes(conn, session, name, { select, planningArea, versionId, signal, sample = 200 } = {}) {
+  const filter = buildFilter(planningArea, versionId)
+  let path = `/${name}?$format=json&$top=${sample}&$skip=0`
+  if (select && select.length) path += `&$select=${encodeURIComponent(select.join(','))}`
+  if (filter) path += `&$filter=${encodeURIComponent(filter)}`
+  const text = await withRetry(async () => {
+    const resp = await proxyCall({ connection: conn, session, com: COM, path, signal, timeout: READ_TIMEOUT })
+    if (!resp.ok) throw await httpError(resp)
+    return resp.text()
+  }, { retries: 3, signal })
+  const rows = JSON.parse(text)?.d?.results ?? []
+  if (rows.length === 0) return null
+  const enc        = new TextEncoder()
+  const readBytes  = enc.encode(text).length
+  const bodyRows   = stripReadonlyFields(rows.map(stripMeta))
+  const writeBytes = enc.encode(JSON.stringify(bodyRows)).length
+  return { readBpr: Math.ceil(readBytes / rows.length), writeBpr: Math.ceil(writeBytes / rows.length), n: rows.length }
 }
 
 // ─── VSMT catalog ────────────────────────────────────────────────────────────

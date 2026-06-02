@@ -8,7 +8,8 @@ import {
   countKf, readKfPage, detectConversion, fetchTimeBuckets,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
-  odataDateToIso, rowsPerChunk, readRowsPerPage, PARALLEL_R, PARALLEL_W, SEGMENT_SIZE, MAX_SEGMENT_ATTEMPTS,
+  odataDateToIso, rowsPerChunk, readRowsPerPage, measureKfRowBytes, readRowsPerPageBytes, rowsPerChunkBytes,
+  PARALLEL_R, PARALLEL_W, SEGMENT_SIZE, MAX_SEGMENT_ATTEMPTS,
 } from '../../services/planningDataApi'
 
 // ── Styles (shared visual language with Migration.jsx) ──────────────────────────
@@ -330,9 +331,18 @@ export default function KeyFigureMigration({ connection, session }) {
           const totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: filter || undefined, signal })
           setProgress(p => ({ ...p, totalRows }))
 
-          // Byte-budgeted batch sizes + stable sort (level columns + time).
-          const readPageSize = readRowsPerPage(srcLevelCols.length + srcKfs.length + 1)
-          const chunkRows    = rowsPerChunk(dstKfs.length, dstLevelCols.length + dstKfs.length + 1)
+          // Batch sizes by MEASURED bytes/row (small live sample), not column count
+          // — the estimate underestimates value-heavy rows (time series), producing
+          // read pages over the truncation zone and POST bodies over Vercel's ~4.5 MB
+          // limit. Field-count is only the fallback if measurement fails.
+          let readPageSize = readRowsPerPage(srcLevelCols.length + srcKfs.length + 1)
+          let chunkRows    = rowsPerChunk(dstKfs.length, dstLevelCols.length + dstKfs.length + 1)
+          if (totalRows > 0) {
+            try {
+              const mm = await measureKfRowBytes(srcConn, srcSession, srcPa, { select: srcSelect, filter: filter || undefined, signal })
+              if (mm) { readPageSize = readRowsPerPageBytes(mm.readBpr); chunkRows = rowsPerChunkBytes(dstKfs.length, mm.writeBpr) }
+            } catch { /* keep field-count fallback */ }
+          }
           const orderby      = [...srcLevelCols, timeField]
 
           // For huge volumes, partition the source read by time bucket (one period
