@@ -659,6 +659,7 @@
   "kfm.segs": "segmentos confirmados: {a}/{b}",
   "kfm.rowsNoTotal": "filas (total desconocido)",
   "kfm.tCount": "Conteo",
+  "kfm.histKfs": "Key figures",
   "kfm.orderTitle": "Orden y mapeo (origen → destino)",
   "kfm.colSrc": "Origen ({sys})",
   "kfm.colDst": "Destino ({sys})",

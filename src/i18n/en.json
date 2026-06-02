@@ -659,6 +659,7 @@
   "kfm.segs": "committed segments: {a}/{b}",
   "kfm.rowsNoTotal": "rows (total unknown)",
   "kfm.tCount": "Count",
+  "kfm.histKfs": "Key figures",
   "kfm.orderTitle": "Order and mapping (source -> destination)",
   "kfm.colSrc": "Source ({sys})",
   "kfm.colDst": "Destination ({sys})",

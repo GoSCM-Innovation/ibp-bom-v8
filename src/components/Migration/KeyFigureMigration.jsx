@@ -46,6 +46,15 @@ function errText(e) {
   return (typeof e.message === 'string' && e.message) || String(e)
 }
 
+// ── History persistence (per destination connection, like master data) ───────
+const KF_HIST_KEY = id => `ibp:kfmigrations:${id}`
+function loadKfHistory(connId) {
+  try { return JSON.parse(localStorage.getItem(KF_HIST_KEY(connId))) || [] } catch { return [] }
+}
+function saveKfHistory(connId, entries) {
+  try { localStorage.setItem(KF_HIST_KEY(connId), JSON.stringify(entries.slice(0, 50))) } catch { /* quota */ }
+}
+
 // Formats a millisecond duration compactly: "1h 02m", "2m 14s", "4,2 s", "850 ms".
 function fmtDuration(ms) {
   if (ms == null || !isFinite(ms)) return '—'
@@ -208,6 +217,10 @@ export default function KeyFigureMigration({ connection, session }) {
   const [runElapsed, setRunElapsed] = useState(0)
   // ── Phase-timing detail expand (per result row) ──
   const [expandedTimeKf, setExpandedTimeKf] = useState(null)
+
+  // ── History (persisted per destination connection) ──
+  const [history, setHistory]         = useState(() => loadKfHistory(connection.id))
+  const [showHistory, setShowHistory] = useState(false)
 
   // ── Discover destination planning areas on mount (auto-select if only one) ──
   useEffect(() => {
@@ -636,6 +649,29 @@ export default function KeyFigureMigration({ connection, session }) {
       }
     } finally {
       setRunning(false); setProgress(null); setResults(all)
+
+      // Persist the run in the per-connection history. Rows are deduped by txId
+      // (KFs of the same group share a transaction and report the same total).
+      const seen = new Set()
+      let totalRowsMigrated = 0
+      for (const r of all) { const k = r.txId || r.kf; if (seen.has(k)) continue; seen.add(k); totalRowsMigrated += (r.total || 0) }
+      const overallStatus = all.some(r => r.status === 'cancelled') ? 'cancelled'
+        : all.some(r => r.status === 'error') ? 'error'
+        : all.some(r => r.status === 'processing') ? 'processing'
+        : all.some(r => r.status === 'warning') ? 'warning' : 'ok'
+      const entry = {
+        date: new Date().toISOString(),
+        srcConnId: srcConn?.id || '', srcConnName: srcConn?.name || '',
+        srcPa, srcVersion, dstPa, dstVersion,
+        kfs: steps.map(s => s.dstKf),
+        totalRows: totalRowsMigrated,
+        status: overallStatus,
+        durationMs: Date.now() - runStartRef.current,
+        timings: all.map(r => ({ kf: r.kf, durationMs: r.durationMs, phaseTimes: r.phaseTimes })),
+      }
+      const updated = [entry, ...loadKfHistory(connection.id)].slice(0, 50)
+      saveKfHistory(connection.id, updated)
+      setHistory(updated)
     }
   }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1044,6 +1080,48 @@ export default function KeyFigureMigration({ connection, session }) {
               {(results.find(r => r.kf === expanded).messages).map((m, i) => (
                 <div key={i} style={{ color: 'var(--red)', fontFamily: 'var(--mono)', padding: '2px 0' }}>{m.ExceptionId}: {m.MsgText}</div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── History (persisted per destination connection) ── */}
+      {history.length > 0 && (
+        <div style={SECTION}>
+          <button
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--text2)', fontWeight: 600, padding: 0 }}
+            onClick={() => setShowHistory(p => !p)}
+          >
+            {showHistory ? t('mig.histToggleClose') : t('mig.histToggleOpen')}
+          </button>
+          {showHistory && (
+            <div style={{ marginTop: 12, overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    <th style={TH}>{t('mig.histDate')}</th>
+                    <th style={TH}>{t('mig.histSrc')}</th>
+                    <th style={TH}>{t('mig.histDst')}</th>
+                    <th style={TH}>{t('kfm.histKfs')}</th>
+                    <th style={TH}>{t('mig.histRows')}</th>
+                    <th style={TH}>{t('mig.histTime')}</th>
+                    <th style={TH}>{t('mig.histStatus')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((h, i) => (
+                    <tr key={i}>
+                      <td style={td({ color: 'var(--text3)', fontSize: 11 })}>{new Date(h.date).toLocaleString()}</td>
+                      <td style={td({ color: 'var(--text2)' })}>{h.srcConnName || '—'} / {h.srcPa}{h.srcVersion ? ` / ${h.srcVersion}` : ''}</td>
+                      <td style={td({ color: 'var(--text2)' })}>{connection.name} / {h.dstPa}{h.dstVersion ? ` / ${h.dstVersion}` : ''}</td>
+                      <td style={td({ color: 'var(--text2)' })} title={(h.kfs || []).join(', ')}>{h.kfs?.length || 0}</td>
+                      <td style={td({ color: 'var(--text2)' })}>{(h.totalRows || 0).toLocaleString()}</td>
+                      <td style={td({ color: 'var(--text2)', fontFamily: 'var(--mono)' })}>{fmtDuration(h.durationMs)}</td>
+                      <td style={td({ fontWeight: 600, color: statusColor(h.status) })}>{statusLabel(h.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
