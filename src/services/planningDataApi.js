@@ -48,6 +48,10 @@ export const READ_BYTE_BUDGET  =   900_000   // GET response ceiling — under t
 // segment (in a fresh transaction), never the whole group, and committed segments
 // are kept. Mirrors the master-data fix.
 export const SEGMENT_SIZE = 20000
+// Concurrent time-bucket workers (independent transactions → parallel). See the
+// master-data note; a ceiling test showed throughput scaling with no errors to ~20
+// concurrent POSTs.
+export const CONCURRENT_SEGMENTS = 4
 // Max attempts PER SEGMENT. A failed attempt abandons its uncommitted transaction
 // (SAP saves nothing without commit) and re-stages that segment, so retries never
 // duplicate values within a committed transaction. Higher than before because each
