@@ -261,6 +261,8 @@ export default function Migration({ connection, session }) {
 
   // ── Options ──
   const [deleteEntries, setDeleteEntries] = useState(true)
+  const [txNameLoad, setTxNameLoad] = useState('IBP-ControlTower-MD')   // SAP transaction label for the load
+  const [txNameDel, setTxNameDel]   = useState('IBP-ControlTower-DEL')  // SAP transaction label for the delete pass
 
   // ── Run state ──
   const cancelledRef          = useRef(false)
@@ -668,7 +670,7 @@ export default function Migration({ connection, session }) {
                   if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                   try {
                     const txDel = await getTransactionId(connection, session, {
-                      transactionName: 'ibp-bom-migration-del',
+                      transactionName: txNameDel.trim() || 'IBP-ControlTower-DEL',
                       versionId: dstVersion || BASE_VERSION_ID,
                       masterDataTypeId: dstName, planningArea: dstPa, signal,
                     })
@@ -746,7 +748,7 @@ export default function Migration({ connection, session }) {
                 let myTx = null
                 try {
                   myTx = await getTransactionId(connection, session, {
-                    transactionName: 'ibp-bom-migration',
+                    transactionName: txNameLoad.trim() || 'IBP-ControlTower-MD',
                     versionId: dstVersion || BASE_VERSION_ID,
                     masterDataTypeId: dstName, planningArea: dstPa, signal,
                   })
@@ -928,7 +930,7 @@ export default function Migration({ connection, session }) {
       saveHistory(connection.id, updated)
       setHistory(updated)
     }
-  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, resolveDst, deleteEntries, mdtExtraFilter, connection, session])
+  }, [srcConn, srcSession, srcPa, srcVersion, dstPa, dstVersion, mdtOrder, resolveDst, deleteEntries, mdtExtraFilter, connection, session, txNameLoad, txNameDel])
 
   // ── Derived ──
   // Identical origin/target is BLOCKED: with "delete destination first" it would
@@ -1485,6 +1487,18 @@ export default function Migration({ connection, session }) {
               ⓘ {t('flt.deleteAutoOff')}
             </div>
           )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
+            <div>
+              <label style={LABEL}>{t('mig.txNameLoad')}</label>
+              <input style={INPUT} value={txNameLoad} onChange={e => setTxNameLoad(e.target.value)} placeholder="IBP-ControlTower-MD" maxLength={40} />
+            </div>
+            <div>
+              <label style={LABEL}>{t('mig.txNameDel')}</label>
+              <input style={{ ...INPUT, ...(deleteEntries ? {} : { opacity: 0.5 }) }} value={txNameDel} onChange={e => setTxNameDel(e.target.value)} placeholder="IBP-ControlTower-DEL" maxLength={40} disabled={!deleteEntries} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 6 }}>{t('mig.txNameNote')}</div>
           {hasAnyFilter && deleteEntries && (
             <div style={{
               fontSize: 11, color: 'var(--red)', lineHeight: 1.5, marginTop: 10,

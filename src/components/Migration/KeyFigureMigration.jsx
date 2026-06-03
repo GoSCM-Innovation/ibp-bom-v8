@@ -117,6 +117,7 @@ export default function KeyFigureMigration({ connection, session }) {
   // ── Selections ──
   const [dstVersion, setDstVersion] = useState('')   // '' = base
   const [srcVersion, setSrcVersion] = useState('')
+  const [txName, setTxName]         = useState('IBP-ControlTower-KF')  // SAP transaction label (registered in destination)
   const [timeField, setTimeField]   = useState('PERIODID4_TSTAMP')
   const [levelAttrs, setLevelAttrs] = useState([])   // destination attribute names (root level)
   const [attrSearch, setAttrSearch] = useState('')
@@ -534,7 +535,7 @@ export default function KeyFigureMigration({ connection, session }) {
                 let segLoaded = 0, segWritten = 0, reachedEnd = false
                 try {
                   const txId = await getTransactionId(connection, session, { signal })
-                  try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion }) } catch { /* best-effort */ }
+                  try { await initiateParallelProcess(connection, session, txId, { planningArea: dstPa, versionId: dstVersion, transactionName: txName.trim() || 'IBP-ControlTower-KF' }) } catch { /* best-effort */ }
 
                   // Read this segment [segStart, segEnd) of the bucket, effParR pages at a time.
                   const segBuf = []
@@ -681,7 +682,7 @@ export default function KeyFigureMigration({ connection, session }) {
       saveKfHistory(connection.id, updated)
       setHistory(updated)
     }
-  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr, extraKfFilter]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr, extraKfFilter, txName]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'warning' ? t('kfm.stWarning') : s === 'processing' ? t('kfm.stProc') : t('kfm.stCancel')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'warning' ? 'var(--yellow, #e6a817)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
@@ -762,6 +763,11 @@ export default function KeyFigureMigration({ connection, session }) {
                 <option value="">{t('kfm.baseVersion')}</option>
                 {(dstCat?.versions || []).filter(v => v.id && v.id !== '__BASELINE').map(v => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
               </select>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={LABEL}>{t('kfm.txName')}</label>
+              <input style={INPUT} value={txName} onChange={e => setTxName(e.target.value)} placeholder="IBP-ControlTower-KF" maxLength={40} />
+              <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{t('kfm.txNameNote')}</div>
             </div>
           </div>
         </div>
