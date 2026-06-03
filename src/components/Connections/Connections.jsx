@@ -10,6 +10,14 @@ import { connDisplayName } from '../../utils/connDisplayName'
 
 const EXPORT_VERSION = '1.0'
 
+// Acuerdos de comunicación mostrados como flags en cada tarjeta de conexión
+const AGREEMENTS = [
+  { key: 'com0326', short: '0326 Jobs',        i18n: 'form.agree0326Label' },
+  { key: 'com0068', short: '0068 Stats',       i18n: 'form.agree0068Title' },
+  { key: 'com0924', short: '0924 Metering',    i18n: 'form.agree0924Title' },
+  { key: 'com0720', short: '0720 Master Data', i18n: 'form.agree0720Title' },
+]
+
 function parseImportText(text, t) {
   let raw
   try { raw = JSON.parse(text) }
@@ -261,11 +269,30 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connDisplayName(conn, t)}</div>
-              {conn.com0326?.user && (
-                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
-                  {conn.com0326.user}
-                </div>
-              )}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginTop: 4 }}>
+                {AGREEMENTS.map(a => {
+                  const configured = !!conn[a.key]?.url
+                  return (
+                    <span
+                      key={a.key}
+                      title={t(a.i18n)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        fontSize: 11, fontWeight: 500,
+                        color: configured ? 'var(--text2)' : 'var(--text3)',
+                        opacity: configured ? 1 : 0.55,
+                      }}
+                    >
+                      <span style={{
+                        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                        background: configured ? 'var(--green)' : 'transparent',
+                        border: configured ? 'none' : '1px solid var(--text3)',
+                      }} />
+                      {a.short}
+                    </span>
+                  )
+                })}
+              </div>
               {getConnectionSapUrl(conn) && (
                 <a
                   href={getConnectionSapUrl(conn)}
