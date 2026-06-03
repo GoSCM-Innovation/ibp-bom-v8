@@ -283,18 +283,29 @@ export async function fetchTimeBuckets(conn, session, pa, { timeField, kf, filte
 
 // ─── Diagnostics / safeguards ────────────────────────────────────────────────
 
-// Detects whether a key figure needs a conversion attribute in $filter:
-// returns 'UOM' | 'CURR' | null. Done with a tiny read WITHOUT the conversion
-// filter — SAP replies "Add property UOMTOID/CURRTOID to a filter condition".
-export async function detectConversion(conn, session, pa, kf, { signal } = {}) {
-  const path = `/${pa}?$format=json&$top=1&$select=${qenc(`PRDID,${kf},PERIODID4_TSTAMP`)}`
-  const resp = await pcall(conn, session, { path, signal })
-  if (resp.ok) return null
-  const err = await httpError(resp).catch(() => null)
-  const d = (err?.detail || '').toUpperCase()
-  if (d.includes('UOMTOID')) return 'UOM'
-  if (d.includes('CURRTOID')) return 'CURR'
-  return null   // some other 4xx — treat as no known conversion
+// Detects which conversion attributes a key figure needs in $filter. Returns an
+// ARRAY (subset of ['UOM','CURR']) — a single KF can require BOTH a target unit
+// (UOMTOID) AND a target currency (CURRTOID) at once. SAP only names ONE missing
+// attribute per response ("Add property X to a filter condition"), so we probe
+// iteratively: supply each already-found attribute with a placeholder value
+// (eq 'ZZZ' — the filter-tree check is value-independent) and re-read until SAP
+// stops complaining about a conversion attribute. Capped at 2 rounds (UOM+CURR).
+export async function detectConversions(conn, session, pa, kf, { signal } = {}) {
+  const found = []
+  for (let round = 0; round < 3; round++) {
+    const probe = found.map(k => `${k === 'CURR' ? 'CURRTOID' : 'UOMTOID'} eq 'ZZZ'`).join(' and ')
+    const cols  = ['PRDID', ...found.map(k => k === 'CURR' ? 'CURRTOID' : 'UOMTOID'), kf, 'PERIODID4_TSTAMP']
+    let path = `/${pa}?$format=json&$top=1&$select=${qenc(cols.join(','))}`
+    if (probe) path += `&$filter=${qenc(probe)}`
+    const resp = await pcall(conn, session, { path, signal })
+    if (resp.ok) break               // no further conversion attribute required
+    const err = await httpError(resp).catch(() => null)
+    const d = (err?.detail || '').toUpperCase()
+    if (d.includes('UOMTOID') && !found.includes('UOM')) { found.push('UOM'); continue }
+    if (d.includes('CURRTOID') && !found.includes('CURR')) { found.push('CURR'); continue }
+    break                            // some other 4xx — no (more) known conversion
+  }
+  return found
 }
 
 // "Level signature": is `attr` a ROOT of the KF level (adding it raises the count)

@@ -5,7 +5,7 @@ import { getSession, setSession } from '../../services/sessionStorage'
 import { setMigrationGuard } from '../../services/migrationGuard'
 import {
   fetchKfCatalog, fetchKfAreas, planningServiceRoot, fetchConversionValues,
-  countKf, readKfPage, detectConversion, fetchTimeBuckets,
+  countKf, readKfPage, detectConversions, fetchTimeBuckets,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
   odataDateToIso, rowsPerChunk, readRowsPerPage, measureKfRowBytes, readRowsPerPageBytes, rowsPerChunkBytes,
@@ -295,8 +295,8 @@ export default function KeyFigureMigration({ connection, session }) {
   }
 
   // ── Migration engine ──
-  const needsUom  = steps.some(s => s.conv === 'UOM')
-  const needsCurr = steps.some(s => s.conv === 'CURR')
+  const needsUom  = steps.some(s => s.convs?.includes('UOM'))
+  const needsCurr = steps.some(s => s.convs?.includes('CURR'))
   // Identical origin/target (same system + area + version) is blocked — it would
   // just overwrite values with themselves. Same system with a different area or
   // version is the supported intra-system migration.
@@ -322,12 +322,16 @@ export default function KeyFigureMigration({ connection, session }) {
     setFltCount({ loading: true })
     try {
       const srcLevelCols = levelAttrs.map(resolveSrcAttr).filter(Boolean)
-      const conv = step.conv
-      const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
-      const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
+      // A KF may require BOTH a target unit and a target currency — add every
+      // conversion filter it asked for (mirrors the migration read).
+      const convs = step.convs || []
       let f = srcVersion ? `VERSIONID eq '${srcVersion}'` : ''
       const cols = [...srcLevelCols]
-      if (convAttr && convVal) { f += `${f ? ' and ' : ''}${convAttr} eq '${convVal}'`; cols.push(convAttr) }
+      for (const c of convs) {
+        const convAttr = c === 'UOM' ? 'UOMTOID' : 'CURRTOID'
+        const convVal  = c === 'UOM' ? selUom : selCurr
+        if (convVal) { f += `${f ? ' and ' : ''}${convAttr} eq '${convVal}'`; cols.push(convAttr) }
+      }
       if (extraKfFilter) f += `${f ? ' and ' : ''}(${extraKfFilter})`
       f += `${f ? ' and ' : ''}(${step.srcKf} gt 0 or ${step.srcKf} lt 0)`
       const select = [...cols, step.srcKf, timeField].join(',')
@@ -365,13 +369,16 @@ export default function KeyFigureMigration({ connection, session }) {
       // group. This avoids re-reading the (huge) level once per key figure.
       const resolved = []
       for (const s of steps) {
-        let conv = s.conv
-        if (conv === undefined) { try { conv = await detectConversion(srcConn, srcSession, srcPa, s.srcKf, { signal }) } catch { conv = null } }
-        resolved.push({ ...s, conv: conv || null })
+        let convs = s.convs
+        if (convs === undefined) { try { convs = await detectConversions(srcConn, srcSession, srcPa, s.srcKf, { signal }) } catch { convs = [] } }
+        resolved.push({ ...s, convs: convs || [] })
       }
       const order = [], groups = {}
       for (const s of resolved) {
-        const k = s.conv || 'none'
+        // Group key = the KF's SET of conversions (e.g. 'CURR+UOM'). All KF in a
+        // group share the planning level AND the conversion filters, so they read
+        // in one source sweep and write in shared POSTs.
+        const k = [...s.convs].sort().join('+') || 'none'
         if (!groups[k]) { groups[k] = []; order.push(k) }
         groups[k].push(s)
       }
@@ -380,9 +387,7 @@ export default function KeyFigureMigration({ connection, session }) {
       for (const gk of order) {
         if (cancelledRef.current) break
         const g = groups[gk]
-        const conv = g[0].conv
-        const convAttr = conv === 'UOM' ? 'UOMTOID' : conv === 'CURR' ? 'CURRTOID' : null
-        const convVal  = conv === 'UOM' ? selUom : conv === 'CURR' ? selCurr : null
+        const convs = g[0].convs || []
         const srcKfs = g.map(s => s.srcKf)
         const dstKfs = g.map(s => s.dstKf)
         const label  = dstKfs.join(', ')
@@ -393,13 +398,20 @@ export default function KeyFigureMigration({ connection, session }) {
         // Selective migration: user filters (attribute values + date range) travel in
         // every source read of the group — count, time buckets, sizing and pages.
         if (extraKfFilter) filter += `${filter ? ' and ' : ''}(${extraKfFilter})`
-        if (convAttr) {
-          if (!convVal) {
-            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: t('kfm.errNoUnit', { kf: s.srcKf }) })
-            done += g.length; continue
-          }
+        // Add every conversion attribute this group needs (a KF can require BOTH
+        // a target unit and a target currency). Missing a selected value aborts
+        // the group with a clear error rather than letting SAP 400.
+        let missingConv = false
+        for (const c of convs) {
+          const convAttr = c === 'UOM' ? 'UOMTOID' : 'CURRTOID'
+          const convVal  = c === 'UOM' ? selUom : selCurr
+          if (!convVal) { missingConv = true; break }
           filter += `${filter ? ' and ' : ''}${convAttr} eq '${convVal}'`
           srcLevelCols.push(convAttr)
+        }
+        if (missingConv) {
+          for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: t('kfm.errNoUnit', { kf: s.srcKf }) })
+          done += g.length; continue
         }
         const srcSelect = [...srcLevelCols, ...srcKfs, timeField].join(',')
         const dstFields = [...dstLevelCols, ...dstKfs, timeField].join(',')
@@ -932,10 +944,10 @@ export default function KeyFigureMigration({ connection, session }) {
                 <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '3px 2px' }} title={dstCat.labels?.[k] || k}>
                   <input type="checkbox" checked={sel} onChange={e => {
                     if (e.target.checked) {
-                      setSteps(p => [...p, { dstKf: k, srcKf: defaultSrcKf(k), conv: undefined }])
+                      setSteps(p => [...p, { dstKf: k, srcKf: defaultSrcKf(k), convs: undefined }])
                       const sk = defaultSrcKf(k) || k
-                      detectConversion(srcConn, srcSession, srcCat.pa, sk)
-                        .then(conv => setSteps(p => p.map(s => s.dstKf === k ? { ...s, conv } : s)))
+                      detectConversions(srcConn, srcSession, srcCat.pa, sk)
+                        .then(convs => setSteps(p => p.map(s => s.dstKf === k ? { ...s, convs } : s)))
                         .catch(() => {})
                     } else setSteps(p => p.filter(s => s.dstKf !== k))
                   }} />
