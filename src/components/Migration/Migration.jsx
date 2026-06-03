@@ -13,7 +13,7 @@ import {
   chunkByBytes, MAX_POST_BYTES, fetchDistinctValues,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
-import { buildConditionFilter, condChip, isExclusionOp } from '../../services/filterUtils'
+import { buildConditionFilter, condChip } from '../../services/filterUtils'
 import { MultiValueSelect, SearchSelect } from './FilterControls'
 
 // ── History persistence ───────────────────────────────────────────────────────
@@ -1389,11 +1389,9 @@ export default function Migration({ connection, session }) {
                                 style={{ ...SELECT, flex: '0 0 150px', fontSize: 11, padding: '4px 6px' }}
                               >
                                 <option value="in">{t('flt.opIn')}</option>
-                                <option value="nin">{t('flt.opNin')}</option>
                                 <option value="sw">{t('flt.opSw')}</option>
-                                <option value="nsw">{t('flt.opNsw')}</option>
                               </select>
-                              {(c.op === 'sw' || c.op === 'nsw') ? (
+                              {c.op === 'sw' ? (
                                 <input
                                   value={c.value}
                                   onChange={e => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, value: e.target.value } : x) }))}
@@ -1421,11 +1419,6 @@ export default function Migration({ connection, session }) {
                               >✕</button>
                             </div>
                           ))}
-                          {conds.some(c => isExclusionOp(c.op)) && (
-                            <div style={{ fontSize: 10, color: 'var(--yellow, #e6a817)', marginBottom: 6 }}>
-                              ⓘ {t('flt.exclNote')}
-                            </div>
-                          )}
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
                             <button
                               onClick={() => setMdtFilters(p => ({ ...p, [mdt]: [...conds, { field: '', op: 'in', value: '' }] }))}

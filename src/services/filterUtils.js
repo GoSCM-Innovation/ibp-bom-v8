@@ -12,14 +12,16 @@ export function splitValues(value) {
 }
 
 // Builds an OData $filter fragment from UI conditions:
-//   [{ field, op: 'in'|'nin'|'sw'|'nsw', value: 'A' | 'A,B,C' }]
-//     → "(FIELD eq 'A' or FIELD eq 'B') and not startswith(FIELD2,'X')"
-// 'in' is an or-chain of eq; 'nin' (exclude) an AND-chain of ne — verified live:
-// SAP rejects mixing ne-chains with or ("Filter is too complex"), the pure
-// and-chain works. CAVEAT (verified on MASTER_DATA): any predicate on a field
-// also drops rows whose field is EMPTY — exclusion omits the listed values AND
-// the empty-valued rows (adding "or F eq ''" changes nothing). Conditions AND
-// together. Returns '' when no condition is complete.
+//   [{ field, op: 'in'|'sw', value: 'A' | 'A,B,C' }]
+//     → "(FIELD eq 'A' or FIELD eq 'B') and startswith(FIELD2,'X')"
+// Only INCLUSION operators: 'in' (or-chain of eq) and 'sw' (startswith). These
+// are transparent — you migrate exactly the named values, nothing hidden.
+// Exclusion ('ne') was removed on purpose: verified live that any predicate on a
+// field also DROPS rows whose field is EMPTY (BRAND ne 'X' = 3138, not 8005; the
+// ~4.9k blank-brand rows vanish and no syntax recovers them — eq null / eq '' both
+// match 0). "Exclude X" therefore silently lost the blanks. To exclude, the user
+// selects every OTHER value from the real-values dropdown — explicit, no surprise.
+// Conditions AND together. Returns '' when no condition is complete.
 export function buildConditionFilter(conds) {
   const esc = v => String(v).replace(/'/g, "''")   // OData: single quote → doubled
   const parts = []
@@ -27,31 +29,17 @@ export function buildConditionFilter(conds) {
     const vals = splitValues(c.value)
     if (!c.field || vals.length === 0) continue
     if (c.op === 'sw') parts.push(`startswith(${c.field},'${esc(vals[0])}')`)
-    else if (c.op === 'nsw') parts.push(`not startswith(${c.field},'${esc(vals[0])}')`)
-    else if (c.op === 'nin') {
-      if (vals.length === 1) parts.push(`${c.field} ne '${esc(vals[0])}'`)
-      else parts.push('(' + vals.map(v => `${c.field} ne '${esc(v)}'`).join(' and ') + ')')
-    }
     else if (vals.length === 1) parts.push(`${c.field} eq '${esc(vals[0])}'`)
     else parts.push('(' + vals.map(v => `${c.field} eq '${esc(v)}'`).join(' or ') + ')')
   }
   return parts.join(' and ')
 }
 
-// True when the condition is an exclusion (shown with an empty-values caveat).
-export function isExclusionOp(op) { return op === 'nin' || op === 'nsw' }
-
 // Compact human chip for an active condition (shown next to the table/section).
 export function condChip(c) {
   const vals = splitValues(c.value)
   if (!c.field || vals.length === 0) return null
-  if (c.op === 'sw')  return `${c.field} ⌐ ${vals[0]}…`
-  if (c.op === 'nsw') return `${c.field} ≠ ${vals[0]}…`
-  if (c.op === 'nin') {
-    if (vals.length === 1) return `${c.field} ≠ ${vals[0]}`
-    if (vals.length <= 3)  return `${c.field} ∉ [${vals.join(', ')}]`
-    return `${c.field} ∉ [${vals.slice(0, 3).join(', ')} +${vals.length - 3}]`
-  }
+  if (c.op === 'sw') return `${c.field} ⌐ ${vals[0]}…`
   if (vals.length === 1) return `${c.field} = ${vals[0]}`
   if (vals.length <= 3)  return `${c.field} ∈ [${vals.join(', ')}]`
   return `${c.field} ∈ [${vals.slice(0, 3).join(', ')} +${vals.length - 3}]`
