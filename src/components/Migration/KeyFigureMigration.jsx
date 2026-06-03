@@ -12,8 +12,8 @@ import {
   chunkByBytes, MAX_POST_BYTES, PARALLEL_R, PARALLEL_W, SEGMENT_SIZE, MAX_SEGMENT_ATTEMPTS, CONCURRENT_SEGMENTS,
 } from '../../services/planningDataApi'
 import { fetchAttrDistinctValues } from '../../services/masterDataApi'
-import { buildConditionFilter, condChip } from '../../services/filterUtils'
-import { MultiValueSelect } from './FilterControls'
+import { buildConditionFilter, condChip, isExclusionOp } from '../../services/filterUtils'
+import { MultiValueSelect, SearchSelect } from './FilterControls'
 
 // ── Styles (shared visual language with Migration.jsx) ──────────────────────────
 const SECTION     = { background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }
@@ -73,87 +73,6 @@ function fmtDuration(ms) {
 
 // Phases shown in the per-KF timing breakdown, in execution order.
 const KF_TIMED_PHASES = ['count', 'reading', 'writing', 'committing', 'processing', 'messages']
-
-// Dropdown with a built-in TEXT SEARCH — for very long option lists (hundreds of
-// key figures, units…) where a native <select> is hard to scan. Click opens a
-// panel with a filter input + scrollable list; Enter picks the first match;
-// Escape / outside click closes. options: [{ value, label }].
-function SearchSelect({ value, options, onChange, placeholder, searchPlaceholder, invalid, style, btnStyle, mono = true }) {
-  const [open, setOpen] = useState(false)
-  const [q, setQ] = useState('')
-  const boxRef = useRef(null)
-  useEffect(() => {
-    if (!open) return
-    const h = e => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [open])
-  const sel = options.find(o => o.value === value)
-  const ql = q.toLowerCase()
-  const filtered = !q ? options : options.filter(o =>
-    String(o.value).toLowerCase().includes(ql) || String(o.label || '').toLowerCase().includes(ql))
-  const pick = v => { onChange(v); setOpen(false); setQ('') }
-  return (
-    <div ref={boxRef} style={{ position: 'relative', ...style }}>
-      <button
-        type="button"
-        onClick={() => { setOpen(o => !o); setQ('') }}
-        style={{
-          background: 'var(--bg)', border: `1px solid ${invalid ? 'var(--red)' : 'var(--border)'}`, borderRadius: 6,
-          color: sel ? 'var(--text)' : 'var(--text3)', fontSize: 12, padding: '7px 10px', width: '100%',
-          textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-          fontFamily: mono ? 'var(--mono)' : 'inherit', ...btnStyle,
-        }}
-      >
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {sel ? sel.label : (placeholder || '—')}
-        </span>
-        <span style={{ color: 'var(--text3)', fontSize: 9, flexShrink: 0 }}>▾</span>
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, marginTop: 3,
-          background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 8,
-          boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
-        }}>
-          <input
-            autoFocus
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Escape') setOpen(false)
-              if (e.key === 'Enter' && filtered.length > 0) pick(filtered[0].value)
-            }}
-            placeholder={searchPlaceholder || '…'}
-            style={{
-              background: 'var(--bg)', border: 'none', borderBottom: '1px solid var(--border)',
-              color: 'var(--text)', fontSize: 12, padding: '8px 10px', width: '100%', outline: 'none', boxSizing: 'border-box',
-            }}
-          />
-          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-            {filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--text3)' }}>—</div>}
-            {filtered.map(o => (
-              <div
-                key={o.value}
-                onClick={() => pick(o.value)}
-                style={{
-                  padding: '6px 10px', fontSize: 11, cursor: 'pointer',
-                  fontFamily: mono ? 'var(--mono)' : 'inherit',
-                  color: o.value === value ? 'var(--accent)' : 'var(--text)',
-                  background: o.value === value ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 16%, transparent)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = o.value === value ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent' }}
-              >
-                {o.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 export default function KeyFigureMigration({ connection, session }) {
   const { t } = useI18n()
@@ -934,12 +853,14 @@ export default function KeyFigureMigration({ connection, session }) {
               <select
                 value={c.op}
                 onChange={e => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, op: e.target.value } : x))}
-                style={{ ...SELECT, flex: '0 0 130px', fontSize: 11, padding: '4px 6px' }}
+                style={{ ...SELECT, flex: '0 0 150px', fontSize: 11, padding: '4px 6px' }}
               >
                 <option value="in">{t('flt.opIn')}</option>
+                <option value="nin">{t('flt.opNin')}</option>
                 <option value="sw">{t('flt.opSw')}</option>
+                <option value="nsw">{t('flt.opNsw')}</option>
               </select>
-              {c.op === 'sw' ? (
+              {(c.op === 'sw' || c.op === 'nsw') ? (
                 <input
                   value={c.value}
                   onChange={e => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, value: e.target.value } : x))}
@@ -962,6 +883,11 @@ export default function KeyFigureMigration({ connection, session }) {
               >✕</button>
             </div>
           ))}
+          {attrFilters.some(c => isExclusionOp(c.op)) && (
+            <div style={{ fontSize: 10, color: 'var(--yellow, #e6a817)', marginBottom: 6 }}>
+              ⓘ {t('flt.exclNote')}
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
             <button

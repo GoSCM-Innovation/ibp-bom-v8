@@ -13,8 +13,8 @@ import {
   chunkByBytes, MAX_POST_BYTES, fetchDistinctValues,
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
-import { buildConditionFilter, condChip } from '../../services/filterUtils'
-import { MultiValueSelect } from './FilterControls'
+import { buildConditionFilter, condChip, isExclusionOp } from '../../services/filterUtils'
+import { MultiValueSelect, SearchSelect } from './FilterControls'
 
 // ── History persistence ───────────────────────────────────────────────────────
 
@@ -1290,33 +1290,37 @@ export default function Migration({ connection, session }) {
                     {/* Origen → Destino (mapeo de tabla) */}
                     <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={mdt}>{mdt}</span>
                     <span style={{ color: 'var(--text3)', fontSize: 12, flexShrink: 0 }}>→</span>
-                    <select
-                      value={resolveDst(mdt)}
+                    <div
                       draggable={false}
                       onPointerDown={e => e.stopPropagation()}
-                      onChange={e => setMdtMapping(prev => ({ ...prev, [mdt]: e.target.value }))}
                       title={resolveDst(mdt) === mdt ? '' : t('mig.mappedTo')}
-                      style={{
-                        ...SELECT, flex: 1, minWidth: 0, fontSize: 11, padding: '3px 6px',
-                        fontFamily: 'var(--mono)',
-                        borderColor: resolveDst(mdt) === mdt ? 'var(--border)' : 'var(--accent)',
-                      }}
+                      style={{ flex: 1, minWidth: 0 }}
                     >
-                      {dstCandidates.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                      <SearchSelect
+                        value={resolveDst(mdt)}
+                        options={dstCandidates.map(d => ({ value: d, label: d }))}
+                        onChange={v => setMdtMapping(prev => ({ ...prev, [mdt]: v }))}
+                        searchPlaceholder={t('kfm.typeToFilter')}
+                        btnStyle={{
+                          fontSize: 11, padding: '3px 6px',
+                          borderColor: resolveDst(mdt) === mdt ? 'var(--border)' : 'var(--accent)',
+                        }}
+                      />
+                    </div>
                     {/* Filtro de registros (migración selectiva) */}
                     <button
                       onPointerDown={e => e.stopPropagation()}
                       onClick={() => handleToggleFilter(mdt)}
                       title={t('flt.btn')}
                       style={{
-                        ...BTN_SEC, padding: '2px 8px', fontSize: 10, flexShrink: 0,
+                        ...BTN_SEC, padding: '2px 9px', fontSize: 10, flexShrink: 0, whiteSpace: 'nowrap',
                         borderColor: hasFilter ? 'var(--accent)' : 'var(--border2)',
                         color: hasFilter ? 'var(--accent)' : 'var(--text2)',
+                        fontWeight: hasFilter ? 700 : 600,
                         background: editorOpen ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'none',
                       }}
                     >
-                      ⧩ {hasFilter ? conds.filter(c => condChip(c)).length : ''}
+                      ⧩ {t('flt.btnShort')}{hasFilter ? ` (${conds.filter(c => condChip(c)).length})` : ''} {editorOpen ? '▾' : '▸'}
                     </button>
                     {/* ↑ ↓ */}
                     <button
@@ -1370,23 +1374,26 @@ export default function Migration({ connection, session }) {
                         <>
                           {conds.map((c, ci) => (
                             <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <select
+                              <SearchSelect
                                 value={c.field}
-                                onChange={e => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, field: e.target.value, value: '' } : x) }))}
-                                style={{ ...SELECT, flex: '0 0 32%', fontSize: 11, padding: '4px 6px', fontFamily: 'var(--mono)' }}
-                              >
-                                <option value="">{t('flt.fieldPh')}</option>
-                                {mdtFieldOpts[mdt].map(f => <option key={f} value={f}>{f}</option>)}
-                              </select>
+                                options={mdtFieldOpts[mdt].map(f => ({ value: f, label: f }))}
+                                onChange={v => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, field: v, value: '' } : x) }))}
+                                placeholder={t('flt.fieldPh')}
+                                searchPlaceholder={t('kfm.typeToFilter')}
+                                style={{ flex: '0 0 32%', minWidth: 0 }}
+                                btnStyle={{ fontSize: 11, padding: '4px 8px' }}
+                              />
                               <select
                                 value={c.op}
                                 onChange={e => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, op: e.target.value } : x) }))}
-                                style={{ ...SELECT, flex: '0 0 130px', fontSize: 11, padding: '4px 6px' }}
+                                style={{ ...SELECT, flex: '0 0 150px', fontSize: 11, padding: '4px 6px' }}
                               >
                                 <option value="in">{t('flt.opIn')}</option>
+                                <option value="nin">{t('flt.opNin')}</option>
                                 <option value="sw">{t('flt.opSw')}</option>
+                                <option value="nsw">{t('flt.opNsw')}</option>
                               </select>
-                              {c.op === 'sw' ? (
+                              {(c.op === 'sw' || c.op === 'nsw') ? (
                                 <input
                                   value={c.value}
                                   onChange={e => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, value: e.target.value } : x) }))}
@@ -1414,6 +1421,11 @@ export default function Migration({ connection, session }) {
                               >✕</button>
                             </div>
                           ))}
+                          {conds.some(c => isExclusionOp(c.op)) && (
+                            <div style={{ fontSize: 10, color: 'var(--yellow, #e6a817)', marginBottom: 6 }}>
+                              ⓘ {t('flt.exclNote')}
+                            </div>
+                          )}
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
                             <button
                               onClick={() => setMdtFilters(p => ({ ...p, [mdt]: [...conds, { field: '', op: 'in', value: '' }] }))}
