@@ -13,3 +13,17 @@ export function getSapSystemUrl(apiUrl) {
     return null
   }
 }
+
+/**
+ * Derives the SAP IBP Fiori launchpad URL from a connection, using the URL of
+ * any configured communication agreement (they all share the same tenant host).
+ */
+export function getConnectionSapUrl(conn) {
+  if (!conn) return null
+  const urls = [conn.com0326?.url, conn.com0068?.url, conn.com0924?.url, conn.com0720?.url]
+  for (const url of urls) {
+    const sapUrl = getSapSystemUrl(url)
+    if (sapUrl) return sapUrl
+  }
+  return null
+}

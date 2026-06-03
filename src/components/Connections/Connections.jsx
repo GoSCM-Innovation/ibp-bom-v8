@@ -5,7 +5,7 @@ import ConnectionForm from './ConnectionForm'
 import ConnectionAvatar from './ConnectionAvatar'
 import ImportConnectionsModal from './ImportConnectionsModal'
 import { remove } from '../../services/connectionStorage'
-import { getSapSystemUrl } from '../../utils/sapUrl'
+import { getConnectionSapUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
 
 const EXPORT_VERSION = '1.0'
@@ -266,9 +266,9 @@ export default function Connections({ connections, onSaved, onDeleted, onSelect,
                   {conn.com0326.user}
                 </div>
               )}
-              {getSapSystemUrl(conn.com0326?.url) && (
+              {getConnectionSapUrl(conn) && (
                 <a
-                  href={getSapSystemUrl(conn.com0326?.url)}
+                  href={getConnectionSapUrl(conn)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4, display: 'inline-block', textDecoration: 'none' }}

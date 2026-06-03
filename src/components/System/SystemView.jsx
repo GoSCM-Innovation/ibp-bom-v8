@@ -9,7 +9,7 @@ import Metering from '../Metering/Metering'
 import Orchestrations from '../Orchestrations/Orchestrations'
 import MigrationTabs from '../Migration/MigrationTabs'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
-import { getSapSystemUrl } from '../../utils/sapUrl'
+import { getConnectionSapUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
 import { confirmLeaveMigration } from '../../services/migrationGuard'
 
@@ -61,9 +61,9 @@ export default function SystemView({ connection, session, onLogout }) {
         <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connDisplayName(connection, t)}</div>
-          {getSapSystemUrl(connection.com0326?.url) && (
+          {getConnectionSapUrl(connection) && (
             <a
-              href={getSapSystemUrl(connection.com0326?.url)}
+              href={getConnectionSapUrl(connection)}
               target="_blank"
               rel="noopener noreferrer"
               style={{ fontSize: 10, color: 'var(--accent)', marginTop: 2, display: 'inline-block', textDecoration: 'none' }}
