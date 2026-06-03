@@ -6,7 +6,7 @@ export function getSapSystemUrl(apiUrl) {
   if (!apiUrl) return null
   try {
     const { protocol, hostname } = new URL(apiUrl)
-    const systemHostname = hostname.replace(/-api\.scmibp\./, '.scmibp.')
+    const systemHostname = hostname.replace(/-api\.scmibp(\d*)\./, '.scmibp$1.')
     if (systemHostname === hostname) return null // no transform matched
     return `${protocol}//${systemHostname}`
   } catch {
