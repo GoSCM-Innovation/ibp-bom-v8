@@ -78,6 +78,16 @@ const MAX_SEGMENT_ATTEMPTS = 5
 // errors: K=4 → 821 rows/s, K=6 → 1505 rows/s (~18 min for 1.6M). 6 hits the target.
 const CONCURRENT_SEGMENTS = 6
 
+// ── Guardabarrera de volumen (por tabla) ──
+// El conteo viene del pre-vuelo ($count en analyzeFields), así que NO hay round-trip extra.
+//   · count > MAX_ROWS_HARD  → tabla BLOQUEADA: se omite, nunca se transfiere.
+//   · MAX_ROWS_WARN..HARD     → la tabla procede, pero se marca en el modal para confirmación.
+//   · count ≤ MAX_ROWS_WARN   → pasa sin fricción.
+// No hay override desde la UI a propósito: para una corrida legítimamente mayor se
+// suben estas constantes en código (fricción deliberada).
+const MAX_ROWS_WARN = 1_000_000
+const MAX_ROWS_HARD = 2_000_000
+
 const MIN_ROOT_LEN = 4
 function rootCandidates(name) {
   const out = []
@@ -512,6 +522,16 @@ export default function Migration({ connection, session }) {
     const byMdt = {}
     for (const srcName of mdtOrder) {
       const dstName = resolveDst(srcName)
+      // Pre-flight row count (SOURCE, with the table's migration filter applied) — drives
+      // the volume guardrail AND is reused as totalRows in runMigration (no extra $count).
+      // null = count couldn't be obtained → runMigration falls back to its own count.
+      let count = null
+      try {
+        count = await fetchCount(srcConn, srcSession, srcName, {
+          planningArea: srcPa, versionId: srcVersion,
+          extraFilter: mdtExtraFilter(srcName) || undefined, retries: 1, timeout: 60000,
+        })
+      } catch { /* count unknown */ }
       let srcFields = null, dstFields = null
       // The column schema is version-independent, so read the sample WITHOUT the
       // version filter — a version-filtered read can be pathologically slow on some
@@ -521,7 +541,7 @@ export default function Migration({ connection, session }) {
       const s = clean(srcFields), d = clean(dstFields)
       if (!s || !d) {
         // Couldn't infer schema on one side (empty entity) → send all source fields.
-        byMdt[srcName] = { verifiable: false, common: null, omitted: [], unfilled: [] }
+        byMdt[srcName] = { verifiable: false, common: null, omitted: [], unfilled: [], count }
         continue
       }
       const dSet = new Set(d), sSet = new Set(s)
@@ -530,6 +550,7 @@ export default function Migration({ connection, session }) {
         common:   s.filter(f => dSet.has(f)),
         omitted:  s.filter(f => !dSet.has(f)),   // only in source → dropped
         unfilled: d.filter(f => !sSet.has(f)),   // only in destination → left empty
+        count,
       }
     }
     const hasConflicts = Object.values(byMdt).some(
@@ -616,13 +637,26 @@ export default function Migration({ connection, session }) {
         let dstBefore = null
 
         try {
-          // Bounded count (1 retry, 60 s) — fails fast instead of retrying ~8 min.
-          const t0 = Date.now()
-          try {
-            totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, extraFilter, signal, retries: 1, timeout: 60000 })
-          } finally { addPhase('reading', Date.now() - t0) }
+          // Reuse the pre-flight count from analyzeFields when available (no extra $count);
+          // otherwise count here. Bounded (1 retry, 60 s) — fails fast instead of ~8 min.
+          const preCount = analysisRef.current?.byMdt?.[srcName]?.count
+          if (typeof preCount === 'number') {
+            totalRows = preCount
+          } else {
+            const t0 = Date.now()
+            try {
+              totalRows = await fetchCount(srcConn, srcSession, srcName, { planningArea: srcPa, versionId: srcVersion, extraFilter, signal, retries: 1, timeout: 60000 })
+            } finally { addPhase('reading', Date.now() - t0) }
+          }
         } catch (e) {
           pushResult({ mdt: srcName, dstName, unverified, status: 'error', total: 0, ok: 0, errors: 1, txId: null, errorMsg: errText(e), phaseTimes: { ...phaseAcc }, durationMs: Date.now() - tableStart })
+          continue
+        }
+
+        // Volume guardrail: a table over the hard cap is BLOCKED — never transferred.
+        // (Tables in the WARN..HARD band were already surfaced for confirmation in the modal.)
+        if (totalRows > MAX_ROWS_HARD) {
+          pushResult({ mdt: srcName, dstName, unverified, status: 'skipped', total: 0, ok: 0, errors: 0, txId: null, errorMsg: t('mig.limitBlockedMsg', { max: MAX_ROWS_HARD.toLocaleString(), n: totalRows.toLocaleString() }), phaseTimes: { ...phaseAcc }, durationMs: Date.now() - tableStart })
           continue
         }
 
@@ -964,11 +998,14 @@ export default function Migration({ connection, session }) {
   // Result status → label / colour / icon (shared by results table and step panel).
   const statusLabel = s => s === 'ok' ? t('mig.statusOk') : s === 'error' ? t('mig.statusError')
     : s === 'warning' ? t('mig.statusWarning')
+    : s === 'skipped' ? t('mig.statusSkipped')
     : s === 'processing' ? t('mig.statusProcessing') : t('mig.statusCancelled')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)'
     : s === 'warning' ? 'var(--yellow, #e6a817)'
+    : s === 'skipped' ? 'var(--text3)'
     : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
   const statusIcon  = s => s === 'ok' ? '✓' : s === 'error' ? '✕' : s === 'warning' ? '⚠'
+    : s === 'skipped' ? '⊘'
     : s === 'processing' ? '⧗' : '⊘'
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -2001,6 +2038,19 @@ export default function Migration({ connection, session }) {
                         background: 'var(--bg)',
                       }}>
                         <div style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--text)', marginBottom: 4 }}>{mdt}</div>
+                        {typeof a.count === 'number' && (() => {
+                          const blocked = a.count > MAX_ROWS_HARD
+                          const warned  = !blocked && a.count > MAX_ROWS_WARN
+                          const col = blocked ? 'var(--red)' : warned ? 'var(--yellow, #e6a817)' : 'var(--text3)'
+                          return (
+                            <div style={{ fontSize: 11, color: col, marginBottom: 4 }}>
+                              {blocked ? '⊘ ' : warned ? '⚠ ' : ''}
+                              {t('mig.rowCount', { n: a.count.toLocaleString() })}
+                              {blocked && ` — ${t('mig.limitBlockedTag', { max: MAX_ROWS_HARD.toLocaleString() })}`}
+                              {warned && ` — ${t('mig.limitWarnTag', { max: MAX_ROWS_WARN.toLocaleString() })}`}
+                            </div>
+                          )
+                        })()}
                         {!a.verifiable ? (
                           <div style={{ fontSize: 11, color: 'var(--yellow, #e6a817)' }}>⚠ {t('mig.fieldsUnverifiable')}</div>
                         ) : ok ? (
