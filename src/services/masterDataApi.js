@@ -388,10 +388,12 @@ export async function fetchCsrf(conn, session, { signal } = {}) {
 // identifier for the base version in /IBP/MASTER_DATA_API_SRV.
 export const BASE_VERSION_ID = '__BASELINE'
 
-export async function getTransactionId(conn, session, { transactionName, versionId, masterDataTypeId, planningArea, signal }) {
+// NOTE: per $metadata, GetTransactionID declares NO parameters — SAP ignores
+// anything passed here (incl. TransactionName). It only mints a transaction GUID.
+// The run's visible label and version/PA context are set via initiateParallelProcess.
+export async function getTransactionId(conn, session, { versionId, masterDataTypeId, planningArea, signal }) {
   const encStr = v => `%27${encodeURIComponent(v)}%27`
   const params = [
-    `TransactionName=${encStr(transactionName || 'ibp-bom-migration')}`,
     `VersionID=${encStr(versionId || BASE_VERSION_ID)}`,
     `TransactionID=${encStr('')}`,
     `MasterDataTypeID=${encStr(masterDataTypeId)}`,
@@ -515,7 +517,7 @@ export async function commitTransaction(conn, session, transactionId, { signal, 
 // errors or waste a round-trip per table.
 const PARALLEL_UNSUPPORTED_KEY = id => `ibp:noParallel:${id}`
 
-export async function initiateParallelProcess(conn, session, transactionId, { planningArea, versionId, masterDataTypeId } = {}) {
+export async function initiateParallelProcess(conn, session, transactionId, { planningArea, versionId, masterDataTypeId, transactionName } = {}) {
   try {
     const cached = JSON.parse(localStorage.getItem(PARALLEL_UNSUPPORTED_KEY(conn.id)))
     if (cached && Date.now() - cached.ts < VSMT_TTL) return null
@@ -526,6 +528,9 @@ export async function initiateParallelProcess(conn, session, transactionId, { pl
     + `&VersionID=${enc(versionId || BASE_VERSION_ID)}`   // required
   if (masterDataTypeId) path += `&MasterDataTypeID=${enc(masterDataTypeId)}`
   if (planningArea)     path += `&PlanningArea=${enc(planningArea)}`
+  // TransactionName is the ONLY place SAP registers the run's visible label for
+  // MASTER_DATA_API_SRV — GetTransactionID ($metadata: no parameters) ignores it.
+  if (transactionName)  path += `&TransactionName=${enc(transactionName)}`
   path += '&$format=json'
   // Best-effort optimisation — short timeout so a slow/unsupported tenant doesn't
   // waste the full window before the real load starts.

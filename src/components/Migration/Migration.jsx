@@ -670,10 +670,11 @@ export default function Migration({ connection, session }) {
                   if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                   try {
                     const txDel = await getTransactionId(connection, session, {
-                      transactionName: txNameDel.trim() || 'IBP-ControlTower-DEL',
                       versionId: dstVersion || BASE_VERSION_ID,
                       masterDataTypeId: dstName, planningArea: dstPa, signal,
                     })
+                    // TransactionName MUST go here — GetTransactionID ignores it (no params in $metadata).
+                    try { await initiateParallelProcess(connection, session, txDel, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, transactionName: txNameDel.trim() || 'IBP-ControlTower-DEL', signal }) } catch { /* ignore */ }
                     const delChunks = chunkByBytes(segKeys, MAX_POST_BYTES, 5000)
                     for (let ci = 0; ci < delChunks.length; ci += PARALLEL_W) {
                       if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
@@ -748,11 +749,11 @@ export default function Migration({ connection, session }) {
                 let myTx = null
                 try {
                   myTx = await getTransactionId(connection, session, {
-                    transactionName: txNameLoad.trim() || 'IBP-ControlTower-MD',
                     versionId: dstVersion || BASE_VERSION_ID,
                     masterDataTypeId: dstName, planningArea: dstPa, signal,
                   })
-                  try { await initiateParallelProcess(connection, session, myTx, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, signal }) } catch { /* ignore */ }
+                  // TransactionName MUST go here — GetTransactionID ignores it (no params in $metadata).
+                  try { await initiateParallelProcess(connection, session, myTx, { planningArea: dstPa, versionId: dstVersion, masterDataTypeId: dstName, transactionName: txNameLoad.trim() || 'IBP-ControlTower-MD', signal }) } catch { /* ignore */ }
 
                   // Read the whole segment (effParR pages at a time) → buffer.
                   const segBuf = []
