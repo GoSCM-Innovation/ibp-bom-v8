@@ -75,6 +75,13 @@ export default function ImportConnectionsModal({ parsed, existing, fileName, onC
                       {c.com0326.url}
                     </div>
                   )}
+                  {(() => {
+                    const codes = [['com0326', '0326'], ['com0068', '0068'], ['com0924', '0924'], ['com0720', '0720']]
+                      .filter(([k]) => c[k]?.url).map(([, code]) => code)
+                    return codes.length > 0 && (
+                      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{codes.join(' · ')}</div>
+                    )
+                  })()}
                 </div>
                 <Tag dup={c._dup} willSkip={c._dup && !replaceDuplicates} t={t} />
               </div>
