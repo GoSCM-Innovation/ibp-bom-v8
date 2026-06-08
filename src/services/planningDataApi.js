@@ -45,11 +45,12 @@ export const MAX_KF_VALUES_PER_POST = 2500
 // FEW BIG pages, not many small. Concurrency comes from CONCURRENT_SEGMENTS workers;
 // PARALLEL_R×CONCURRENT_SEGMENTS = max in-flight reads (2×6=12 of ~2.5 MB each).
 export const PARALLEL_R = 2                  // parallel read pages per worker
-// Parallel write POSTs per worker. Lowered 4 → 2: writes SATURATE at ~8-12 concurrent
-// POSTs (~300 values/s, a SAP-side ceiling measured vs my400444 — more concurrency does
-// NOT help and only loads the tenant). 2 × CONCURRENT_SEGMENTS(6) = 12 concurrent POSTs
-// sits right at the sweet spot with the least load.
-export const PARALLEL_W = 2
+// Parallel write POSTs per worker. Write throughput keeps climbing with concurrency
+// (measured vs my400444, 2500-value POSTs, 0 errors): 12 POSTs→298, 16→354, 20→415
+// values/s. 3 × CONCURRENT_SEGMENTS(6) = 18 concurrent POSTs (~390 values/s) is the
+// chosen balance — ~30% over 12 without pushing the tenant to the max. (Combined with
+// the 2500-value cap so each POST stays ~53 s, well under WRITE_TIMEOUT/maxDuration.)
+export const PARALLEL_W = 3
 export const COUNT_TOP  = 2                  // small $top for safe counting (never 0)
 // Separate byte budgets (the hard ceiling is BYTES, not rows; Vercel caps the
 // request/response body at ~4.5 MB). Reads get a SMALLER budget: large multi-MB
