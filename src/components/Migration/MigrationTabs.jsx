@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import Migration from './Migration'
-import KeyFigureMigration from './KeyFigureMigration'
+// [release/master-data] Migración de dato transaccional (key figures) OCULTA hasta su
+// propio release. El código vive intacto; para reactivarla, revertir este commit:
+// restaurar el import, la pestaña 'kf' en TABS y la línea de render `mode === 'kf'`.
+// import KeyFigureMigration from './KeyFigureMigration'
 
 // Container for the Migration tab: two modes —
 //   · "Dato maestro"      → existing master-data migration (Migration)
@@ -14,7 +17,7 @@ export default function MigrationTabs({ connection, session }) {
 
   const TABS = [
     { id: 'master', label: t('kfm.tabMaster') },
-    { id: 'kf',     label: t('kfm.tabKf') },
+    // [release/master-data] { id: 'kf', label: t('kfm.tabKf') },
   ]
 
   return (
@@ -31,7 +34,7 @@ export default function MigrationTabs({ connection, session }) {
       </div>
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {mode === 'master' && <Migration connection={connection} session={session} />}
-        {mode === 'kf'     && <KeyFigureMigration connection={connection} session={session} />}
+        {/* [release/master-data] {mode === 'kf' && <KeyFigureMigration connection={connection} session={session} />} */}
       </div>
     </div>
   )
