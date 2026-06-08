@@ -33,7 +33,12 @@ const CATALOG_TTL   = 24 * 60 * 60 * 1000   // 24 h
 
 export const BASE_VERSION_ID = '__BASELINE'
 export const MAX_KF_VALUES_PER_POST = 5000  // SAP-recommended limit
-export const PARALLEL_R = 6                  // parallel read pages
+// Parallel read pages PER WORKER. Kept LOW on purpose: the dominant read cost is a
+// fixed ~6 s per request (measured vs my400439 — flat across $skip depth and $orderby).
+// Bigger pages amortise that fixed cost far better than many small ones, so we read
+// FEW BIG pages, not many small. Concurrency comes from CONCURRENT_SEGMENTS workers;
+// PARALLEL_R×CONCURRENT_SEGMENTS = max in-flight reads (2×6=12 of ~2.5 MB each).
+export const PARALLEL_R = 2                  // parallel read pages per worker
 export const PARALLEL_W = 4                  // parallel write POSTs per bucket; × CONCURRENT_SEGMENTS(4) = ~16 concurrent POSTs (ceiling-test safe zone)
 export const COUNT_TOP  = 2                  // small $top for safe counting (never 0)
 // Separate byte budgets (the hard ceiling is BYTES, not rows; Vercel caps the
@@ -42,12 +47,20 @@ export const COUNT_TOP  = 2                  // small $top for safe counting (ne
 // keep each read page well under the size where truncation appears (and page
 // reads retry — see readKfPage). Mirrors the master-data fix.
 export const WRITE_BYTE_BUDGET = 3_500_000   // POST body ceiling, well below ~4.5 MB
-export const READ_BYTE_BUDGET  =   900_000   // GET response ceiling — under the ~1 MB truncation zone
-// Rows per COMMITTED segment. A KF group is loaded in segments of this size, each
-// committed before the next — so a transient failure only re-does the CURRENT
-// segment (in a fresh transaction), never the whole group, and committed segments
-// are kept. Mirrors the master-data fix.
-export const SEGMENT_SIZE = 20000
+// GET response ceiling. Raised 900 KB → 2.5 MB: each request has a large FIXED cost
+// (~6 s), so a 2.5 MB page (~5000 value-rows) reads ~2.5× more rows/s than a 900 KB
+// one and stays safely under Vercel's ~4.5 MB serverless response limit. Verified the
+// proxy relays 2.5 MB intact; the Content-Length truncation guard + page retry remain
+// the safety net if a relay ever comes up short.
+export const READ_BYTE_BUDGET  = 2_500_000
+// Rows per COMMITTED segment. A KF is loaded in segments of this size, each committed
+// before the next — so a transient failure only re-does the CURRENT segment (in a
+// fresh transaction), never the whole KF, and committed segments are kept. Raised
+// 20000 → 40000 (fewer transactions = fewer getTransactionID/IPP/commit cycles). Not
+// higher because CONCURRENT_SEGMENTS workers each BUFFER a full segment in browser
+// memory before writing (40000 × 6 ≈ 240k rows); the confirmation tail is already
+// parallelised, so bigger segments give little extra benefit.
+export const SEGMENT_SIZE = 40000
 // Concurrent time-bucket workers (independent transactions → parallel). See the
 // master-data note; a ceiling test showed throughput scaling with no errors to ~20
 // concurrent POSTs. Measured 0 errors; K=6 ≈ 1505 rows/s end-to-end (~18 min/1.6M).

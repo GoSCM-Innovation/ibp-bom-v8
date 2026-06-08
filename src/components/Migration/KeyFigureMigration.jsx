@@ -363,26 +363,22 @@ export default function KeyFigureMigration({ connection, session }) {
       let csrf = null
       try { csrf = await fetchCsrf(connection, session, { signal }) } catch { /* proxy fetches per POST */ }
 
-      // Resolve each step's conversion (cached on the step or detected now), then
-      // GROUP key figures that share the same conversion (none / UOM / currency).
-      // All KF of a group share the planning level, so they are read in ONE source
-      // sweep and written in shared POSTs (rows × nKf ≤ 5000) — one transaction per
-      // group. This avoids re-reading the (huge) level once per key figure.
+      // Resolve each step's conversion (cached on the step or detected now). Each KF
+      // is then migrated ON ITS OWN, sequentially — one source sweep, one set of
+      // transactions and one result per KF (mirrors the master-data table loop).
+      // Rationale (product decision): step-by-step results (KF i/N as each finishes),
+      // bounded system load (only one KF in flight), and a lighter per-request cost
+      // (a 1-KF aggregated read is ~1.5× faster than a 3-KF one). KFs are NOT grouped:
+      // grouping only paid off when KFs shared rows, and re-reading is cheap here.
       const resolved = []
       for (const s of steps) {
         let convs = s.convs
         if (convs === undefined) { try { convs = await detectConversions(srcConn, srcSession, srcPa, s.srcKf, { signal }) } catch { convs = [] } }
         resolved.push({ ...s, convs: convs || [] })
       }
+      // One "group" per KF → the loop below processes each key figure independently.
       const order = [], groups = {}
-      for (const s of resolved) {
-        // Group key = the KF's SET of conversions (e.g. 'CURR+UOM'). All KF in a
-        // group share the planning level AND the conversion filters, so they read
-        // in one source sweep and write in shared POSTs.
-        const k = [...s.convs].sort().join('+') || 'none'
-        if (!groups[k]) { groups[k] = []; order.push(k) }
-        groups[k].push(s)
-      }
+      resolved.forEach((s, i) => { const k = `kf${i}`; groups[k] = [s]; order.push(k) })
 
       let done = 0
       for (const gk of order) {
@@ -504,7 +500,12 @@ export default function KeyFigureMigration({ connection, session }) {
 
           const segmentTxIds = []   // one committed transaction per non-empty segment
           let committedRows = 0     // read rows confirmed — durable baseline (never reset)
+          let inflightRows  = 0     // rows read by ALL workers but not yet committed (shared)
           let totalWritten  = 0     // values actually written across all segments
+          // Live row count = committed + in-flight, summed across every concurrent
+          // worker (the old `committedRows + segLoaded` used only ONE worker's local
+          // partial, so 5/6 of the in-flight rows were invisible → rate/ETA way off).
+          const liveRows = () => committedRows + inflightRows
           const effParR = orderby.length ? PARALLEL_R : 1   // serial reads if no stable $orderby (#4)
 
           // ── Concurrent COMMITTED segments (position-segmented per bucket) ──
@@ -553,7 +554,8 @@ export default function KeyFigureMigration({ connection, session }) {
                     if (rowsRead.length === 0) { reachedEnd = true; break }
                     for (const r of projectBatch(rowsRead)) segBuf.push(r)
                     segLoaded += rowsRead.length
-                    setProgress(p => ({ ...p, rows: committedRows + segLoaded }))
+                    inflightRows += rowsRead.length
+                    setProgress(p => ({ ...p, rows: liveRows() }))
                     const want = Math.min(readPageSize * effParR, segEnd - pageStart)
                     if (rowsRead.length < want) { reachedEnd = true; break }   // bucket ended within this segment
                   }
@@ -584,10 +586,15 @@ export default function KeyFigureMigration({ connection, session }) {
                     segmentTxIds.push(txId)
                     totalWritten += segWritten
                   }
+                  // Move this segment's rows from in-flight to the durable baseline.
                   committedRows += segLoaded
-                  setProgress(p => ({ ...p, rows: committedRows, segsDone: (p.segsDone || 0) + 1 }))
+                  inflightRows  -= segLoaded
+                  setProgress(p => ({ ...p, rows: liveRows(), segsDone: (p.segsDone || 0) + 1 }))
                   break   // segment done; pull the next one
                 } catch (e) {
+                  // Roll this attempt's partial reads back out of the in-flight count
+                  // (a retry re-reads them; a throw ends the run). Keeps liveRows() honest.
+                  inflightRows -= segLoaded
                   if (e.isCancelled || e.name === 'AbortError' || cancelledRef.current) throw e
                   if (e.isCalculated) throw e   // permanent (calculated KF) — don't retry
                   // CSRF expired → refresh and retry (a 403 stages nothing, safe) (#2).
@@ -603,6 +610,9 @@ export default function KeyFigureMigration({ connection, session }) {
               }
             }
           }
+          // Mark when actual reading starts (after count/measure/buckets) so the live
+          // rate & ETA reflect real throughput, not the fixed setup overhead.
+          setProgress(p => ({ ...p, readStart: Date.now() }))
           // Without a stable $orderby, concurrent $skip windows could overlap or skip
           // rows → run fully serial (1 worker) in that rare case (#2).
           await Promise.all(Array.from({ length: orderby.length ? CONCURRENT_SEGMENTS : 1 }, () => worker()))
@@ -614,22 +624,35 @@ export default function KeyFigureMigration({ connection, session }) {
             continue
           }
 
-          // Confirm processing + collect messages across ALL segment transactions.
+          // Confirm processing + collect messages across ALL segment transactions,
+          // CONCURRENTLY (bounded pool). Each segment committed its own transaction, so
+          // they can be polled in parallel — this collapses what used to be ~N serial
+          // round-trips (the invisible "processing" tail on big runs). readMessages is
+          // only fetched when a transaction did NOT come back cleanly PROCESSED (a clean
+          // PROCESSED has no error messages, so the extra round-trip is wasted).
           setProgress(p => ({ ...p, phase: 'processing' }))
           const tProc = Date.now()
           let anyError = false, anyWarning = false, anyUnconfirmed = false
           const msgs = []
-          for (const tx of segmentTxIds) {
-            if (cancelledRef.current) break
-            const st0 = await waitForProcessed(connection, session, tx, { timeoutMs: Math.min(1800000, Math.max(120000, SEGMENT_SIZE * 3)), signal })
-            if (st0 === 'ERROR') anyError = true
-            else if (st0 === 'PROCESSED_WITH_ERRORS') anyWarning = true
-            else if (st0 !== 'PROCESSED') anyUnconfirmed = true
-            const m = await readMessages(connection, session, dstPa, tx, { signal })
-            // Count only error/abort messages (E/A). If the tenant's Message set has no
-            // Severity field, keep all (preserves prior behaviour) (#5).
-            msgs.push(...m.filter(x => x.Severity == null || ['E', 'A'].includes(x.Severity)))
+          const txQueue = [...segmentTxIds]
+          const confirmWorker = async () => {
+            for (;;) {
+              if (cancelledRef.current) break
+              const tx = txQueue.shift()
+              if (!tx) break
+              const st0 = await waitForProcessed(connection, session, tx, { timeoutMs: Math.min(1800000, Math.max(120000, SEGMENT_SIZE * 3)), signal })
+              if (st0 === 'ERROR') anyError = true
+              else if (st0 === 'PROCESSED_WITH_ERRORS') anyWarning = true
+              else if (st0 !== 'PROCESSED') anyUnconfirmed = true
+              if (st0 !== 'PROCESSED') {
+                const m = await readMessages(connection, session, dstPa, tx, { signal })
+                // Count only error/abort messages (E/A). If the tenant's Message set has
+                // no Severity field, keep all (preserves prior behaviour) (#5).
+                msgs.push(...m.filter(x => x.Severity == null || ['E', 'A'].includes(x.Severity)))
+              }
+            }
           }
+          await Promise.all(Array.from({ length: Math.min(CONCURRENT_SEGMENTS, Math.max(1, segmentTxIds.length)) }, () => confirmWorker()))
           addPhase('processing', Date.now() - tProc)
           // Honest status: any ERROR → error; rejections/warnings → warning;
           // unconfirmed → processing; else ok.
@@ -1083,10 +1106,15 @@ export default function KeyFigureMigration({ connection, session }) {
             })}
           </div>
 
-          {/* Current group — bar + %, live speed, ETA and committed segments */}
+          {/* Current KF — bar + %, live speed, ETA and committed segments */}
           {(() => {
-            const elapsedS = Math.max(1, (Date.now() - (progress.groupStart || Date.now())) / 1000)
-            const rate = progress.rows > 0 ? Math.round(progress.rows / elapsedS) : 0
+            // Rate measured from when READING started (readStart), not from groupStart —
+            // otherwise the fixed setup (count + buckets + measure) drags the rate/ETA
+            // down. progress.rows is the SHARED live count (committed + in-flight across
+            // all workers), so the rate now reflects real throughput.
+            const rateClock = progress.readStart || progress.groupStart || Date.now()
+            const elapsedS = Math.max(1, (Date.now() - rateClock) / 1000)
+            const rate = (progress.rows > 0 && progress.readStart) ? Math.round(progress.rows / elapsedS) : 0
             const pct = progress.totalRows > 0 ? Math.min(100, (progress.rows / progress.totalRows) * 100) : null
             const etaS = (pct != null && rate > 0) ? Math.max(0, (progress.totalRows - progress.rows) / rate) : null
             return (
