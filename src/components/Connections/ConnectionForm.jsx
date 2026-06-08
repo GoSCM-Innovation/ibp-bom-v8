@@ -23,6 +23,10 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       url:  initial?.com0924?.url  || '',
       user: initial?.com0924?.user || '',
     },
+    com0720: {
+      url:  initial?.com0720?.url  || '',
+      user: initial?.com0720?.user || '',
+    },
   })
   const [error, setError] = useState('')
 
@@ -47,12 +51,14 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     if (!form.name)    { setError(t('form.errNameRequired')); return }
     if (!form.ambiente) { setError(t('form.errEnvRequired')); return }
 
-    const err326      = validateAgreement(form.com0326,     'SAP_COM_0326')
-    const err068      = validateAgreement(form.com0068,     'SAP_COM_0068')
+    const err326      = validateAgreement(form.com0326, 'SAP_COM_0326')
+    const err068      = validateAgreement(form.com0068, 'SAP_COM_0068')
     const errMetering = validateAgreement(form.com0924, 'SAP_COM_0924')
+    const err0720     = validateAgreement(form.com0720, 'SAP_COM_0720')
     if (err326)      { setError(err326);      return }
     if (err068)      { setError(err068);      return }
     if (errMetering) { setError(errMetering); return }
+    if (err0720)     { setError(err0720);     return }
 
     const conn = {
       ...(initial ? { ...initial } : {}),
@@ -62,9 +68,10 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       logoUrl:  form.logoUrl,
     }
 
-    const has326      = form.com0326.url     || form.com0326.user
-    const has068      = form.com0068.url     || form.com0068.user
+    const has326      = form.com0326.url || form.com0326.user
+    const has068      = form.com0068.url || form.com0068.user
     const hasMetering = form.com0924.url || form.com0924.user
+    const has0720     = form.com0720.url || form.com0720.user
 
     if (has326) {
       conn.com0326 = { url: form.com0326.url.replace(/\/$/, ''), user: form.com0326.user }
@@ -82,6 +89,12 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       conn.com0924 = { url: form.com0924.url.replace(/\/$/, ''), user: form.com0924.user }
     } else {
       delete conn.com0924
+    }
+
+    if (has0720) {
+      conn.com0720 = { url: form.com0720.url.replace(/\/$/, ''), user: form.com0720.user }
+    } else {
+      delete conn.com0720
     }
 
     upsert(conn)
@@ -131,6 +144,18 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         values={form.com0924}
         onChange={(k, v) => setAgreement('com0924', k, v)}
         urlPlaceholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata4/ibp/api_meteringactivity/srvd_a2x/ibp/api_meteringactivity/0001"
+        urlLabel={t('form.agreeUrlLabel')}
+        userLabel={t('form.userLabel')}
+        isMobile={isMobile}
+      />
+
+      {/* SAP_COM_0720 */}
+      <AgreementSection
+        title={t('form.agree0720Title')}
+        subtitle={t('form.agree0720Subtitle')}
+        values={form.com0720}
+        onChange={(k, v) => setAgreement('com0720', k, v)}
+        urlPlaceholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata/IBP/MASTER_DATA_API_SRV"
         urlLabel={t('form.agreeUrlLabel')}
         userLabel={t('form.userLabel')}
         isMobile={isMobile}

@@ -7,6 +7,7 @@ import GlobalResumen from './components/Resumen/GlobalResumen'
 import LoginModal from './components/Connections/LoginModal'
 import { getAll, bulkImport } from './services/connectionStorage'
 import { loadAllSessions, setSession, clearSession } from './services/sessionStorage'
+import { confirmLeaveMigration } from './services/migrationGuard'
 import { useIsMobile } from './hooks/useIsMobile'
 import { I18nProvider } from './context/I18nContext'
 import './App.css'
@@ -42,12 +43,15 @@ export default function App() {
   }
 
   function sessionIsComplete(conn, session) {
-    const needed = ['com0326', 'com0068', 'com0924'].filter(k => conn[k]?.url)
+    const needed = ['com0326', 'com0068', 'com0924', 'com0720'].filter(k => conn[k]?.url)
     if (needed.length === 0) return true
     return needed.every(k => session?.[k]?.password)
   }
 
   function handleSelect(id) {
+    if (id === activeId) return
+    // Navigating away from a running migration cancels it — confirm first.
+    if (!confirmLeaveMigration()) return
     if (id !== 'connections' && id !== 'resumen-general') {
       const conn = connections.find(c => c.id === id)
       if (conn && !sessionIsComplete(conn, sessions[id])) {
@@ -69,6 +73,7 @@ export default function App() {
   }
 
   function handleLogout(connId) {
+    if (!confirmLeaveMigration()) return
     clearSession(connId)
     setSessions(p => { const n = { ...p }; delete n[connId]; return n })
     if (activeId === connId) setActiveId('connections')

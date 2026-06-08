@@ -7,16 +7,19 @@ import Resumen from '../Resumen/Resumen'
 import ResourceStats from '../ResourceStats/ResourceStats'
 import Metering from '../Metering/Metering'
 import Orchestrations from '../Orchestrations/Orchestrations'
+import MigrationTabs from '../Migration/MigrationTabs'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
-import { getSapSystemUrl } from '../../utils/sapUrl'
+import { getConnectionSapUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
+import { confirmLeaveMigration } from '../../services/migrationGuard'
 
 export default function SystemView({ connection, session, onLogout }) {
   const { t } = useI18n()
   const isMobile = useIsMobile()
-  const has0326    = !!(connection.com0326?.url    && connection.com0326?.user)
-  const has0068    = !!(connection.com0068?.url    && connection.com0068?.user)
+  const has0326    = !!(connection.com0326?.url && connection.com0326?.user)
+  const has0068    = !!(connection.com0068?.url && connection.com0068?.user)
   const hasMetering = !!(connection.com0924?.url && connection.com0924?.user)
+  const has0720    = !!(connection.com0720?.url && connection.com0720?.user)
 
   const APPS = [
     ...(has0326 ? [
@@ -31,9 +34,19 @@ export default function SystemView({ connection, session, onLogout }) {
     ...(hasMetering ? [
       { id: 'metering', label: t('system.tabMetering') },
     ] : []),
+    ...(has0720 ? [
+      { id: 'migration', label: t('system.tabMigration') },
+    ] : []),
   ]
 
   const [activeApp, setActiveApp] = useState(APPS[0]?.id || null)
+
+  // Switching sub-tab leaves the Migration view (unmount cancels the run) — confirm first.
+  function selectApp(id) {
+    if (id === activeApp) return
+    if (activeApp === 'migration' && !confirmLeaveMigration()) return
+    setActiveApp(id)
+  }
 
   const emptyStateLines = t('system.emptyState').split('\n')
 
@@ -48,9 +61,9 @@ export default function SystemView({ connection, session, onLogout }) {
         <ConnectionAvatar name={connection.name} logoUrl={connection.logoUrl} size={34} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{connDisplayName(connection, t)}</div>
-          {getSapSystemUrl(connection.com0326?.url) && (
+          {getConnectionSapUrl(connection) && (
             <a
-              href={getSapSystemUrl(connection.com0326?.url)}
+              href={getConnectionSapUrl(connection)}
               target="_blank"
               rel="noopener noreferrer"
               style={{ fontSize: 10, color: 'var(--accent)', marginTop: 2, display: 'inline-block', textDecoration: 'none' }}
@@ -82,7 +95,7 @@ export default function SystemView({ connection, session, onLogout }) {
           background: 'var(--bg2)', padding: isMobile ? '0 12px' : '0 24px', flexShrink: 0,
         }}>
           {APPS.map(app => (
-            <button key={app.id} onClick={() => setActiveApp(app.id)} style={{
+            <button key={app.id} onClick={() => selectApp(app.id)} style={{
               padding: isMobile ? '10px 14px' : '10px 20px',
               fontSize: 12, background: 'none', border: 'none',
               borderBottom: activeApp === app.id ? '2px solid var(--accent)' : '2px solid transparent',
@@ -109,6 +122,7 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'orquestador'  && <Orchestrations connection={connection} session={session} />}
         {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
         {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
+        {activeApp === 'migration'    && <MigrationTabs  connection={connection} session={session} />}
       </div>
     </div>
   )

@@ -1,7 +1,10 @@
-export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser }) {
+export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout, signal, fetchCsrf, csrf, serviceRoot: serviceRootOverride }) {
   const comKey = `com${com}`
   const agreement = connection[comKey]
-  const serviceRoot = agreement?.url || ''
+  // serviceRootOverride lets callers reuse a com's credentials but target a
+  // different OData service (e.g. PLANNING_DATA_API_SRV reuses SAP_COM_0720
+  // credentials but a different service URL than MASTER_DATA_API_SRV).
+  const serviceRoot = serviceRootOverride || agreement?.url || ''
   const sessionCreds = session?.[comKey] || {}
 
   let fullPath = path || ''
@@ -20,6 +23,14 @@ export async function proxyCall({ connection, session, com = '0326', path, metho
       password: sessionCreds.password || '',
       method,
       ...(body !== undefined && { body }),
+      ...(timeout !== undefined && { timeout }),
+      // fetchCsrf: ask the proxy to only obtain a CSRF token+cookies (no real call).
+      ...(fetchCsrf ? { fetchCsrf: true } : {}),
+      // csrf: reuse a previously obtained { csrfToken, cookies } so the proxy
+      // skips the per-POST CSRF round-trip to SAP.
+      ...(csrf ? { csrfToken: csrf.csrfToken, cookies: csrf.cookies } : {}),
     }),
+    // Caller-provided AbortSignal lets a cancelled migration cut requests in flight.
+    ...(signal ? { signal } : {}),
   })
 }
