@@ -397,16 +397,18 @@ export async function fetchCsrf(conn, session, { signal } = {}) {
 // identifier for the base version in /IBP/MASTER_DATA_API_SRV.
 export const BASE_VERSION_ID = '__BASELINE'
 
-// NOTE: per $metadata, GetTransactionID declares NO parameters — SAP ignores
-// anything passed here (incl. TransactionName). It only mints a transaction GUID.
-// The run's visible label and version/PA context are set via initiateParallelProcess.
+// Base target (no version): the transaction must be minted with ONLY the
+// MasterDataTypeID. Sending VersionID/PlanningArea for the base version makes the
+// later staging POST fail with 400 "check the planning area and version values"
+// (verified live). A real version binds VersionID + PlanningArea as the context.
 export async function getTransactionId(conn, session, { versionId, masterDataTypeId, planningArea, signal }) {
   const encStr = v => `%27${encodeURIComponent(v)}%27`
   const params = [
-    `VersionID=${encStr(versionId || BASE_VERSION_ID)}`,
     `TransactionID=${encStr('')}`,
     `MasterDataTypeID=${encStr(masterDataTypeId)}`,
-    `PlanningArea=${encStr(planningArea)}`,
+    ...(versionId
+      ? [`VersionID=${encStr(versionId)}`, `PlanningArea=${encStr(planningArea)}`]
+      : []),
     '$format=json',
   ].join('&')
 
@@ -433,20 +435,23 @@ export async function getTransactionId(conn, session, { versionId, masterDataTyp
 // A full-replace migration therefore uses TWO separate transactions: first a
 // delete transaction (commit), then a load transaction.
 //
-// planningArea + versionId must be top-level fields in the POST body to tell
-// SAP IBP which version to target (per official API documentation). Omitting
-// them makes SAP default to __BASELINE regardless of the GetTransactionID
-// VersionID.
+// Version context in the POST body:
+//   • Real version → carry BOTH PlanningAreaID and VersionID (tells SAP which
+//     version-specific context to write).
+//   • Base (no version) → carry NEITHER. Including PlanningAreaID with the base
+//     version is rejected with 400 "check the planning area and version values";
+//     omitting both writes to the global/base master data (verified live, applies
+//     to load AND delete — mirrors how external integrations target base).
 export async function postTransChunk(conn, session, name, transactionId, rows, { deleteEntries = false, planningArea, versionId, signal, csrf } = {}) {
   const cleanRows = stripReadonlyFields(rows)
   const attrs = cleanRows.length ? Object.keys(cleanRows[0]).join(',') : ''
 
-  // Version context: include PlanningAreaID + VersionID only when provided.
-  // Omitting VersionID (or passing __BASELINE) targets the base version.
-  const versionCtx = {
-    ...(planningArea ? { PlanningAreaID: planningArea } : {}),
-    ...(versionId    ? { VersionID:      versionId    } : {}),
-  }
+  const versionCtx = versionId
+    ? {
+        ...(planningArea ? { PlanningAreaID: planningArea } : {}),
+        VersionID: versionId,
+      }
+    : {}
 
   const body = {
     TransactionID:       transactionId,
@@ -527,6 +532,12 @@ export async function commitTransaction(conn, session, transactionId, { signal, 
 const PARALLEL_UNSUPPORTED_KEY = id => `ibp:noParallel:${id}`
 
 export async function initiateParallelProcess(conn, session, transactionId, { planningArea, versionId, masterDataTypeId, transactionName } = {}) {
+  // Base target (no version) does NOT support InitiateParallelProcess (returns
+  // 400/404 for every parameter combination — verified live). Skip it: a base run
+  // simply forgoes the visible job label / server-side parallelism. Crucially, this
+  // avoids caching the 4xx as "unsupported" for the WHOLE connection, which would
+  // also disable it for real-version loads that DO support it.
+  if (!versionId) return null
   try {
     const cached = JSON.parse(localStorage.getItem(PARALLEL_UNSUPPORTED_KEY(conn.id)))
     if (cached && Date.now() - cached.ts < VSMT_TTL) return null

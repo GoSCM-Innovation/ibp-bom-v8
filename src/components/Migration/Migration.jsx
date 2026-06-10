@@ -708,8 +708,10 @@ export default function Migration({ connection, session }) {
                 for (let attempt = 1; ; attempt++) {
                   if (cancelledRef.current) throw Object.assign(new Error('cancelled'), { isCancelled: true })
                   try {
+                    // Pass the raw dstVersion ('' = base): an empty version makes
+                    // the write helpers omit PlanningArea + VersionID (base mode).
                     const txDel = await getTransactionId(connection, session, {
-                      versionId: dstVersion || BASE_VERSION_ID,
+                      versionId: dstVersion,
                       masterDataTypeId: dstName, planningArea: dstPa, signal,
                     })
                     // TransactionName MUST go here — GetTransactionID ignores it (no params in $metadata).
@@ -787,8 +789,9 @@ export default function Migration({ connection, session }) {
                 let segLoaded = 0       // rows staged in THIS attempt (reset on retry)
                 let myTx = null
                 try {
+                  // Raw dstVersion ('' = base) → write helpers omit PA + VersionID.
                   myTx = await getTransactionId(connection, session, {
-                    versionId: dstVersion || BASE_VERSION_ID,
+                    versionId: dstVersion,
                     masterDataTypeId: dstName, planningArea: dstPa, signal,
                   })
                   // TransactionName MUST go here — GetTransactionID ignores it (no params in $metadata).
