@@ -146,7 +146,12 @@ export async function fetchVsmt(conn, session) {
   const data  = await resp.json()
   const rows  = data?.d?.results ?? []
 
-  try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: rows })) } catch {}
+  // Only cache a NON-EMPTY result. An empty array (e.g. a transient glitch or a
+  // read before the com0720 session was ready) must NOT poison the cache for 24 h
+  // and leave the planning-area dropdown permanently empty with no way to recover.
+  if (rows.length > 0) {
+    try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: rows })) } catch {}
+  }
   return rows
 }
 
@@ -181,7 +186,11 @@ export async function fetchImportableMdts(conn, session) {
     .filter(s => s.endsWith('Trans'))
     .map(s => s.slice(0, -'Trans'.length))
 
-  try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: importable })) } catch { /* ignore quota errors */ }
+  // Only cache a NON-EMPTY result — an empty list (transient failure) must not be
+  // remembered for 24 h, or every importable MDT would be filtered out of the UI.
+  if (importable.length > 0) {
+    try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: importable })) } catch { /* ignore quota errors */ }
+  }
   return new Set(importable)
 }
 

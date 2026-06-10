@@ -5,6 +5,7 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import {
   fetchVsmt, buildCatalog, fetchImportableMdts,
+  invalidateVsmtCache, invalidateImportableCache,
   fetchCount, readEntityPage, readKeyRows, fetchFieldNames, fetchKeyNames, fetchCsrf,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
@@ -196,6 +197,10 @@ export default function Migration({ connection, session }) {
 
   // Refresh trigger — increment to force allConns/connById to re-read localStorage
   const [connsTick, setConnsTick] = useState(0)
+  // Catalog refresh trigger — increment to force the VSMT/importable catalogs to
+  // re-fetch from SAP (after invalidating their caches). Decoupled from connsTick
+  // so "↺ Actualizar" can also recover from a stale/empty catalog cache.
+  const [catalogTick, setCatalogTick] = useState(0)
 
   // Source candidates: OTHER connections with SAP_COM_0720, plus THIS connection
   // itself (listed first) — to migrate between areas/versions of the same system.
@@ -318,7 +323,7 @@ export default function Migration({ connection, session }) {
       .catch(e   => { if (alive) setCatalogError(t('mig.catalogError', { msg: e.message })) })
       .finally(  () => { if (alive) setDstLoading(false) })
     return () => { alive = false }
-  }, [connection.id, session?.com0720?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load importable-MDT set for the destination (best-effort) ──
   // Reference/virtual MDTs (no <MDT>Trans) are excluded from the selection list.
@@ -330,7 +335,7 @@ export default function Migration({ connection, session }) {
       .then(set => { if (alive) setImportableSet(set) })
       .catch(()  => { if (alive) setImportableSet(null) })
     return () => { alive = false }
-  }, [connection.id, session?.com0720?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Leave guard: warn before navigating away while a migration is running ──
   // Tells the navigation guard (consulted by SystemView/App) that leaving will
@@ -368,7 +373,7 @@ export default function Migration({ connection, session }) {
       .catch(e   => { if (alive) setCatalogError(t('mig.catalogError', { msg: e.message })) })
       .finally(  () => { if (alive) setSrcLoading(false) })
     return () => { alive = false }
-  }, [srcConnId, srcTempCreds?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [srcConnId, srcTempCreds?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset selectors when catalogs change
   useEffect(() => { setSrcPa(''); setSrcVersion(''); setMdtOrder([]); setMdtMapping({}) }, [srcCatalog])
@@ -1029,7 +1034,17 @@ export default function Migration({ connection, session }) {
               <label style={{ ...LABEL, marginBottom: 0 }}>{t('mig.srcLabel')}</label>
               <button
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text3)', padding: '0 2px' }}
-                onClick={() => setConnsTick(n => n + 1)}
+                onClick={() => {
+                  // Refresh BOTH the connection list AND the catalogs: invalidate the
+                  // cached VSMT/importable sets (for destination + source) so a stale or
+                  // empty cache can't leave the area dropdown permanently empty, then
+                  // bump catalogTick to force a fresh fetch from SAP.
+                  invalidateVsmtCache(connection.id)
+                  invalidateImportableCache(connection.id)
+                  if (srcConn) { invalidateVsmtCache(srcConn.id); invalidateImportableCache(srcConn.id) }
+                  setConnsTick(n => n + 1)
+                  setCatalogTick(n => n + 1)
+                }}
                 title={t('mig.refreshConns')}
               >
                 {t('mig.refreshConns')}
