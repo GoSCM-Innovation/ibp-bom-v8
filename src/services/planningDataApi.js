@@ -200,11 +200,17 @@ export async function fetchKfAreas(conn, session, { force = false, signal } = {}
   if (!force) {
     try {
       const cached = JSON.parse(localStorage.getItem(ck))
-      if (cached && Date.now() - cached.ts < CATALOG_TTL) return cached.data
+      // Ignore an EMPTY cached list: a transient empty (discovery before the
+      // com0720 session was ready, or a hiccup) must not pin the area dropdown to
+      // "no areas" for 24 h with no way out. Mirrors the master-data fetchVsmt fix.
+      if (cached && cached.data?.length > 0 && Date.now() - cached.ts < CATALOG_TTL) return cached.data
     } catch { /* ignore */ }
   }
   const areas = await discoverPlanningArea(conn, session, { signal })
-  try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: areas })) } catch { /* quota */ }
+  // Only cache a NON-EMPTY result, for the same reason.
+  if (areas.length > 0) {
+    try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), data: areas })) } catch { /* quota */ }
+  }
   return areas
 }
 

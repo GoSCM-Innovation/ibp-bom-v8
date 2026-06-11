@@ -4,7 +4,7 @@ import { getAll } from '../../services/connectionStorage'
 import { getSession, setSession } from '../../services/sessionStorage'
 import { setMigrationGuard } from '../../services/migrationGuard'
 import {
-  fetchKfCatalog, fetchKfAreas, planningServiceRoot, fetchConversionValues,
+  fetchKfCatalog, fetchKfAreas, invalidateKfCatalog, planningServiceRoot, fetchConversionValues,
   countKf, readKfPage, detectConversions, fetchTimeBuckets,
   fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
   commitTransaction, waitForProcessed, readMessages,
@@ -113,6 +113,18 @@ export default function KeyFigureMigration({ connection, session }) {
   const [dstLoading, setDstLoading] = useState(false)
   const [srcLoading, setSrcLoading] = useState(false)
   const [catError, setCatError] = useState('')
+  // Catalog refresh trigger — bump to force areas/catalog (source + destination)
+  // to re-discover from SAP after invalidating their caches ("↺ Actualizar").
+  const [catalogTick, setCatalogTick] = useState(0)
+
+  // Invalidate the cached KF areas/catalog (destination + source) and force a
+  // fresh discovery — recovers from a stale or empty catalog cache without waiting
+  // out the 24 h TTL. Mirrors the master-data "Actualizar" button.
+  function refreshCatalogs() {
+    invalidateKfCatalog(connection.id)
+    if (srcConn) invalidateKfCatalog(srcConn.id)
+    setCatalogTick(n => n + 1)
+  }
 
   // ── Selections ──
   const [dstVersion, setDstVersion] = useState('')   // '' = base
@@ -170,7 +182,7 @@ export default function KeyFigureMigration({ connection, session }) {
       .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
       .finally(() => { if (alive) setDstLoading(false) })
     return () => { alive = false }
-  }, [connection.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection.id, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load destination catalog for the selected area ──
   useEffect(() => {
@@ -182,7 +194,7 @@ export default function KeyFigureMigration({ connection, session }) {
       .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
       .finally(() => { if (alive) setDstLoading(false) })
     return () => { alive = false }
-  }, [connection.id, dstPa]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection.id, dstPa, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Discover source planning areas when source session is available ──
   useEffect(() => {
@@ -195,7 +207,7 @@ export default function KeyFigureMigration({ connection, session }) {
       .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
       .finally(() => { if (alive) setSrcLoading(false) })
     return () => { alive = false }
-  }, [srcConnId, srcTempCreds?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [srcConnId, srcTempCreds?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load source catalog for the selected area ──
   useEffect(() => {
@@ -207,7 +219,7 @@ export default function KeyFigureMigration({ connection, session }) {
       .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
       .finally(() => { if (alive) setSrcLoading(false) })
     return () => { alive = false }
-  }, [srcConnId, srcPa, srcTempCreds?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [srcConnId, srcPa, srcTempCreds?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Leave guard while running ──
   useEffect(() => { setMigrationGuard(running, t('mig.leaveWarning')); return () => setMigrationGuard(false) }, [running, t])
@@ -721,7 +733,18 @@ export default function KeyFigureMigration({ connection, session }) {
 
       {/* ── Source / destination ── */}
       <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
-        <div style={SECTION_HDR}>{t('kfm.sectionConn')}</div>
+        <div style={{ ...SECTION_HDR, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>{t('kfm.sectionConn')}</span>
+          <button
+            type="button"
+            onClick={refreshCatalogs}
+            disabled={dstLoading || srcLoading}
+            title={t('mig.refreshConns')}
+            style={{ background: 'none', border: 'none', cursor: (dstLoading || srcLoading) ? 'default' : 'pointer', fontSize: 10, color: 'var(--text3)', padding: '0 2px', textTransform: 'none', letterSpacing: 0, fontWeight: 600 }}
+          >
+            {t('mig.refreshConns')}
+          </button>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
           {/* Source */}
           <div>
