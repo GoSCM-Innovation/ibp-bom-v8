@@ -196,6 +196,19 @@ export default function KeyFigureMigration({ connection, session }) {
     return () => { alive = false }
   }, [connection.id, dstPa, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Keep the selected time level VALID for the destination area ──
+  // The default (PERIODID4_TSTAMP / week) does not exist in every area's time
+  // profile — e.g. a daily area like CTCNDIA exposes only PERIODID0. When the
+  // current timeField isn't among the area's available levels, the <select> shows
+  // the first option while the state stays on the (invalid) default: the dropdown
+  // desyncs from the level summary AND the migration would read a non-existent
+  // field. Snap timeField to the first available level whenever it falls out.
+  useEffect(() => {
+    const available = TIME_LEVELS.filter(tl => (dstCat?.dims || []).includes(tl.field))
+    if (available.length === 0) return
+    if (!available.some(tl => tl.field === timeField)) setTimeField(available[0].field)
+  }, [dstCat]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Discover source planning areas when source session is available ──
   useEffect(() => {
     if (!srcConn || !srcSession) { setSrcAreas([]); setSrcPa(''); setSrcCat(null); return }
