@@ -542,6 +542,11 @@ export default function KeyFigureMigration({ connection, session }) {
           // segment read comes up short (no rows beyond it); workers that already
           // grabbed a past-the-end window just read empty (harmless, duplicate-safe).
           const buckets = segFilters.map(f => ({ filter: f, skip: 0, done: false }))
+          // Refine the segment-count denominator now that time-bucket partitioning is
+          // known. Each non-empty bucket commits ≥1 segment, so the real total is at
+          // least the bucket count (the initial ceil(totalRows/SEGMENT_SIZE) ignores
+          // partitioning → a time-partitioned KF otherwise showed e.g. "117/9").
+          setProgress(p => ({ ...p, totalSegs: Math.max(totalRows > 0 ? Math.ceil(totalRows / SEGMENT_SIZE) : 0, buckets.length) }))
           const nextWork = () => {
             for (const b of buckets) {
               if (!b.done) { const segStart = b.skip; b.skip += SEGMENT_SIZE; return { b, segStart } }
