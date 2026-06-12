@@ -256,6 +256,8 @@
   "global.statusWarning": "Warning",
   "global.statusHealthy": "Healthy",
   "global.statusError": "Error",
+  "global.statusNoAgreement": "No agreement",
+  "global.noAgreementTitle": "This connection has no SAP_COM_0326 (Application Jobs) communication agreement configured. Click to configure it.",
   "global.login": "🔒 Sign in",
   "global.loading": "Loading…",
   "global.chartGlobalStatus": "Global distribution by status",

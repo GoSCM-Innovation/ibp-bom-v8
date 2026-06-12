@@ -87,7 +87,7 @@ export default function App() {
       return <Connections connections={connections} onSaved={refreshConnections} onDeleted={handleDeleted} onSelect={handleSelect} onBulkImport={handleBulkImport} />
     }
     if (activeId === 'resumen-general') {
-      return <GlobalResumen connections={connections} sessions={sessions} onLogin={(id) => setLoginTarget(id)} />
+      return <GlobalResumen connections={connections} sessions={sessions} onLogin={(id) => setLoginTarget(id)} onConfigure={() => setActiveId('connections')} />
     }
     if (activeConn) {
       return <SystemView connection={activeConn} session={sessions[activeConn.id]} onLogout={() => handleLogout(activeConn.id)} />
