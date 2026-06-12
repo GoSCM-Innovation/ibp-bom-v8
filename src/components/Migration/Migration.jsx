@@ -2132,7 +2132,7 @@ export default function Migration({ connection, session }) {
               </button>
               <button
                 disabled={runBlocked}
-                style={isProd ? { ...btnPrimary(runBlocked), background: 'var(--red)', color: '#fff' } : btnPrimary(runBlocked)}
+                style={runBlocked ? btnPrimary(true) : (isProd ? { ...btnPrimary(false), background: 'var(--red)', color: '#fff' } : btnPrimary(false))}
                 onClick={runMigration}
               >
                 {t('mig.confirmBtn')}

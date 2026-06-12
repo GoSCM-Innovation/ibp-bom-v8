@@ -748,7 +748,7 @@ export default function KeyFigureMigration({ connection, session }) {
     }
   }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr, extraKfFilter, txName]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'warning' ? t('kfm.stWarning') : s === 'processing' ? t('kfm.stProc') : t('kfm.stCancel')
+  const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'warning' ? t('kfm.stWarning') : s === 'processing' ? t('kfm.stProc') : s === 'skipped' ? t('mig.statusSkipped') : t('kfm.stCancel')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'warning' ? 'var(--yellow, #e6a817)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
   const PHASE = { detect: t('kfm.phDetect'), count: t('kfm.phCount'), reading: t('kfm.phReading'), writing: t('kfm.phWriting'), committing: t('kfm.phCommit'), processing: t('kfm.phProcessing'), retrying: t('kfm.phRetrying') }
   // Concise phase names for the timing breakdown (reuses the master-data keys).
