@@ -566,6 +566,7 @@
   "mig.limitBlockedMsg": "Omitida: {n} registros supera el límite de {max}.",
   "mig.limitRunBlocked": "La corrida suma {n} registros y supera el límite de {max} de la versión web. Redúcela con filtros (fecha/versión) o ejecútala en la versión local.",
   "kfm.limitBlockedMsg": "Omitida: {n} registros supera el límite de {max} de la versión web. Redúcela con filtros o ejecútala en la versión local.",
+  "kfm.errCountRequired": "No se pudo contar el volumen y la versión web exige el conteo para aplicar el límite. Reintenta, acota con filtros o ejecútala en la versión local.",
   "mig.histToggleOpen": "Ver historial ▾",
   "mig.histToggleClose": "Ocultar historial ▴",
   "mig.histEmpty": "Sin migraciones anteriores",

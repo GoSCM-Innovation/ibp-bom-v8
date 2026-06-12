@@ -453,27 +453,37 @@ export default function KeyFigureMigration({ connection, session }) {
           // a tenant rejects the KF-value filter; the client-side empty/0/null skip
           // in projectBatch stays as a safety net either way.
           //
-          // The count is BOUNDED (1 retry, 60 s): if it still fails, the migration
-          // STARTS ANYWAY with an unknown total — progress shows rows + speed
-          // without a percentage instead of blocking on a slow count.
+          // The count is BOUNDED (1 retry, 60 s). If it still fails: in LOCAL the
+          // migration starts anyway with an unknown total (progress shows rows +
+          // speed without a percentage); in the WEB the count is MANDATORY — the
+          // volume cap can't be enforced without it, so the KF errors instead.
           const baseFilter = filter
           const nzClause = '(' + srcKfs.map(kf => `${kf} gt 0 or ${kf} lt 0`).join(' or ') + ')'
           const nzFilter = baseFilter ? `${baseFilter} and ${nzClause}` : nzClause
-          let totalRows = 0   // 0 = unknown (count failed) — the cursor reads until exhausted anyway
+          let totalRows = 0
+          let countKnown = false   // distinguishes "count failed" from a legitimate 0
           const t0count = Date.now()
           try {
             totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: nzFilter, signal, retries: 1, timeout: 60000 })
+            countKnown = true
             filter = nzFilter   // adopt for time buckets + reads + measurement below
           } catch {
             try {
               totalRows = await countKf(srcConn, srcSession, srcPa, { select: srcSelect, filter: baseFilter || undefined, signal, retries: 1, timeout: 60000 })
-            } catch { /* unknown total — proceed anyway */ }
+              countKnown = true
+            } catch { /* unknown total — only acceptable in local */ }
           }
           addPhase('count', Date.now() - t0count)
           setProgress(p => ({ ...p, totalRows, totalSegs: totalRows > 0 ? Math.ceil(totalRows / SEGMENT_SIZE) : 0 }))
 
+          // En la web el conteo es OBLIGATORIO: sin total no se puede aplicar el tope.
+          if (!isLocalRun() && !countKnown) {
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'error', total: 0, ok: 0, errors: 1, errorMsg: t('kfm.errCountRequired'), durationMs: Date.now() - groupStart, phaseTimes: { ...phaseAcc } })
+            done += g.length
+            continue
+          }
+
           // Tope por CORRIDA (acumulado de KF). En local (isLocalRun) no aplica.
-          // totalRows=0 = conteo desconocido → se deja pasar (no se puede acotar).
           if (!isLocalRun() && totalRows > 0 && runRows + totalRows > KF_MAX_HARD) {
             for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'skipped', total: 0, ok: 0, errors: 0, errorMsg: t('kfm.limitBlockedMsg', { max: KF_MAX_HARD.toLocaleString(), n: totalRows.toLocaleString() }), durationMs: Date.now() - groupStart, phaseTimes: { ...phaseAcc } })
             done += g.length
