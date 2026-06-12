@@ -18,8 +18,13 @@ export const JOB_HEADER_SELECT = [
 // fixed-width, is also chronological. $filter / $orderby on this field are already
 // used in production by the orchestration polling (useOrchRun.js), so the mechanism
 // is known to work; only the date-range literal is new.
+// Techo duro de filas por respuesta. El $filter de fecha ya acota el resultado;
+// este $top es un cinturón de seguridad por si un tenant tiene muchísimos jobs en
+// el rango, para que la respuesta nunca crezca sin tope.
+export const JOB_HEADER_TOP = 2000
+
 export function buildJobHeaderPath({ fromTs, toTs, withFilter = true }) {
-  const params = [`$select=${encodeURIComponent(JOB_HEADER_SELECT.join(','))}`]
+  const params = [`$select=${encodeURIComponent(JOB_HEADER_SELECT.join(','))}`, `$top=${JOB_HEADER_TOP}`]
   if (withFilter && fromTs && toTs) {
     const f = `JobPlannedStartDateTime ge '${fromTs}' and JobPlannedStartDateTime le '${toTs}'`
     params.push(`$filter=${encodeURIComponent(f)}`)

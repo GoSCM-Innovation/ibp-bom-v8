@@ -16,6 +16,9 @@ import {
 import { setMigrationGuard } from '../../services/migrationGuard'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
 import { MultiValueSelect, SearchSelect } from './FilterControls'
+import {
+  MASTER_MAX_WARN as MAX_ROWS_WARN, MASTER_MAX_HARD as MAX_ROWS_HARD, isLocalRun,
+} from '../../config/migrationLimits'
 
 // ── History persistence ───────────────────────────────────────────────────────
 
@@ -79,15 +82,13 @@ const MAX_SEGMENT_ATTEMPTS = 5
 // errors: K=4 → 821 rows/s, K=6 → 1505 rows/s (~18 min for 1.6M). 6 hits the target.
 const CONCURRENT_SEGMENTS = 6
 
-// ── Guardabarrera de volumen (por tabla) ──
+// ── Guardabarrera de volumen ──
 // El conteo viene del pre-vuelo ($count en analyzeFields), así que NO hay round-trip extra.
-//   · count > MAX_ROWS_HARD  → tabla BLOQUEADA: se omite, nunca se transfiere.
-//   · MAX_ROWS_WARN..HARD     → la tabla procede, pero se marca en el modal para confirmación.
-//   · count ≤ MAX_ROWS_WARN   → pasa sin fricción.
-// No hay override desde la UI a propósito: para una corrida legítimamente mayor se
-// suben estas constantes en código (fricción deliberada).
-const MAX_ROWS_WARN = 1_000_000
-const MAX_ROWS_HARD = 2_000_000
+//   · suma de la corrida > MAX_ROWS_HARD  → CORRIDA bloqueada (no se transfiere nada).
+//   · tabla individual > MAX_ROWS_HARD     → tabla omitida.
+//   · MAX_ROWS_WARN..HARD                  → procede, marcado en el modal para confirmación.
+// Topes (MAX_ROWS_WARN/HARD) e isLocalRun vienen de config/migrationLimits.js. En LOCAL
+// (localhost) isLocalRun()=true y los topes NO aplican: ahí se migra sin límite.
 
 const MIN_ROOT_LEN = 4
 function rootCandidates(name) {
@@ -606,6 +607,15 @@ export default function Migration({ connection, session }) {
     // Publish results live so completed tables stay visible during the run.
     const pushResult = r => { allResults.push(r); setResults([...allResults]) }
 
+    // Guardabarrera por CORRIDA: suma de filas de todas las tablas seleccionadas.
+    // En local (isLocalRun) no aplica. Bloquea ANTES de transferir nada.
+    const runTotal = mdtList.reduce((s, m) => s + (analysisRef.current?.byMdt?.[m]?.count || 0), 0)
+    if (!isLocalRun() && runTotal > MAX_ROWS_HARD) {
+      setResults([{ mdt: '—', dstName: '—', unverified: false, status: 'skipped', total: 0, ok: 0, errors: 0, txId: null, errorMsg: t('mig.limitRunBlocked', { max: MAX_ROWS_HARD.toLocaleString(), n: runTotal.toLocaleString() }), phaseTimes: {}, durationMs: 0 }])
+      setRunning(false)
+      return
+    }
+
     try {
       for (let di = 0; di < mdtList.length; di++) {
         if (cancelledRef.current) break
@@ -663,7 +673,7 @@ export default function Migration({ connection, session }) {
 
         // Volume guardrail: a table over the hard cap is BLOCKED — never transferred.
         // (Tables in the WARN..HARD band were already surfaced for confirmation in the modal.)
-        if (totalRows > MAX_ROWS_HARD) {
+        if (!isLocalRun() && totalRows > MAX_ROWS_HARD) {
           pushResult({ mdt: srcName, dstName, unverified, status: 'skipped', total: 0, ok: 0, errors: 0, txId: null, errorMsg: t('mig.limitBlockedMsg', { max: MAX_ROWS_HARD.toLocaleString(), n: totalRows.toLocaleString() }), phaseTimes: { ...phaseAcc }, durationMs: Date.now() - tableStart })
           continue
         }
@@ -1991,6 +2001,9 @@ export default function Migration({ connection, session }) {
       {/* ── Pre-migration confirmation modal (field analysis + production warning) ── */}
       {showConfirm && analysis && (() => {
         const isProd = ['Producción', 'Production'].includes(connection.ambiente)
+        // Suma de filas de la corrida → bloquea si supera el tope de la web (no en local).
+        const runTotal   = mdtOrder.reduce((s, m) => s + (analysis.byMdt?.[m]?.count || 0), 0)
+        const runBlocked = !isLocalRun() && runTotal > MAX_ROWS_HARD
         return (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
@@ -2014,6 +2027,17 @@ export default function Migration({ connection, session }) {
                 borderRadius: 6, padding: '7px 10px',
               }}>
                 ⚠ {t('mig.confirmMsg', { name: connection.name })}
+              </div>
+            )}
+
+            {runBlocked && (
+              <div style={{
+                fontSize: 11, color: 'var(--red)', lineHeight: 1.5, marginBottom: 12,
+                background: 'color-mix(in srgb, var(--red) 10%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)',
+                borderRadius: 6, padding: '7px 10px',
+              }}>
+                ⊘ {t('mig.limitRunBlocked', { max: MAX_ROWS_HARD.toLocaleString(), n: runTotal.toLocaleString() })}
               </div>
             )}
 
@@ -2060,8 +2084,8 @@ export default function Migration({ connection, session }) {
                       }}>
                         <div style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--text)', marginBottom: 4 }}>{mdt}</div>
                         {typeof a.count === 'number' && (() => {
-                          const blocked = a.count > MAX_ROWS_HARD
-                          const warned  = !blocked && a.count > MAX_ROWS_WARN
+                          const blocked = !isLocalRun() && a.count > MAX_ROWS_HARD
+                          const warned  = !isLocalRun() && !blocked && a.count > MAX_ROWS_WARN
                           const col = blocked ? 'var(--red)' : warned ? 'var(--yellow, #e6a817)' : 'var(--text3)'
                           return (
                             <div style={{ fontSize: 11, color: col, marginBottom: 4 }}>
@@ -2107,7 +2131,8 @@ export default function Migration({ connection, session }) {
                 {t('mig.confirmCancel')}
               </button>
               <button
-                style={isProd ? { ...btnPrimary(false), background: 'var(--red)', color: '#fff' } : btnPrimary(false)}
+                disabled={runBlocked}
+                style={isProd ? { ...btnPrimary(runBlocked), background: 'var(--red)', color: '#fff' } : btnPrimary(runBlocked)}
                 onClick={runMigration}
               >
                 {t('mig.confirmBtn')}

@@ -14,6 +14,7 @@ import {
 import { fetchAttrDistinctValues } from '../../services/masterDataApi'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
 import { MultiValueSelect, SearchSelect } from './FilterControls'
+import { KF_MAX_HARD, isLocalRun } from '../../config/migrationLimits'
 
 // ── Styles (shared visual language with Migration.jsx) ──────────────────────────
 const SECTION     = { background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }
@@ -406,6 +407,7 @@ export default function KeyFigureMigration({ connection, session }) {
       resolved.forEach((s, i) => { const k = `kf${i}`; groups[k] = [s]; order.push(k) })
 
       let done = 0
+      let runRows = 0   // acumulado de filas de la corrida (para el tope de la web)
       for (const gk of order) {
         if (cancelledRef.current) break
         const g = groups[gk]
@@ -469,6 +471,15 @@ export default function KeyFigureMigration({ connection, session }) {
           }
           addPhase('count', Date.now() - t0count)
           setProgress(p => ({ ...p, totalRows, totalSegs: totalRows > 0 ? Math.ceil(totalRows / SEGMENT_SIZE) : 0 }))
+
+          // Tope por CORRIDA (acumulado de KF). En local (isLocalRun) no aplica.
+          // totalRows=0 = conteo desconocido → se deja pasar (no se puede acotar).
+          if (!isLocalRun() && totalRows > 0 && runRows + totalRows > KF_MAX_HARD) {
+            for (const s of g) push({ kf: s.dstKf, srcKf: s.srcKf, status: 'skipped', total: 0, ok: 0, errors: 0, errorMsg: t('kfm.limitBlockedMsg', { max: KF_MAX_HARD.toLocaleString(), n: totalRows.toLocaleString() }), durationMs: Date.now() - groupStart, phaseTimes: { ...phaseAcc } })
+            done += g.length
+            continue
+          }
+          runRows += totalRows
 
           // Batch sizes by MEASURED bytes/row (small live sample), not column count
           // — the estimate underestimates value-heavy rows (time series), producing

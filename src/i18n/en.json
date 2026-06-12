@@ -563,6 +563,8 @@
   "mig.limitWarnTag": "exceeds {max}, requires confirmation",
   "mig.limitBlockedTag": "exceeds the {max} limit, will be skipped",
   "mig.limitBlockedMsg": "Skipped: {n} records exceeds the {max} limit.",
+  "mig.limitRunBlocked": "This run totals {n} records, over the web version's {max} limit. Narrow it with filters (date/version) or run it in the local version.",
+  "kfm.limitBlockedMsg": "Skipped: {n} records exceeds the web version's {max} limit. Narrow it with filters or run it in the local version.",
   "mig.histToggleOpen": "View history ▾",
   "mig.histToggleClose": "Hide history ▴",
   "mig.previewTitle": "Preview: {name}",

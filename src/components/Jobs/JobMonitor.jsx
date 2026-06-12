@@ -13,7 +13,7 @@ import {
   getTzMode, setTzMode as saveTzMode, getTzLabel,
 } from '../../utils/dateUtils'
 
-const REFRESH_MS = 30000
+const REFRESH_MS = 60000
 const DEFAULT_HOURS = 24
 
 const mk = (hex) => ({ color: hex, bg: `${hex}26`, border: `${hex}4d` })

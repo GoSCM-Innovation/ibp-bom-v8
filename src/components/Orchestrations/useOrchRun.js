@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { proxyCall } from '../../services/proxyCall'
 import { saveRunState, loadRunState, clearRunState } from './useOrchStorage'
 
-const POLL_MS = 5000
+const POLL_MS = 10000
 
 const SAP_SUCCESS  = new Set(['F'])
 const SAP_WARNING  = new Set(['W'])
