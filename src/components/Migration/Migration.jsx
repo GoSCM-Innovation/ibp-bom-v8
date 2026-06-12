@@ -275,7 +275,10 @@ export default function Migration({ connection, session }) {
   const [filterTest, setFilterTest]     = useState({})     // { [srcMdt]: { loading?, n?, total?, error? } }
 
   // ── Options ──
-  const [deleteEntries, setDeleteEntries] = useState(true)
+  // Off by default: the delete pass re-reads ALL destination keys and re-POSTs
+  // them as deletions before loading, which doubles the migration's data transfer.
+  // Opt in explicitly when a full replace is actually needed.
+  const [deleteEntries, setDeleteEntries] = useState(false)
   const [txNameLoad, setTxNameLoad] = useState('IBP-ControlTower-MD')   // SAP transaction label for the load
   const [txNameDel, setTxNameDel]   = useState('IBP-ControlTower-DEL')  // SAP transaction label for the delete pass
 
