@@ -28,7 +28,7 @@ const STATUS_COLORS = {
 
 const CONN_COLORS = ['#3b82f6', '#34d399', '#f97316', '#8b5cf6', '#06b6d4', '#ff6b6b', '#fbbf24', '#a78bfa']
 
-export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
+export default function GlobalResumen({ connections, sessions = {}, onLogin, onConfigure }) {
   const { t } = useI18n()
 
   const STATUS_LABELS = {
@@ -62,6 +62,13 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
     const results = {}
     await Promise.all(connections.map(async (conn) => {
+      // SAP_COM_0326 (Application Jobs) not configured: the proxy call could only
+      // ever fail (empty serviceRoot), so skip it and surface a distinct state
+      // instead of a generic "Error" — and save the wasted proxy round-trip.
+      if (!conn.com0326?.url) {
+        results[conn.id] = { rows: [], error: '', loading: false, noAgreement: true }
+        return
+      }
       const session = sessions[conn.id]
       if (!session) {
         results[conn.id] = { rows: [], error: '', loading: false, noSession: true }
@@ -110,6 +117,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
 
   const connSummaries = connections.map((conn, idx) => {
     const d = connData[conn.id]
+    if (!conn.com0326?.url) return { conn, idx, loading: false, total: 0, finished: 0, failed: 0, running: 0, scheduled: 0, successRate: 0, error: '', noAgreement: true }
     const hasSession = !!sessions[conn.id]
     if (!hasSession) return { conn, idx, loading: false, total: 0, finished: 0, failed: 0, running: 0, scheduled: 0, successRate: 0, error: '', noSession: true }
     if (!d || d.loading) return { conn, idx, loading: true, total: 0, finished: 0, failed: 0, running: 0, scheduled: 0, successRate: 0, error: '' }
@@ -146,7 +154,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
     .sort((a, b) => b.value - a.value)
 
   const connBarData = connSummaries
-    .filter(c => !c.error)
+    .filter(c => !c.error && !c.noAgreement)
     .map(c => ({
       name: (() => { const n = connDisplayName(c.conn, t); return n.length > 20 ? n.slice(0, 18) + '…' : n })(),
       finished: c.finished + (c.warned || 0),
@@ -309,7 +317,13 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                     <TruncText text={connDisplayName(cs.conn, t)} style={{ fontWeight: 600, color: 'var(--text)' }} />
                   </td>
                   <td style={tdStyle}>
-                    {cs.noSession ? (
+                    {cs.noAgreement ? (
+                      <button onClick={() => onConfigure?.(cs.conn.id)} title={t('global.noAgreementTitle')} style={{
+                        ...statusBadge, cursor: 'pointer',
+                        background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)',
+                        border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+                      }}>⚙ {t('global.statusNoAgreement')}</button>
+                    ) : cs.noSession ? (
                       <button onClick={() => onLogin?.(cs.conn.id)} style={{
                         fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, cursor: 'pointer',
                         background: 'var(--surface-glass)', color: 'var(--text3)',
@@ -373,7 +387,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
         <div style={cardStyle}>
           <div style={cardTitle}>{t('global.connHealthCard')}</div>
           {connSummaries.map((cs, i) => {
-            const color = cs.error ? 'var(--red)' : cs.failed > 0 ? '#fbbf24' : 'var(--green)'
+            const color = cs.noAgreement ? 'var(--text3)' : cs.error ? 'var(--red)' : cs.failed > 0 ? '#fbbf24' : 'var(--green)'
             const pct = gTotal > 0 ? (cs.total / gTotal) * 100 : 0
             return (
               <div key={cs.conn.id} style={{ marginBottom: 10 }}>
@@ -385,7 +399,7 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{connDisplayName(cs.conn, t)}</span>
                   </div>
                   <span style={{ fontSize: 11, fontWeight: 700, color, flexShrink: 0, marginLeft: 8 }}>
-                    {cs.error ? t('global.statusError') : `${cs.successRate}%`}
+                    {cs.noAgreement ? t('global.statusNoAgreement') : cs.error ? t('global.statusError') : `${cs.successRate}%`}
                   </span>
                 </div>
                 <div style={{ height: 3, background: 'var(--border)', borderRadius: 2 }}>
