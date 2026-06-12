@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import ProgressBar from '../ui/ProgressBar'
 import { proxyCall } from '../../services/proxyCall'
+import { loadJobHeaders } from '../../services/jobHeaders'
+import { useVisibleInterval } from '../../hooks/useVisibleInterval'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
@@ -34,7 +36,6 @@ export default function Resumen({ connection, session }) {
   const [error, setError]         = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
   const [tzMode, setTzModeState]      = useState(() => getTzMode())
-  const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
   const addLogRef = useRef(addLog)
   addLogRef.current = addLog
@@ -68,23 +69,32 @@ export default function Resumen({ connection, session }) {
 
   const loadData = useCallback(async () => {
     setLoading(true); setError('')
+    const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
+    const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
     try {
-      const data = await proxyPost('/JobHeaderSet')
-      if (data.error) throw new Error(data.error)
-      setRows(data?.d?.results ?? data?.value ?? [])
+      const r = await loadJobHeaders({ connection, session, fromTs, toTs })
+      addLogRef.current({
+        method: 'GET', path: r.path, status: r.status, duration: r.duration,
+        detail: r.error || `OK · ${r.rows.length} ${r.filtered ? 'filtrado' : 'sin filtro'}`,
+      })
+      if (r.error) throw new Error(r.error)
+      setRows(r.rows)
       setLastRefresh(new Date())
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [proxyPost])
+  }, [connection, session, fromDate, toDate, tzMode])
 
+  // Initial load + reload on date-range change (debounced); periodic refresh
+  // pauses while the tab is hidden.
   useEffect(() => {
-    loadData()
-    timerRef.current = setInterval(loadData, REFRESH_MS)
-    return () => clearInterval(timerRef.current)
+    const id = setTimeout(loadData, 400)
+    return () => clearTimeout(id)
   }, [loadData])
+
+  useVisibleInterval(loadData, REFRESH_MS)
 
   function statusLabel(code) {
     return statuses.find(s => s.JobStatus === code)?.JobStatusText || code

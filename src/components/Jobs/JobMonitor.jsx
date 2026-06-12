@@ -6,6 +6,8 @@ import ProgressBar from '../ui/ProgressBar'
 import StepsPanel from './StepsPanel'
 import TruncText from '../ui/TruncText'
 import { proxyCall } from '../../services/proxyCall'
+import { loadJobHeaders } from '../../services/jobHeaders'
+import { useVisibleInterval } from '../../hooks/useVisibleInterval'
 import {
   toSapTs, formatSapTs, toInputDate, inputDateToDate,
   getTzMode, setTzMode as saveTzMode, getTzLabel,
@@ -67,7 +69,6 @@ export default function JobMonitor({ connection, session }) {
   const [stepsJob, setStepsJob]         = useState(null)
   const [tzMode, setTzModeState]        = useState(() => getTzMode())
   const resizing = useRef(null)
-  const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
   const addLogRef = useRef(addLog)
   addLogRef.current = addLog
@@ -114,26 +115,37 @@ export default function JobMonitor({ connection, session }) {
     }).catch(() => {})
   }, [proxyPost])
 
-  // Load job headers
+  // Load job headers — server-side $select + date $filter (only the visible range
+  // is fetched, instead of the whole JobHeaderSet).
   const loadJobs = useCallback(async () => {
     setLoading(true); setError('')
+    const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
+    const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
     try {
-      const data = await proxyPost('/JobHeaderSet')
-      if (data.error) throw new Error(data.error + (data.detail ? ': ' + data.detail : ''))
-      setRows(data?.d?.results ?? data?.value ?? [])
+      const r = await loadJobHeaders({ connection, session, fromTs, toTs })
+      addLogRef.current({
+        method: 'GET', path: r.path, status: r.status, duration: r.duration,
+        detail: r.error || `OK · ${r.rows.length} ${r.filtered ? 'filtrado' : 'sin filtro'}`,
+      })
+      if (r.error) throw new Error(r.error)
+      setRows(r.rows)
       setLastRefresh(new Date())
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [proxyPost])
+  }, [connection, session, fromDate, toDate, tzMode])
 
+  // Initial load + reload when the date range changes (debounced so editing the
+  // datetime inputs doesn't fire a burst of requests).
   useEffect(() => {
-    loadJobs()
-    timerRef.current = setInterval(loadJobs, REFRESH_MS)
-    return () => clearInterval(timerRef.current)
+    const id = setTimeout(loadJobs, 400)
+    return () => clearTimeout(id)
   }, [loadJobs])
+
+  // Periodic refresh — paused while the browser tab is hidden.
+  useVisibleInterval(loadJobs, REFRESH_MS)
 
   // Cancel job
   async function handleCancel() {

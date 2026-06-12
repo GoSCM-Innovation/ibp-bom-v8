@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import ProgressBar from '../ui/ProgressBar'
 import TruncText from '../ui/TruncText'
-import { proxyCall } from '../../services/proxyCall'
+import { loadJobHeaders } from '../../services/jobHeaders'
+import { useVisibleInterval } from '../../hooks/useVisibleInterval'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
@@ -40,7 +41,6 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
   const [connData, setConnData] = useState({})
   const [lastRefresh, setLastRefresh] = useState(null)
   const [tzMode, setTzModeState]      = useState(() => getTzMode())
-  const timerRef = useRef(null)
   const [logs, addLog] = useTechLogs()
   const addLogRef = useRef(addLog)
   addLogRef.current = addLog
@@ -58,6 +58,8 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
   }
 
   const loadAll = useCallback(async () => {
+    const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
+    const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
     const results = {}
     await Promise.all(connections.map(async (conn) => {
       const session = sessions[conn.id]
@@ -66,33 +68,31 @@ export default function GlobalResumen({ connections, sessions = {}, onLogin }) {
         return
       }
       results[conn.id] = { rows: [], error: '', loading: true }
-      const start = performance.now()
       try {
-        const res = await proxyCall({ connection: conn, session, path: '/JobHeaderSet' })
-        const data = await res.json()
-        const duration = Math.round(performance.now() - start)
-        addLogRef.current({ method: 'GET', path: `/JobHeaderSet (${conn.name})`, status: res.status, duration, detail: data.error || `${(data?.d?.results ?? data?.value ?? []).length} rows` })
-        if (data.error) {
-          results[conn.id] = { rows: [], error: data.error, loading: false }
-        } else {
-          results[conn.id] = { rows: data?.d?.results ?? data?.value ?? [], error: '', loading: false }
-        }
+        const r = await loadJobHeaders({ connection: conn, session, fromTs, toTs })
+        addLogRef.current({
+          method: 'GET', path: `${r.path} (${conn.name})`, status: r.status, duration: r.duration,
+          detail: r.error || `${r.rows.length} rows ${r.filtered ? '· filtrado' : '· sin filtro'}`,
+        })
+        results[conn.id] = { rows: r.rows, error: r.error, loading: false }
       } catch (e) {
-        const duration = Math.round(performance.now() - start)
-        addLogRef.current({ method: 'GET', path: `/JobHeaderSet (${conn.name})`, status: 0, duration, detail: e.message })
+        addLogRef.current({ method: 'GET', path: `/JobHeaderSet (${conn.name})`, status: 0, duration: 0, detail: e.message })
         results[conn.id] = { rows: [], error: e.message, loading: false }
       }
     }))
     setConnData(results)
     setLastRefresh(new Date())
-  }, [connections, sessions])
+  }, [connections, sessions, fromDate, toDate, tzMode])
 
+  // Initial load + reload on date-range change (debounced); periodic refresh
+  // pauses while the tab is hidden, and is disabled when there are no connections.
   useEffect(() => {
     if (connections.length === 0) return
-    loadAll()
-    timerRef.current = setInterval(loadAll, REFRESH_MS)
-    return () => clearInterval(timerRef.current)
+    const id = setTimeout(loadAll, 400)
+    return () => clearTimeout(id)
   }, [loadAll, connections.length])
+
+  useVisibleInterval(loadAll, connections.length ? REFRESH_MS : null)
 
   const fromTs = toSapTs(inputDateToDate(fromDate, tzMode))
   const toTs   = toSapTs(inputDateToDate(toDate, tzMode))
