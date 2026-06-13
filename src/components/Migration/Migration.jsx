@@ -1038,6 +1038,18 @@ export default function Migration({ connection, session }) {
         {t('mig.title')}
       </div>
 
+      {/* Aviso de tope de volumen: solo en la web; en local (sin tope) no se muestra. */}
+      {!isLocalRun() && (
+        <div style={{
+          fontSize: 11, color: 'var(--text2)', lineHeight: 1.5, marginBottom: 20,
+          background: 'color-mix(in srgb, var(--accent) 7%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+          borderRadius: 8, padding: '9px 12px',
+        }}>
+          ℹ️ {t('mig.webLimitBanner', { max: MAX_ROWS_HARD.toLocaleString() })}
+        </div>
+      )}
+
       {/* ── Config section ── */}
       <div style={SECTION}>
         <div style={SECTION_HDR}>{t('mig.sectionConfig')}</div>

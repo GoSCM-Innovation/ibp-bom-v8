@@ -770,6 +770,18 @@ export default function KeyFigureMigration({ connection, session }) {
       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>{t('kfm.title')}</div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 20 }}>{t('kfm.subtitle')}</div>
 
+      {/* Aviso de tope de volumen: solo en la web; en local (sin tope) no se muestra. */}
+      {!isLocalRun() && (
+        <div style={{
+          fontSize: 11, color: 'var(--text2)', lineHeight: 1.5, marginBottom: 20,
+          background: 'color-mix(in srgb, var(--accent) 7%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+          borderRadius: 8, padding: '9px 12px',
+        }}>
+          ℹ️ {t('mig.webLimitBanner', { max: KF_MAX_HARD.toLocaleString() })}
+        </div>
+      )}
+
       {/* ── Source / destination ── */}
       <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
         <div style={{ ...SECTION_HDR, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
