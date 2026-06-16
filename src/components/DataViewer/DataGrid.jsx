@@ -12,7 +12,7 @@
 // "Mostrar datos" via the filter panel. A persistent note makes this explicit.
 // Editing/selection arrive in later phases.
 // ─────────────────────────────────────────────────────────────────────────────
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { formatCell } from '../../services/catalogHelpers'
 
@@ -58,6 +58,17 @@ export default function DataGrid({
   const keySet = new Set(keyNames)
   const [gotoVal, setGotoVal] = useState('')
   const [colFilters, setColFilters] = useState({})   // { [col]: text } — prefix match, current page only
+  const [fullscreen, setFullscreen] = useState(false)
+
+  // Esc exits fullscreen; lock body scroll while the overlay is open.
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKey = e => { if (e.key === 'Escape') setFullscreen(false) }
+    window.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow }
+  }, [fullscreen])
 
   const sortIndicator = c => (!sort || sort.field !== c) ? '' : (sort.dir === 'desc' ? ' ▼' : ' ▲')
 
@@ -69,8 +80,17 @@ export default function DataGrid({
     active.every(([c, v]) => cellText(r[c]).toLowerCase().startsWith(v.trim().toLowerCase()))
   )
 
+  const rootStyle = fullscreen
+    ? { display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--bg)', padding: 16 }
+    : { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }
+
+  const fsBtnStyle = {
+    background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
+    color: 'var(--text2)', fontSize: 11, fontWeight: 600, padding: '4px 10px', cursor: 'pointer',
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div style={rootStyle}>
       {/* Explicit scope note */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 2px 6px', flexShrink: 0, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: 'var(--text3)' }}>ⓘ {t('viewer.colFilterNote')}</span>
@@ -79,6 +99,14 @@ export default function DataGrid({
             {t('viewer.showingOf', { n: visibleRows.length.toLocaleString(), total: rows.length.toLocaleString() })}
           </span>
         )}
+        <span style={{ flex: 1 }} />
+        <button
+          style={fsBtnStyle}
+          onClick={() => setFullscreen(v => !v)}
+          title={fullscreen ? t('viewer.exitFullscreenTitle') : t('viewer.fullscreenTitle')}
+        >
+          {fullscreen ? t('viewer.exitFullscreen') : t('viewer.fullscreen')}
+        </button>
       </div>
 
       <div style={{
