@@ -8,6 +8,8 @@ import ResourceStats from '../ResourceStats/ResourceStats'
 import Metering from '../Metering/Metering'
 import Orchestrations from '../Orchestrations/Orchestrations'
 import MigrationTabs from '../Migration/MigrationTabs'
+import MasterDataViewer from '../DataViewer/MasterDataViewer'
+import TransactionalDataViewer from '../DataViewer/TransactionalDataViewer'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getConnectionSapUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
@@ -35,7 +37,9 @@ export default function SystemView({ connection, session, onLogout }) {
       { id: 'metering', label: t('system.tabMetering') },
     ] : []),
     ...(has0720 ? [
-      { id: 'migration', label: t('system.tabMigration') },
+      { id: 'migration',  label: t('system.tabMigration') },
+      { id: 'viewMaster', label: t('system.tabViewMaster') },
+      { id: 'viewTrans',  label: t('system.tabViewTrans') },
     ] : []),
   ]
 
@@ -123,6 +127,8 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
         {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
         {activeApp === 'migration'    && <MigrationTabs  connection={connection} session={session} />}
+        {activeApp === 'viewMaster'   && <MasterDataViewer connection={connection} session={session} />}
+        {activeApp === 'viewTrans'    && <TransactionalDataViewer connection={connection} session={session} />}
       </div>
     </div>
   )

@@ -15,6 +15,7 @@ import {
 } from '../../services/masterDataApi'
 import { setMigrationGuard } from '../../services/migrationGuard'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
+import { getPas, getVersions, getMdts, formatCell } from '../../services/catalogHelpers'
 import { MultiValueSelect, SearchSelect } from './FilterControls'
 import {
   MASTER_MAX_WARN as MAX_ROWS_WARN, MASTER_MAX_HARD as MAX_ROWS_HARD, isLocalRun,
@@ -32,32 +33,8 @@ function saveHistory(connId, entries) {
 }
 
 // ── Catalog helpers ───────────────────────────────────────────────────────────
-
-function getPas(catalog) {
-  if (!catalog) return []
-  return Object.entries(catalog)
-    .map(([id, { desc }]) => ({ id, desc }))
-    .sort((a, b) => a.id.localeCompare(b.id))
-}
-
-function getVersions(catalog, pa) {
-  if (!catalog || !pa) return []
-  return catalog[pa]?.versions || []
-}
-
-// When version is '' → __BASE: return union of all MDTs for that PA
-function getMdts(catalog, pa, version) {
-  if (!catalog || !pa) return []
-  const paEntry = catalog[pa]
-  if (!paEntry) return []
-  if (!version) {
-    const all = new Set()
-    paEntry.versions.forEach(v => v.mdts.forEach(m => all.add(m)))
-    return [...all].sort()
-  }
-  const vEntry = paEntry.versions.find(v => v.id === version)
-  return vEntry ? [...vEntry.mdts].sort() : []
-}
+// getPas / getVersions / getMdts moved to services/catalogHelpers.js (shared with
+// the Data Viewer) — imported above.
 
 // ── Table pairing (root match) ──────────────────────────────────────────────
 // Tables can be named differently across systems (e.g. AS1PRODUCT vs AS4PRODUCT).
@@ -166,13 +143,7 @@ function errText(e) {
   return String(e)
 }
 
-// Converts OData v2 date strings like /Date(1764247462000+0000)/ to locale format.
-function formatCell(val) {
-  if (typeof val !== 'string') return val ?? ''
-  const m = val.match(/^\/Date\((\d+)([+-]\d{4})?\)\/$/)
-  if (m) return new Date(parseInt(m[1], 10)).toLocaleString()
-  return val
-}
+// formatCell moved to services/catalogHelpers.js (shared with the Data Viewer).
 
 // Formats a millisecond duration compactly: "1h 02m", "2m 14s", "4,2 s", "850 ms".
 function fmtDuration(ms) {
