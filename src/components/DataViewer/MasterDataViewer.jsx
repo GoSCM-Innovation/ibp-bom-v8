@@ -15,6 +15,9 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   fetchVsmt, buildCatalog, invalidateVsmtCache,
   fetchCount, readEntityPage, fetchFieldNames, fetchKeyNames, fetchDistinctValues,
+  fetchCsrf, getTransactionId, initiateParallelProcess, postTransChunk,
+  commitTransaction, waitForProcessed, readMessages,
+  chunkByBytes, MAX_POST_BYTES, READONLY_FIELDS,
 } from '../../services/masterDataApi'
 import { getPas, getVersions, getMdts } from '../../services/catalogHelpers'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
@@ -22,6 +25,7 @@ import { SearchSelect, MultiValueSelect } from '../Migration/FilterControls'
 import ColumnPicker from './ColumnPicker'
 import CollapsibleSection from './CollapsibleSection'
 import DataGrid from './DataGrid'
+import EditReviewModal from './EditReviewModal'
 
 // ── localStorage keys ──
 const COLS_KEY     = (connId, mdt) => `ibp:viewer:cols:master:${connId}:${mdt}`
@@ -106,6 +110,13 @@ export default function MasterDataViewer({ connection, session }) {
   const [gridLoading, setGridLoading] = useState(false)
   const [gridError, setGridError]     = useState('')
 
+  // ── Editing (Phase 2) ──
+  const [editMode, setEditMode]       = useState(false)
+  const [edits, setEdits]             = useState({})    // { [rowKey]: { row, changes } } — persists across pages
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [saveResult, setSaveResult]   = useState(null)  // { status, count?, errors?, message? }
+
   const abortRef = useRef(null)
 
   // ── Load catalog on mount / session change ──
@@ -146,6 +157,8 @@ export default function MasterDataViewer({ connection, session }) {
     setQuery(null); setRows([]); setGridError('')
     setConds([]); setFilterTest(null)
     setSchema(null); setSchemaError('')
+    // Drop any unsaved edits and leave edit mode — they belonged to the old table.
+    setEdits({}); setEditMode(false); setSaveResult(null)
     // Back to configuring → open both panels so the selection/columns are visible.
     setSelCollapsed(false); setDataCollapsed(false)
     if (!mdt) return
@@ -207,6 +220,34 @@ export default function MasterDataViewer({ connection, session }) {
 
   const extraFilter = useMemo(() => buildConditionFilter(conds) || undefined, [conds])
 
+  // ── Editing helpers ──
+  // Editable = everything except the business keys and the server-managed
+  // read-only fields (PlanningAreaID, VersionID, CREATEDDATE, LASTMODIFIEDDATE).
+  const editableCols = useMemo(() => {
+    if (!schema) return []
+    const keySet = new Set(schema.keyNames)
+    return schema.allColumns.filter(c => !keySet.has(c) && !READONLY_FIELDS.has(c))
+  }, [schema])
+
+  // Record a cell edit. `row` is the ORIGINAL row snapshot (used to detect reverts
+  // and to carry the keys + untouched fields when building the upsert payload).
+  const onCellEdit = useCallback((rk, field, value, row) => {
+    setEdits(prev => {
+      const orig    = row[field]
+      const cur     = prev[rk] || { row, changes: {} }
+      const changes = { ...cur.changes }
+      if (String(value) === String(orig ?? '')) delete changes[field]   // reverted → no longer dirty
+      else changes[field] = value
+      const next = { ...prev }
+      if (Object.keys(changes).length === 0) delete next[rk]
+      else next[rk] = { row: cur.row, changes }
+      return next
+    })
+  }, [])
+
+  const editCount    = Object.keys(edits).length
+  const discardEdits = useCallback(() => setEdits({}), [])
+
   // ── Load one page for a given query (server-side $skip/$top/$orderby/$filter) ──
   const runLoad = useCallback(async q => {
     if (!mdt || !schema) return
@@ -246,6 +287,11 @@ export default function MasterDataViewer({ connection, session }) {
   // "Mostrar datos" / "Aplicar": (re)count for the active filter, then load page 1.
   const applyAndShow = useCallback(async () => {
     if (!mdt || !schema) return
+    // Changing columns/filter re-reads rows → unsaved edits would no longer line up.
+    if (Object.keys(edits).length) {
+      if (!window.confirm(t('viewer.discardEditsConfirm'))) return
+      setEdits({})
+    }
     let total = schema.total
     if (extraFilter) {
       try {
@@ -258,7 +304,53 @@ export default function MasterDataViewer({ connection, session }) {
     setQuery({ page: 1, pageSize, sort: null, filter: extraFilter, total })
     // Data is loaded → collapse config to give the grid room.
     setSelCollapsed(true); setDataCollapsed(true)
-  }, [mdt, schema, extraFilter, selectedCols, connection, session, pa, version, pageSize])
+  }, [mdt, schema, extraFilter, selectedCols, connection, session, pa, version, pageSize, edits, t])
+
+  // ── Save edits: review-confirmed upsert → commit → poll → messages ──
+  const doSave = useCallback(async () => {
+    const entries = Object.values(edits)
+    if (!entries.length || !schema) return
+    const keyNames = schema.keyNames
+    // Uniform attribute set across the batch (keys + union of all changed fields)
+    // so every POSTed row carries the same columns (postTransChunk derives
+    // RequestedAttributes from the first row). Untouched fields keep their original
+    // value, so they upsert as no-ops rather than getting blanked.
+    const union = new Set()
+    entries.forEach(e => Object.keys(e.changes).forEach(f => union.add(f)))
+    const fields = [...union]
+    const postRows = entries.map(({ row, changes }) => {
+      const out = {}
+      for (const k of keyNames) out[k] = row[k]
+      for (const f of fields) out[f] = (f in changes) ? changes[f] : row[f]
+      return out
+    })
+
+    setSaving(true); setSaveResult(null)
+    try {
+      let csrf = null
+      try { csrf = await fetchCsrf(connection, session) } catch { /* proxy fetches per POST */ }
+      const txId = await getTransactionId(connection, session, { versionId: version, masterDataTypeId: mdt, planningArea: pa })
+      try { await initiateParallelProcess(connection, session, txId, { planningArea: pa, versionId: version, masterDataTypeId: mdt, transactionName: 'IBP-Viewer-EDIT' }) } catch { /* best effort */ }
+      const chunks = chunkByBytes(postRows, MAX_POST_BYTES, 5000)
+      for (const chunk of chunks) {
+        await postTransChunk(connection, session, mdt, txId, chunk, { deleteEntries: false, planningArea: pa, versionId: version, csrf })
+      }
+      await commitTransaction(connection, session, txId, { csrf })
+      const st   = await waitForProcessed(connection, session, txId, { timeoutMs: 120000 })
+      const msgs = await readMessages(connection, session, mdt, txId)
+      const errors = (msgs || []).filter(m => ['E', 'A'].includes(m.Severity))
+      const status = errors.length ? 'warning' : (st === 'ERROR' ? 'error' : 'ok')
+      setSaveResult({ status, count: postRows.length, errors, message: st === 'ERROR' ? t('viewer.saveProcessError') : '' })
+      if (status === 'ok') {
+        setEdits({})
+        if (query) runLoad(query)   // refresh the page so it shows the persisted values
+      }
+    } catch (e) {
+      setSaveResult({ status: 'error', message: errText(e) })
+    } finally {
+      setSaving(false)
+    }
+  }, [edits, schema, connection, session, version, mdt, pa, query, runLoad, t])
 
   const onPageChange     = p  => setQuery(q => q ? { ...q, page: Math.min(Math.max(1, p), pageCount) } : q)
   const onPageSizeChange = sz => { setPageSize(sz); setQuery(q => q ? { ...q, pageSize: sz, page: 1 } : q) }
@@ -500,9 +592,27 @@ export default function MasterDataViewer({ connection, session }) {
             pageSizeOptions={PAGE_SIZES}
             onPageChange={onPageChange}
             onPageSizeChange={onPageSizeChange}
+            editMode={editMode}
+            editableCols={editableCols}
+            edits={edits}
+            editCount={editCount}
+            onToggleEdit={() => setEditMode(v => !v)}
+            onCellEdit={onCellEdit}
+            onSaveEdits={() => { setSaveResult(null); setShowSaveModal(true) }}
+            onDiscardEdits={discardEdits}
           />
         )}
       </div>
+
+      <EditReviewModal
+        open={showSaveModal}
+        edits={edits}
+        keyNames={schema?.keyNames || []}
+        saving={saving}
+        result={saveResult}
+        onConfirm={doSave}
+        onClose={() => setShowSaveModal(false)}
+      />
     </div>
   )
 }
