@@ -806,6 +806,7 @@
   "viewer.fullscreenTitle": "Maximize the table to fullscreen",
   "viewer.exitFullscreen": "⤡ Exit",
   "viewer.exitFullscreenTitle": "Exit fullscreen (Esc)",
+  "viewer.resizeHint": "Drag to resize · double-click to auto-fit to content",
   "viewer.colFilterPh": "filter…",
   "viewer.colFilterNote": "Column filters apply only to the records on this page (starts with).",
   "viewer.colFilterEmpty": "No row on this page matches the column filter.",

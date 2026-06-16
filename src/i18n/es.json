@@ -806,6 +806,7 @@
   "viewer.fullscreenTitle": "Maximizar la tabla a pantalla completa",
   "viewer.exitFullscreen": "⤡ Salir",
   "viewer.exitFullscreenTitle": "Salir de pantalla completa (Esc)",
+  "viewer.resizeHint": "Arrastra para ajustar el ancho · doble clic para autoajustar al contenido",
   "viewer.colFilterPh": "filtrar…",
   "viewer.colFilterNote": "El filtro por columna actúa solo sobre los registros de esta página (empieza con).",
   "viewer.colFilterEmpty": "Ninguna fila de esta página coincide con el filtro de columna.",

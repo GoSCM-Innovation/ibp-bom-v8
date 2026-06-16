@@ -12,9 +12,14 @@
 // "Mostrar datos" via the filter panel. A persistent note makes this explicit.
 // Editing/selection arrive in later phases.
 // ─────────────────────────────────────────────────────────────────────────────
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { formatCell } from '../../services/catalogHelpers'
+
+// Default cap for auto-sized columns: they fit their content/header up to this,
+// then ellipsize. The user can drag wider or double-click the handle to auto-fit.
+const AUTO_MAX = 600
+const MIN_COL  = 60
 
 const THCELL = {
   textAlign: 'left', padding: '6px 10px 5px', borderBottom: '1px solid var(--border)',
@@ -33,7 +38,7 @@ const COLFILTER = {
 }
 const TD = {
   padding: '5px 10px', borderBottom: '1px solid var(--border)', fontSize: 12,
-  whiteSpace: 'nowrap', color: 'var(--text)', maxWidth: 360,
+  whiteSpace: 'nowrap', color: 'var(--text)',
   overflow: 'hidden', textOverflow: 'ellipsis',
 }
 const navBtn = disabled => ({
@@ -59,6 +64,10 @@ export default function DataGrid({
   const [gotoVal, setGotoVal] = useState('')
   const [colFilters, setColFilters] = useState({})   // { [col]: text } — prefix match, current page only
   const [fullscreen, setFullscreen] = useState(false)
+  const [colWidths, setColWidths] = useState({})     // { [col]: px } — explicit width (drag/auto-fit); absent = auto-fit
+
+  const tableRef   = useRef(null)
+  const measureRef = useRef(null)   // reused offscreen canvas for text measurement
 
   // Esc exits fullscreen; lock body scroll while the overlay is open.
   useEffect(() => {
@@ -70,7 +79,57 @@ export default function DataGrid({
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow }
   }, [fullscreen])
 
+  // Drop explicit widths when the column SET changes (new table/selection) — old
+  // widths would otherwise leak into an unrelated layout.
+  const colsKey = columns.join('|')
+  useEffect(() => { setColWidths({}) }, [colsKey])
+
   const sortIndicator = c => (!sort || sort.field !== c) ? '' : (sort.dir === 'desc' ? ' ▼' : ' ▲')
+
+  // Width style for a column: explicit (pinned) when set, else auto-fit up to AUTO_MAX.
+  const widthStyle = c => {
+    const w = colWidths[c]
+    return w ? { width: w, minWidth: w, maxWidth: w } : { maxWidth: AUTO_MAX }
+  }
+
+  // Drag the right edge of a header to resize that column.
+  const startResize = (e, c) => {
+    e.preventDefault(); e.stopPropagation()
+    const th = e.target.closest('th')
+    const startW = th ? th.offsetWidth : (colWidths[c] || 120)
+    const startX = e.clientX
+    const onMove = ev => {
+      const w = Math.max(MIN_COL, startW + (ev.clientX - startX))
+      setColWidths(p => ({ ...p, [c]: w }))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  // Double-click the edge: auto-fit the column to the widest of header + visible cells.
+  const autoFit = (e, c) => {
+    e.preventDefault(); e.stopPropagation()
+    const canvas = measureRef.current || (measureRef.current = document.createElement('canvas'))
+    const ctx = canvas.getContext('2d')
+    const sample = tableRef.current?.querySelector('tbody td') || tableRef.current?.querySelector('th')
+    const font = sample ? getComputedStyle(sample).font : ''
+    ctx.font = font && font.trim() ? font : '12px monospace'
+    let max = ctx.measureText(c).width + (keySet.has(c) ? 22 : 0)   // header (+ key icon allowance)
+    for (const r of visibleRows) {
+      const w = ctx.measureText(cellText(r[c])).width
+      if (w > max) max = w
+    }
+    const W = Math.min(800, Math.max(MIN_COL, Math.ceil(max) + 28))   // + cell padding & sort arrow
+    setColWidths(p => ({ ...p, [c]: W }))
+  }
 
   // Only consider filters for columns that are currently shown (stale keys for
   // hidden columns are ignored, so no effect-based pruning is needed).
@@ -116,14 +175,16 @@ export default function DataGrid({
         {error && <div style={{ padding: 16, color: 'var(--red)', fontSize: 12 }}>{error}</div>}
 
         {!error && columns.length > 0 && (
-          <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: 'var(--mono)' }}>
+          <table ref={tableRef} style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'auto', fontFamily: 'var(--mono)' }}>
             <thead>
               <tr>
                 {columns.map(c => (
-                  <th key={c} style={THCELL}>
+                  <th key={c} style={{ ...THCELL, ...widthStyle(c) }}>
                     <div style={THNAME} onClick={() => onSort?.(c)} title={c}>
-                      {keySet.has(c) && <span style={{ color: 'var(--accent)' }}>🔑</span>}
-                      <span>{c}{sortIndicator(c)}</span>
+                      {keySet.has(c) && <span style={{ color: 'var(--accent)', flex: '0 0 auto' }}>🔑</span>}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                        {c}{sortIndicator(c)}
+                      </span>
                     </div>
                     <input
                       value={colFilters[c] || ''}
@@ -131,6 +192,14 @@ export default function DataGrid({
                       onClick={e => e.stopPropagation()}
                       placeholder={t('viewer.colFilterPh')}
                       style={COLFILTER}
+                    />
+                    {/* Resize handle: drag to set width, double-click to auto-fit. */}
+                    <div
+                      onMouseDown={e => startResize(e, c)}
+                      onDoubleClick={e => autoFit(e, c)}
+                      onClick={e => e.stopPropagation()}
+                      title={t('viewer.resizeHint')}
+                      style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 7, cursor: 'col-resize', userSelect: 'none', borderRight: '1px solid var(--border)' }}
                     />
                   </th>
                 ))}
@@ -141,7 +210,7 @@ export default function DataGrid({
                 <tr key={i}>
                   {columns.map(c => {
                     const txt = cellText(r[c])
-                    return <td key={c} style={TD} title={txt}>{txt}</td>
+                    return <td key={c} style={{ ...TD, ...widthStyle(c) }} title={txt}>{txt}</td>
                   })}
                 </tr>
               ))}
