@@ -768,6 +768,8 @@
   "kfm.fltCountNeedKf": "Selecciona al menos un key figure (con origen asignado) para poder contar.",
   "kfm.fltCountResult": "{n} filas no-cero coinciden (medido con {kf})",
 
+  "viewer.refresh": "↺ Actualizar",
+  "viewer.refreshTitle": "Vuelve a leer el catálogo de SAP (áreas, versiones y tablas). Úsalo si cambiaste una configuración en IBP y aún no se refleja.",
   "viewer.area": "Área de planificación",
   "viewer.version": "Versión",
   "viewer.versionBase": "(base / sin versión)",

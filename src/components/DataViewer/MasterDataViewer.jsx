@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  fetchVsmt, buildCatalog,
+  fetchVsmt, buildCatalog, invalidateVsmtCache,
   fetchCount, readEntityPage, fetchFieldNames, fetchKeyNames, fetchDistinctValues,
 } from '../../services/masterDataApi'
 import { getPas, getVersions, getMdts } from '../../services/catalogHelpers'
@@ -72,6 +72,8 @@ export default function MasterDataViewer({ connection, session }) {
   const [catalog, setCatalog]               = useState(null)
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [catalogError, setCatalogError]     = useState('')
+  // Bump to force a fresh catalog read after invalidating the cache ("↺ Actualizar").
+  const [catalogTick, setCatalogTick]       = useState(0)
 
   // ── Selection ──
   const [pa, setPa]           = useState('')
@@ -107,9 +109,17 @@ export default function MasterDataViewer({ connection, session }) {
       .catch(e => { if (alive) setCatalogError(errText(e)) })
       .finally(() => { if (alive) setCatalogLoading(false) })
     return () => { alive = false }
-  }, [connection.id, session?.com0720?.user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // Invalidate the cached VSMT catalog and force a fresh discovery from SAP —
+  // recovers an IBP config change (new area/version/table) without waiting out the
+  // 24 h cache TTL. Mirrors the "↺ Actualizar" button in the Migration tabs.
+  const refreshCatalog = useCallback(() => {
+    invalidateVsmtCache(connection.id)
+    setCatalogTick(n => n + 1)
+  }, [connection.id])
 
   const pas      = useMemo(() => getPas(catalog), [catalog])
   const versions = useMemo(() => getVersions(catalog, pa), [catalog, pa])
@@ -254,6 +264,16 @@ export default function MasterDataViewer({ connection, session }) {
 
         {/* Selection */}
         <div style={SECTION}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <button
+              style={{ ...BTN_SEC, opacity: catalogLoading ? 0.6 : 1, cursor: catalogLoading ? 'wait' : 'pointer' }}
+              onClick={refreshCatalog}
+              disabled={catalogLoading}
+              title={t('viewer.refreshTitle')}
+            >
+              {t('viewer.refresh')}
+            </button>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1.4fr', gap: 12 }}>
             <div>
               <label style={LABEL}>{t('viewer.area')}</label>

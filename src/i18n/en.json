@@ -768,6 +768,8 @@
   "kfm.fltCountNeedKf": "Select at least one key figure (with a source assigned) to count.",
   "kfm.fltCountResult": "{n} non-zero rows match (measured with {kf})",
 
+  "viewer.refresh": "↺ Refresh",
+  "viewer.refreshTitle": "Re-read the SAP catalog (areas, versions and tables). Use it if you changed a configuration in IBP and it isn't showing yet.",
   "viewer.area": "Planning area",
   "viewer.version": "Version",
   "viewer.versionBase": "(base / no version)",
