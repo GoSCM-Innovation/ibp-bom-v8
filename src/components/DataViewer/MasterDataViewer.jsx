@@ -26,6 +26,7 @@ import ColumnPicker from './ColumnPicker'
 import CollapsibleSection from './CollapsibleSection'
 import DataGrid from './DataGrid'
 import EditReviewModal from './EditReviewModal'
+import DeleteConfirmModal from './DeleteConfirmModal'
 
 // ── localStorage keys ──
 const COLS_KEY     = (connId, mdt) => `ibp:viewer:cols:master:${connId}:${mdt}`
@@ -117,6 +118,12 @@ export default function MasterDataViewer({ connection, session }) {
   const [saving, setSaving]           = useState(false)
   const [saveResult, setSaveResult]   = useState(null)  // { status, count?, errors?, message? }
 
+  // ── Selection / delete (Phase 3) ──
+  const [selected, setSelected]           = useState({})    // { [rowKey]: row } — persists across pages
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleting, setDeleting]           = useState(false)
+  const [deleteResult, setDeleteResult]   = useState(null)
+
   const abortRef = useRef(null)
 
   // ── Load catalog on mount / session change ──
@@ -159,6 +166,8 @@ export default function MasterDataViewer({ connection, session }) {
     setSchema(null); setSchemaError('')
     // Drop any unsaved edits and leave edit mode — they belonged to the old table.
     setEdits({}); setEditMode(false); setSaveResult(null)
+    // Drop any row selection too — it belonged to the old table.
+    setSelected({}); setDeleteResult(null)
     // Back to configuring → open both panels so the selection/columns are visible.
     setSelCollapsed(false); setDataCollapsed(false)
     if (!mdt) return
@@ -292,6 +301,8 @@ export default function MasterDataViewer({ connection, session }) {
       if (!window.confirm(t('viewer.discardEditsConfirm'))) return
       setEdits({})
     }
+    // A new column/filter set re-reads rows → drop the row selection (it can be redone).
+    setSelected({})
     let total = schema.total
     if (extraFilter) {
       try {
@@ -351,6 +362,79 @@ export default function MasterDataViewer({ connection, session }) {
       setSaving(false)
     }
   }, [edits, schema, connection, session, version, mdt, pa, query, runLoad, t])
+
+  // ── Row selection (Phase 3 delete) ──
+  const selCount = Object.keys(selected).length
+  const onToggleRow = useCallback((rk, row) => {
+    setSelected(prev => {
+      const next = { ...prev }
+      if (next[rk]) delete next[rk]; else next[rk] = row
+      return next
+    })
+  }, [])
+  const onToggleAllPage = useCallback((rowsOnPage, checked) => {
+    setSelected(prev => {
+      const next = { ...prev }
+      for (const { rk, row } of rowsOnPage) {
+        if (checked) next[rk] = row; else delete next[rk]
+      }
+      return next
+    })
+  }, [])
+
+  // After a delete the row count drops → recount for the active filter and reload
+  // the (clamped) current page so the grid no longer shows the removed records.
+  const refreshAfterDelete = useCallback(async () => {
+    if (!query || !mdt) return
+    let total = query.total
+    try {
+      total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter: query.filter, retries: 1, timeout: 60000 })
+    } catch { /* keep previous total */ }
+    setQuery(q => {
+      if (!q) return q
+      const pages = Math.max(1, Math.ceil(total / q.pageSize))
+      return { ...q, total, page: Math.min(q.page, pages) }
+    })
+  }, [query, mdt, connection, session, pa, version])
+
+  // ── Delete: review-confirmed deleteEntries upsert → commit → poll → messages ──
+  const doDelete = useCallback(async () => {
+    const entries = Object.values(selected)
+    if (!entries.length || !schema) return
+    const keyNames = schema.keyNames
+    // Delete payload carries ONLY the business keys of each record to remove.
+    const delRows = entries.map(row => {
+      const out = {}
+      for (const k of keyNames) out[k] = row[k]
+      return out
+    })
+
+    setDeleting(true); setDeleteResult(null)
+    try {
+      let csrf = null
+      try { csrf = await fetchCsrf(connection, session) } catch { /* proxy fetches per POST */ }
+      const txId = await getTransactionId(connection, session, { versionId: version, masterDataTypeId: mdt, planningArea: pa })
+      try { await initiateParallelProcess(connection, session, txId, { planningArea: pa, versionId: version, masterDataTypeId: mdt, transactionName: 'IBP-Viewer-DEL' }) } catch { /* best effort */ }
+      const chunks = chunkByBytes(delRows, MAX_POST_BYTES, 5000)
+      for (const chunk of chunks) {
+        await postTransChunk(connection, session, mdt, txId, chunk, { deleteEntries: true, planningArea: pa, versionId: version, csrf })
+      }
+      await commitTransaction(connection, session, txId, { csrf })
+      const st   = await waitForProcessed(connection, session, txId, { timeoutMs: 120000 })
+      const msgs = await readMessages(connection, session, mdt, txId)
+      const errors = (msgs || []).filter(m => ['E', 'A'].includes(m.Severity))
+      const status = errors.length ? 'warning' : (st === 'ERROR' ? 'error' : 'ok')
+      setDeleteResult({ status, count: delRows.length, errors, message: st === 'ERROR' ? t('viewer.saveProcessError') : '' })
+      if (status === 'ok') {
+        setSelected({})
+        await refreshAfterDelete()
+      }
+    } catch (e) {
+      setDeleteResult({ status: 'error', message: errText(e) })
+    } finally {
+      setDeleting(false)
+    }
+  }, [selected, schema, connection, session, version, mdt, pa, t, refreshAfterDelete])
 
   const onPageChange     = p  => setQuery(q => q ? { ...q, page: Math.min(Math.max(1, p), pageCount) } : q)
   const onPageSizeChange = sz => { setPageSize(sz); setQuery(q => q ? { ...q, pageSize: sz, page: 1 } : q) }
@@ -600,6 +684,11 @@ export default function MasterDataViewer({ connection, session }) {
             onCellEdit={onCellEdit}
             onSaveEdits={() => { setSaveResult(null); setShowSaveModal(true) }}
             onDiscardEdits={discardEdits}
+            selectedKeys={selected}
+            selCount={selCount}
+            onToggleRow={onToggleRow}
+            onToggleAllPage={onToggleAllPage}
+            onDeleteSelected={() => { setDeleteResult(null); setShowDeleteModal(true) }}
           />
         )}
       </div>
@@ -612,6 +701,16 @@ export default function MasterDataViewer({ connection, session }) {
         result={saveResult}
         onConfirm={doSave}
         onClose={() => setShowSaveModal(false)}
+      />
+
+      <DeleteConfirmModal
+        open={showDeleteModal}
+        rows={Object.values(selected)}
+        keyNames={schema?.keyNames || []}
+        deleting={deleting}
+        result={deleteResult}
+        onConfirm={doDelete}
+        onClose={() => setShowDeleteModal(false)}
       />
     </div>
   )

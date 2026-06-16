@@ -62,6 +62,11 @@ const primaryBtn = {
   background: 'var(--accent)', border: 'none', borderRadius: 6,
   color: 'var(--text-on-accent)', fontSize: 11, fontWeight: 700, padding: '4px 12px', cursor: 'pointer',
 }
+const dangerBtn = {
+  background: 'none', border: '1px solid var(--red)', borderRadius: 6,
+  color: 'var(--red)', fontSize: 11, fontWeight: 700, padding: '4px 12px', cursor: 'pointer',
+}
+const SELCELL = { padding: '0 6px', borderBottom: '1px solid var(--border)', textAlign: 'center', width: 34, minWidth: 34 }
 const DIRTY_BG = 'color-mix(in srgb, var(--accent) 16%, transparent)'
 
 const cellText = v => { const c = formatCell(v); return c == null ? '' : String(c) }
@@ -74,6 +79,8 @@ export default function DataGrid({
   // Phase 2 editing (all optional — absent ⇒ read-only grid):
   editMode = false, editableCols = [], edits = {}, editCount = 0,
   onToggleEdit, onCellEdit, onSaveEdits, onDiscardEdits,
+  // Phase 3 row selection / delete (optional — absent ⇒ no checkboxes):
+  selectedKeys = {}, selCount = 0, onToggleRow, onToggleAllPage, onDeleteSelected,
 }) {
   const { t } = useI18n()
   const keySet = new Set(keyNames)
@@ -169,6 +176,11 @@ export default function DataGrid({
   const beginEdit = (rk, field, current) => { setEditing({ rk, field }); setDraft(current == null ? '' : String(current)) }
   const commitEdit = (rk, field, row) => { onCellEdit?.(rk, field, draft, row); setEditing(null) }
 
+  // Row selection (Phase 3 delete) — checkboxes appear only when wired up.
+  const selectable  = !!onToggleRow
+  const allChecked  = selectable && visibleRows.length > 0 && visibleRows.every(r => selectedKeys[rowKeyOf(r)])
+  const someChecked = selectable && visibleRows.some(r => selectedKeys[rowKeyOf(r)])
+
   const rootStyle = fullscreen
     ? { display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--bg)', padding: 16 }
     : { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }
@@ -186,6 +198,9 @@ export default function DataGrid({
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {selCount > 0 && (
+          <button style={dangerBtn} onClick={() => onDeleteSelected?.()}>{t('viewer.delete', { n: selCount })}</button>
+        )}
         {editMode && editCount > 0 && (
           <>
             <button style={primaryBtn} onClick={() => onSaveEdits?.()}>{t('viewer.save', { n: editCount })}</button>
@@ -220,6 +235,17 @@ export default function DataGrid({
           <table ref={tableRef} style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'auto', fontFamily: 'var(--mono)' }}>
             <thead>
               <tr>
+                {selectable && (
+                  <th style={{ ...THCELL, width: 34, minWidth: 34, textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={allChecked}
+                      ref={el => { if (el) el.indeterminate = someChecked && !allChecked }}
+                      onChange={e => onToggleAllPage?.(visibleRows.map(r => ({ rk: rowKeyOf(r), row: r })), e.target.checked)}
+                      title={t('viewer.selectAllPage')}
+                    />
+                  </th>
+                )}
                 {columns.map(c => (
                   <th
                     key={c}
@@ -266,6 +292,11 @@ export default function DataGrid({
                 const changes = edits[rk]?.changes
                 return (
                   <tr key={i}>
+                    {selectable && (
+                      <td style={SELCELL}>
+                        <input type="checkbox" checked={!!selectedKeys[rk]} onChange={() => onToggleRow?.(rk, r)} />
+                      </td>
+                    )}
                     {columns.map(c => {
                       const isDirty = changes && Object.prototype.hasOwnProperty.call(changes, c)
                       const rawVal  = isDirty ? changes[c] : r[c]
