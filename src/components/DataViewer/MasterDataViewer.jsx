@@ -28,12 +28,6 @@ const COLS_KEY     = (connId, mdt) => `ibp:viewer:cols:master:${connId}:${mdt}`
 const PAGESIZE_KEY = 'ibp:viewer:pagesize'
 const PAGE_SIZES   = [50, 100, 200, 500]
 
-// Collapsed state of the two config panels — persisted globally so the layout
-// the user prefers (more room for the grid) sticks across tables and sessions.
-const COLLAPSE_SEL_KEY  = 'ibp:viewer:collapse:selection'
-const COLLAPSE_DATA_KEY = 'ibp:viewer:collapse:data'
-const loadFlag = (key) => { try { return localStorage.getItem(key) === '1' } catch { return false } }
-
 function loadCols(connId, mdt) {
   try { return JSON.parse(localStorage.getItem(COLS_KEY(connId, mdt))) || null } catch { return null }
 }
@@ -82,11 +76,11 @@ export default function MasterDataViewer({ connection, session }) {
   // Bump to force a fresh catalog read after invalidating the cache ("↺ Actualizar").
   const [catalogTick, setCatalogTick]       = useState(0)
 
-  // ── Collapsible config panels (free space for the grid) ──
-  const [selCollapsed, setSelCollapsed]   = useState(() => loadFlag(COLLAPSE_SEL_KEY))
-  const [dataCollapsed, setDataCollapsed] = useState(() => loadFlag(COLLAPSE_DATA_KEY))
-  useEffect(() => { try { localStorage.setItem(COLLAPSE_SEL_KEY,  selCollapsed  ? '1' : '0') } catch { /* quota */ } }, [selCollapsed])
-  useEffect(() => { try { localStorage.setItem(COLLAPSE_DATA_KEY, dataCollapsed ? '1' : '0') } catch { /* quota */ } }, [dataCollapsed])
+  // ── Collapsible config panels ──
+  // Open while configuring; auto-collapse once data is loaded (applyAndShow) and
+  // re-open when the table changes (schema effect). Toggleable any time by hand.
+  const [selCollapsed, setSelCollapsed]   = useState(false)
+  const [dataCollapsed, setDataCollapsed] = useState(false)
 
   // ── Selection ──
   const [pa, setPa]           = useState('')
@@ -97,7 +91,8 @@ export default function MasterDataViewer({ connection, session }) {
   const [schema, setSchema]               = useState(null)   // { allColumns, keyNames, total }
   const [schemaLoading, setSchemaLoading] = useState(false)
   const [schemaError, setSchemaError]     = useState('')
-  const [selectedCols, setSelectedCols]   = useState([])
+  const [selectedCols, setSelectedCols]   = useState([])   // draft: edited freely, no fetch
+  const [appliedCols, setAppliedCols]     = useState([])   // committed on "Aplicar" — what `rows` reflect & the grid renders
 
   // ── Filters ──
   const [conds, setConds]           = useState([])     // [{ field, op:'in'|'sw', value }]
@@ -151,6 +146,8 @@ export default function MasterDataViewer({ connection, session }) {
     setQuery(null); setRows([]); setGridError('')
     setConds([]); setFilterTest(null)
     setSchema(null); setSchemaError('')
+    // Back to configuring → open both panels so the selection/columns are visible.
+    setSelCollapsed(false); setDataCollapsed(false)
     if (!mdt) return
     let alive = true
     const ac = new AbortController()
@@ -168,7 +165,9 @@ export default function MasterDataViewer({ connection, session }) {
       setSchema({ allColumns, keyNames, total })
       const saved = loadCols(connection.id, mdt)
       const validSaved = saved ? saved.filter(c => allColumns.includes(c)) : []
-      setSelectedCols(validSaved.length ? validSaved : defaultSelection(allColumns, keyNames))
+      const initial = validSaved.length ? validSaved : defaultSelection(allColumns, keyNames)
+      setSelectedCols(initial)
+      setAppliedCols(initial)
     }).catch(e => { if (alive) setSchemaError(errText(e)) })
       .finally(() => { if (alive) setSchemaLoading(false) })
     return () => { alive = false; ac.abort() }
@@ -195,8 +194,8 @@ export default function MasterDataViewer({ connection, session }) {
       ? [`${q.sort.field}${q.sort.dir === 'desc' ? ' desc' : ''}`]
       : (schema.keyNames.length ? schema.keyNames : undefined)
     // Always fetch the key columns (even if hidden) so rows stay addressable for
-    // the edit/delete phases; the grid only RENDERS the selected columns.
-    const select = [...new Set([...selectedCols, ...schema.keyNames])]
+    // the edit/delete phases; the grid only RENDERS the applied columns.
+    const select = [...new Set([...appliedCols, ...schema.keyNames])]
     try {
       const data = await readEntityPage(connection, session, mdt, {
         skip, top: q.pageSize, planningArea: pa, versionId: version,
@@ -210,12 +209,14 @@ export default function MasterDataViewer({ connection, session }) {
     } finally {
       if (abortRef.current === ac) setGridLoading(false)
     }
-  }, [mdt, schema, selectedCols, connection, session, pa, version, t])
+  }, [mdt, schema, appliedCols, connection, session, pa, version, t])
 
-  // Reload whenever the query OR the displayed columns change.
+  // Reload only when the query changes (page / sort / filter / applied columns).
+  // Column edits do NOT fetch — they wait for "Aplicar" (see applyAndShow), so
+  // toggling columns can't flood the proxy with one read per click.
   useEffect(() => {
     if (query) runLoad(query)
-  }, [query, selectedCols]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Mostrar datos" / "Aplicar": (re)count for the active filter, then load page 1.
   const applyAndShow = useCallback(async () => {
@@ -226,8 +227,13 @@ export default function MasterDataViewer({ connection, session }) {
         total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter, retries: 1, timeout: 60000 })
       } catch { /* keep base total */ }
     }
+    // Commit the draft column selection — this is the ONLY place a fetch is
+    // triggered for column changes, so editing columns never hits SAP on its own.
+    setAppliedCols(selectedCols)
     setQuery({ page: 1, pageSize, sort: null, filter: extraFilter, total })
-  }, [mdt, schema, extraFilter, connection, session, pa, version, pageSize])
+    // Data is loaded → collapse config to give the grid room.
+    setSelCollapsed(true); setDataCollapsed(true)
+  }, [mdt, schema, extraFilter, selectedCols, connection, session, pa, version, pageSize])
 
   const onPageChange     = p  => setQuery(q => q ? { ...q, page: Math.min(Math.max(1, p), pageCount) } : q)
   const onPageSizeChange = sz => { setPageSize(sz); setQuery(q => q ? { ...q, pageSize: sz, page: 1 } : q) }
@@ -264,6 +270,16 @@ export default function MasterDataViewer({ connection, session }) {
   }
 
   const activeChips = conds.map(condChip).filter(Boolean)
+
+  // Are there column/filter edits not yet reflected in the loaded data? Drives the
+  // "Aplicar cambios" hint so the user knows a fetch is pending on their click.
+  const pendingChanges = useMemo(() => {
+    if (!query) return false
+    const a = new Set(appliedCols)
+    const colsDirty = selectedCols.length !== appliedCols.length || selectedCols.some(c => !a.has(c))
+    const filterDirty = (extraFilter || undefined) !== (query.filter || undefined)
+    return colsDirty || filterDirty
+  }, [query, selectedCols, appliedCols, extraFilter])
 
   // Summaries shown in each panel's header when collapsed, so context isn't lost.
   const selSummary = pa
@@ -347,7 +363,7 @@ export default function MasterDataViewer({ connection, session }) {
             summary={dataSummary}
             actions={
               <button style={btnPrimary(!schema.allColumns.length)} disabled={!schema.allColumns.length} onClick={applyAndShow}>
-                {query ? t('viewer.applyFilter') : t('viewer.showData')}
+                {!query ? t('viewer.showData') : (pendingChanges ? t('viewer.applyChanges') : t('viewer.applyFilter'))}
               </button>
             }
           >
@@ -445,7 +461,7 @@ export default function MasterDataViewer({ connection, session }) {
         )}
         {query && (
           <DataGrid
-            columns={selectedCols}
+            columns={appliedCols}
             rows={rows}
             keyNames={schema?.keyNames || []}
             loading={gridLoading}

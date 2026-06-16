@@ -787,6 +787,7 @@
   "viewer.rowCount": "{n} filas en total",
   "viewer.showData": "Mostrar datos",
   "viewer.applyFilter": "Aplicar",
+  "viewer.applyChanges": "Aplicar cambios",
   "viewer.filterNote": "El filtro lo resuelve SAP: solo se traen las filas que coinciden, nunca se descarga la tabla completa.",
   "viewer.columns": "Columnas",
   "viewer.columnsOf": "{n}/{total}",

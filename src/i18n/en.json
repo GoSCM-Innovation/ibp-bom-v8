@@ -787,6 +787,7 @@
   "viewer.rowCount": "{n} rows in total",
   "viewer.showData": "Show data",
   "viewer.applyFilter": "Apply",
+  "viewer.applyChanges": "Apply changes",
   "viewer.filterNote": "The filter is resolved by SAP: only matching rows are fetched, the full table is never downloaded.",
   "viewer.columns": "Columns",
   "viewer.columnsOf": "{n}/{total}",
