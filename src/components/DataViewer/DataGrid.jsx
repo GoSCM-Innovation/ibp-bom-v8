@@ -4,17 +4,32 @@
 // Pure presentation: it renders the rows/columns it is given and delegates sort,
 // pagination and page-size changes to the parent via callbacks. The parent does
 // all data fetching SERVER-SIDE (one page at a time), so this grid never holds
-// more than `pageSize` rows. Editing/selection arrive in later phases.
+// more than `pageSize` rows.
+//
+// Per-column text filter: a small input under each column header narrows the rows
+// CLIENT-SIDE, by prefix (starts-with, case-insensitive). It only filters the
+// rows already on screen (the current page) — server-side filtering happens before
+// "Mostrar datos" via the filter panel. A persistent note makes this explicit.
+// Editing/selection arrive in later phases.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { formatCell } from '../../services/catalogHelpers'
 
-const TH = {
-  textAlign: 'left', padding: '7px 10px', borderBottom: '1px solid var(--border)',
+const THCELL = {
+  textAlign: 'left', padding: '6px 10px 5px', borderBottom: '1px solid var(--border)',
+  background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1, verticalAlign: 'top',
+}
+const THNAME = {
   color: 'var(--text2)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase',
   letterSpacing: '.05em', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none',
-  background: 'var(--bg2)', position: 'sticky', top: 0, zIndex: 1,
+  display: 'flex', alignItems: 'center', gap: 4,
+}
+const COLFILTER = {
+  marginTop: 5, width: '100%', boxSizing: 'border-box',
+  background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 5,
+  color: 'var(--text)', fontSize: 11, padding: '3px 6px', outline: 'none',
+  fontFamily: 'var(--mono)', fontWeight: 400, textTransform: 'none', letterSpacing: 0,
 }
 const TD = {
   padding: '5px 10px', borderBottom: '1px solid var(--border)', fontSize: 12,
@@ -31,6 +46,8 @@ const inputSm = {
   color: 'var(--text)', fontSize: 11, padding: '4px 7px', outline: 'none',
 }
 
+const cellText = v => { const c = formatCell(v); return c == null ? '' : String(c) }
+
 export default function DataGrid({
   columns, rows, keyNames = [], loading, error,
   sort, onSort,
@@ -40,11 +57,30 @@ export default function DataGrid({
   const { t } = useI18n()
   const keySet = new Set(keyNames)
   const [gotoVal, setGotoVal] = useState('')
+  const [colFilters, setColFilters] = useState({})   // { [col]: text } — prefix match, current page only
 
   const sortIndicator = c => (!sort || sort.field !== c) ? '' : (sort.dir === 'desc' ? ' ▼' : ' ▲')
 
+  // Only consider filters for columns that are currently shown (stale keys for
+  // hidden columns are ignored, so no effect-based pruning is needed).
+  const colSet = new Set(columns)
+  const active = Object.entries(colFilters).filter(([c, v]) => v && v.trim() && colSet.has(c))
+  const visibleRows = active.length === 0 ? rows : rows.filter(r =>
+    active.every(([c, v]) => cellText(r[c]).toLowerCase().startsWith(v.trim().toLowerCase()))
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Explicit scope note */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 2px 6px', flexShrink: 0, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--text3)' }}>ⓘ {t('viewer.colFilterNote')}</span>
+        {active.length > 0 && (
+          <span style={{ fontSize: 11, color: 'var(--accent)' }}>
+            {t('viewer.showingOf', { n: visibleRows.length.toLocaleString(), total: rows.length.toLocaleString() })}
+          </span>
+        )}
+      </div>
+
       <div style={{
         flex: 1, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8,
         position: 'relative', background: 'var(--bg)',
@@ -56,19 +92,28 @@ export default function DataGrid({
             <thead>
               <tr>
                 {columns.map(c => (
-                  <th key={c} style={TH} onClick={() => onSort?.(c)} title={c}>
-                    {keySet.has(c) && <span style={{ color: 'var(--accent)', marginRight: 4 }}>🔑</span>}
-                    {c}{sortIndicator(c)}
+                  <th key={c} style={THCELL}>
+                    <div style={THNAME} onClick={() => onSort?.(c)} title={c}>
+                      {keySet.has(c) && <span style={{ color: 'var(--accent)' }}>🔑</span>}
+                      <span>{c}{sortIndicator(c)}</span>
+                    </div>
+                    <input
+                      value={colFilters[c] || ''}
+                      onChange={e => setColFilters(p => ({ ...p, [c]: e.target.value }))}
+                      onClick={e => e.stopPropagation()}
+                      placeholder={t('viewer.colFilterPh')}
+                      style={COLFILTER}
+                    />
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {visibleRows.map((r, i) => (
                 <tr key={i}>
                   {columns.map(c => {
-                    const v = formatCell(r[c])
-                    return <td key={c} style={TD} title={v == null ? '' : String(v)}>{v}</td>
+                    const txt = cellText(r[c])
+                    return <td key={c} style={TD} title={txt}>{txt}</td>
                   })}
                 </tr>
               ))}
@@ -79,6 +124,11 @@ export default function DataGrid({
         {!error && !loading && rows.length === 0 && (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>
             {t('viewer.empty')}
+          </div>
+        )}
+        {!error && !loading && rows.length > 0 && visibleRows.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>
+            {t('viewer.colFilterEmpty')}
           </div>
         )}
 
