@@ -807,6 +807,8 @@
   "viewer.exitFullscreen": "⤡ Exit",
   "viewer.exitFullscreenTitle": "Exit fullscreen (Esc)",
   "viewer.resizeHint": "Drag to resize · double-click to auto-fit to content",
+  "viewer.colHeaderHint": "{c} · click: sort · drag header: reorder",
+  "viewer.gridHint": "Drag headers to reorder; drag their edge to resize (double-click = auto-fit).",
   "viewer.colFilterPh": "filter…",
   "viewer.colFilterNote": "Column filters apply only to the records on this page (starts with).",
   "viewer.colFilterEmpty": "No row on this page matches the column filter.",

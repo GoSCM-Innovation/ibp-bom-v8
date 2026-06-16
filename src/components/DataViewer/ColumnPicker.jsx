@@ -72,10 +72,11 @@ export default function ColumnPicker({ allColumns, keyNames = [], selected, onCh
   const applyKeysDesc = () => onChange(allColumns.filter(c => keySet.has(c) || isDesc(c)))
   const applyAll      = () => onChange([...allColumns])
 
+  // Preserve the user's column ORDER: removing drops in place, adding appends to
+  // the end (so a custom drag-reorder isn't reset to schema order on every toggle).
   const toggle = c => {
-    const next = new Set(selSet)
-    if (next.has(c)) next.delete(c); else next.add(c)
-    onChange(allColumns.filter(x => next.has(x)))
+    if (selSet.has(c)) onChange(selected.filter(x => x !== c))
+    else               onChange([...selected, c])
   }
 
   const saveCurrent = () => {

@@ -164,7 +164,13 @@ export default function MasterDataViewer({ connection, session }) {
       const keyNames   = keys || []
       setSchema({ allColumns, keyNames, total })
       const saved = loadCols(connection.id, mdt)
-      const validSaved = saved ? saved.filter(c => allColumns.includes(c)) : []
+      let validSaved = saved ? saved.filter(c => allColumns.includes(c)) : []
+      // Guard against a stale/leaked selection: if the saved set contains NONE of
+      // this table's key columns, it's almost certainly not a real choice for this
+      // table → discard it and fall back to the default (which includes the keys).
+      if (validSaved.length && keyNames.length && !validSaved.some(c => keyNames.includes(c))) {
+        validSaved = []
+      }
       const initial = validSaved.length ? validSaved : defaultSelection(allColumns, keyNames)
       setSelectedCols(initial)
       setAppliedCols(initial)
@@ -173,10 +179,29 @@ export default function MasterDataViewer({ connection, session }) {
     return () => { alive = false; ac.abort() }
   }, [mdt, pa, version, connection.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist column selection per connection+table.
-  useEffect(() => {
-    if (mdt && selectedCols.length) saveCols(connection.id, mdt, selectedCols)
-  }, [selectedCols, mdt, connection.id])
+  // Persist the column choice ONLY on explicit user edits for the CURRENT table.
+  // (An effect keyed on [selectedCols, mdt] would fire on the transient render
+  //  right after a table switch — mdt already new, selectedCols still old — and
+  //  save the previous table's columns under the new table's key, corrupting it.)
+  const onColumnsChange = useCallback(cols => {
+    setSelectedCols(cols)
+    if (mdt) saveCols(connection.id, mdt, cols)
+  }, [mdt, connection.id])
+
+  // Reorder (drag headers): reflect the new order in the displayed columns AND the
+  // draft, keeping any not-yet-applied draft columns at the end. No fetch — same
+  // data, just a different column order.
+  const onReorderColumns = useCallback(newOrder => {
+    setAppliedCols(newOrder)
+    setSelectedCols(prev => {
+      const prevSet = new Set(prev)
+      const ordered = newOrder.filter(c => prevSet.has(c))
+      const extras  = prev.filter(c => !newOrder.includes(c))
+      const next = [...ordered, ...extras]
+      if (mdt) saveCols(connection.id, mdt, next)
+      return next
+    })
+  }, [mdt, connection.id])
 
   useEffect(() => { try { localStorage.setItem(PAGESIZE_KEY, String(pageSize)) } catch { /* quota */ } }, [pageSize])
 
@@ -374,7 +399,7 @@ export default function MasterDataViewer({ connection, session }) {
                     allColumns={schema.allColumns}
                     keyNames={schema.keyNames}
                     selected={selectedCols}
-                    onChange={setSelectedCols}
+                    onChange={onColumnsChange}
                     connId={connection.id}
                   />
                   <span style={{ fontSize: 12, color: 'var(--text2)' }}>
@@ -462,6 +487,7 @@ export default function MasterDataViewer({ connection, session }) {
         {query && (
           <DataGrid
             columns={appliedCols}
+            onReorder={onReorderColumns}
             rows={rows}
             keyNames={schema?.keyNames || []}
             loading={gridLoading}

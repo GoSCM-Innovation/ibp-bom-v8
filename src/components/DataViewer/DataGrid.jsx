@@ -55,7 +55,7 @@ const cellText = v => { const c = formatCell(v); return c == null ? '' : String(
 
 export default function DataGrid({
   columns, rows, keyNames = [], loading, error,
-  sort, onSort,
+  sort, onSort, onReorder,
   page, pageCount, pageSize, pageSizeOptions = [50, 100, 200, 500],
   onPageChange, onPageSizeChange,
 }) {
@@ -65,9 +65,11 @@ export default function DataGrid({
   const [colFilters, setColFilters] = useState({})   // { [col]: text } — prefix match, current page only
   const [fullscreen, setFullscreen] = useState(false)
   const [colWidths, setColWidths] = useState({})     // { [col]: px } — explicit width (drag/auto-fit); absent = auto-fit
+  const [dragOverCol, setDragOverCol] = useState(null)
 
   const tableRef   = useRef(null)
   const measureRef = useRef(null)   // reused offscreen canvas for text measurement
+  const dragColRef = useRef(null)   // column being dragged to reorder
 
   // Esc exits fullscreen; lock body scroll while the overlay is open.
   useEffect(() => {
@@ -78,11 +80,6 @@ export default function DataGrid({
     document.body.style.overflow = 'hidden'
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow }
   }, [fullscreen])
-
-  // Drop explicit widths when the column SET changes (new table/selection) — old
-  // widths would otherwise leak into an unrelated layout.
-  const colsKey = columns.join('|')
-  useEffect(() => { setColWidths({}) }, [colsKey])
 
   const sortIndicator = c => (!sort || sort.field !== c) ? '' : (sort.dir === 'desc' ? ' ▼' : ' ▲')
 
@@ -131,6 +128,16 @@ export default function DataGrid({
     setColWidths(p => ({ ...p, [c]: W }))
   }
 
+  // Drag a header onto another to reorder — `from` is inserted before `to`.
+  const reorderTo = to => {
+    const from = dragColRef.current
+    if (!from || from === to || !onReorder) return
+    const next = columns.slice()
+    next.splice(next.indexOf(from), 1)
+    next.splice(next.indexOf(to), 0, from)
+    onReorder(next)
+  }
+
   // Only consider filters for columns that are currently shown (stale keys for
   // hidden columns are ignored, so no effect-based pruning is needed).
   const colSet = new Set(columns)
@@ -153,6 +160,7 @@ export default function DataGrid({
       {/* Explicit scope note */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 2px 6px', flexShrink: 0, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: 'var(--text3)' }}>ⓘ {t('viewer.colFilterNote')}</span>
+        <span style={{ fontSize: 11, color: 'var(--text3)' }}>ⓘ {t('viewer.gridHint')}</span>
         {active.length > 0 && (
           <span style={{ fontSize: 11, color: 'var(--accent)' }}>
             {t('viewer.showingOf', { n: visibleRows.length.toLocaleString(), total: rows.length.toLocaleString() })}
@@ -179,8 +187,21 @@ export default function DataGrid({
             <thead>
               <tr>
                 {columns.map(c => (
-                  <th key={c} style={{ ...THCELL, ...widthStyle(c) }}>
-                    <div style={THNAME} onClick={() => onSort?.(c)} title={c}>
+                  <th
+                    key={c}
+                    style={{ ...THCELL, ...widthStyle(c), boxShadow: dragOverCol === c ? 'inset 2px 0 0 0 var(--accent)' : undefined }}
+                    onDragOver={e => { if (onReorder && dragColRef.current && dragColRef.current !== c) { e.preventDefault(); setDragOverCol(c) } }}
+                    onDragLeave={() => setDragOverCol(o => (o === c ? null : o))}
+                    onDrop={e => { e.preventDefault(); reorderTo(c); setDragOverCol(null) }}
+                  >
+                    <div
+                      style={{ ...THNAME, cursor: onReorder ? 'grab' : 'pointer' }}
+                      onClick={() => onSort?.(c)}
+                      title={onReorder ? t('viewer.colHeaderHint', { c }) : c}
+                      draggable={!!onReorder}
+                      onDragStart={e => { dragColRef.current = c; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c) } catch { /* IE */ } }}
+                      onDragEnd={() => { dragColRef.current = null; setDragOverCol(null) }}
+                    >
                       {keySet.has(c) && <span style={{ color: 'var(--accent)', flex: '0 0 auto' }}>🔑</span>}
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                         {c}{sortIndicator(c)}
