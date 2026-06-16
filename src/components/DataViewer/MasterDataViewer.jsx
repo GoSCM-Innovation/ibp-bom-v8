@@ -20,12 +20,19 @@ import { getPas, getVersions, getMdts } from '../../services/catalogHelpers'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
 import { SearchSelect, MultiValueSelect } from '../Migration/FilterControls'
 import ColumnPicker from './ColumnPicker'
+import CollapsibleSection from './CollapsibleSection'
 import DataGrid from './DataGrid'
 
 // ── localStorage keys ──
 const COLS_KEY     = (connId, mdt) => `ibp:viewer:cols:master:${connId}:${mdt}`
 const PAGESIZE_KEY = 'ibp:viewer:pagesize'
 const PAGE_SIZES   = [50, 100, 200, 500]
+
+// Collapsed state of the two config panels — persisted globally so the layout
+// the user prefers (more room for the grid) sticks across tables and sessions.
+const COLLAPSE_SEL_KEY  = 'ibp:viewer:collapse:selection'
+const COLLAPSE_DATA_KEY = 'ibp:viewer:collapse:data'
+const loadFlag = (key) => { try { return localStorage.getItem(key) === '1' } catch { return false } }
 
 function loadCols(connId, mdt) {
   try { return JSON.parse(localStorage.getItem(COLS_KEY(connId, mdt))) || null } catch { return null }
@@ -74,6 +81,12 @@ export default function MasterDataViewer({ connection, session }) {
   const [catalogError, setCatalogError]     = useState('')
   // Bump to force a fresh catalog read after invalidating the cache ("↺ Actualizar").
   const [catalogTick, setCatalogTick]       = useState(0)
+
+  // ── Collapsible config panels (free space for the grid) ──
+  const [selCollapsed, setSelCollapsed]   = useState(() => loadFlag(COLLAPSE_SEL_KEY))
+  const [dataCollapsed, setDataCollapsed] = useState(() => loadFlag(COLLAPSE_DATA_KEY))
+  useEffect(() => { try { localStorage.setItem(COLLAPSE_SEL_KEY,  selCollapsed  ? '1' : '0') } catch { /* quota */ } }, [selCollapsed])
+  useEffect(() => { try { localStorage.setItem(COLLAPSE_DATA_KEY, dataCollapsed ? '1' : '0') } catch { /* quota */ } }, [dataCollapsed])
 
   // ── Selection ──
   const [pa, setPa]           = useState('')
@@ -252,6 +265,14 @@ export default function MasterDataViewer({ connection, session }) {
 
   const activeChips = conds.map(condChip).filter(Boolean)
 
+  // Summaries shown in each panel's header when collapsed, so context isn't lost.
+  const selSummary = pa
+    ? [pa, version || t('viewer.versionBase'), mdt].filter(Boolean).join('  /  ')
+    : '—'
+  const dataSummary = schema
+    ? `${t('viewer.colsSummary', { n: selectedCols.length, total: schema.allColumns.length })} · ${t('viewer.filtersSummary', { n: conds.length })}`
+    : ''
+
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -263,8 +284,12 @@ export default function MasterDataViewer({ connection, session }) {
         )}
 
         {/* Selection */}
-        <div style={SECTION}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <CollapsibleSection
+          title={t('viewer.secSelection')}
+          collapsed={selCollapsed}
+          onToggle={() => setSelCollapsed(v => !v)}
+          summary={selSummary}
+          actions={
             <button
               style={{ ...BTN_SEC, opacity: catalogLoading ? 0.6 : 1, cursor: catalogLoading ? 'wait' : 'pointer' }}
               onClick={refreshCatalog}
@@ -273,7 +298,8 @@ export default function MasterDataViewer({ connection, session }) {
             >
               {t('viewer.refresh')}
             </button>
-          </div>
+          }
+        >
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1.4fr', gap: 12 }}>
             <div>
               <label style={LABEL}>{t('viewer.area')}</label>
@@ -300,15 +326,31 @@ export default function MasterDataViewer({ connection, session }) {
               />
             </div>
           </div>
-        </div>
+        </CollapsibleSection>
 
         {/* Schema-dependent controls */}
-        {mdt && (
+        {mdt && schemaLoading && (
           <div style={SECTION}>
-            {schemaLoading && <div style={{ fontSize: 12, color: 'var(--text2)' }}>{t('viewer.loadingSchema')}</div>}
-            {schemaError   && <div style={{ fontSize: 12, color: 'var(--red)' }}>{t('viewer.schemaError', { msg: schemaError })}</div>}
-
-            {schema && !schemaLoading && (
+            <div style={{ fontSize: 12, color: 'var(--text2)' }}>{t('viewer.loadingSchema')}</div>
+          </div>
+        )}
+        {mdt && schemaError && !schemaLoading && (
+          <div style={SECTION}>
+            <div style={{ fontSize: 12, color: 'var(--red)' }}>{t('viewer.schemaError', { msg: schemaError })}</div>
+          </div>
+        )}
+        {mdt && schema && !schemaLoading && (
+          <CollapsibleSection
+            title={t('viewer.secData')}
+            collapsed={dataCollapsed}
+            onToggle={() => setDataCollapsed(v => !v)}
+            summary={dataSummary}
+            actions={
+              <button style={btnPrimary(!schema.allColumns.length)} disabled={!schema.allColumns.length} onClick={applyAndShow}>
+                {query ? t('viewer.applyFilter') : t('viewer.showData')}
+              </button>
+            }
+          >
               <>
                 {/* Toolbar */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -322,10 +364,6 @@ export default function MasterDataViewer({ connection, session }) {
                   <span style={{ fontSize: 12, color: 'var(--text2)' }}>
                     {t('viewer.rowCount', { n: (schema.total ?? 0).toLocaleString() })}
                   </span>
-                  <span style={{ flex: 1 }} />
-                  <button style={btnPrimary(!schema.allColumns.length)} disabled={!schema.allColumns.length} onClick={applyAndShow}>
-                    {query ? t('viewer.applyFilter') : t('viewer.showData')}
-                  </button>
                 </div>
 
                 {/* Filters */}
@@ -389,8 +427,7 @@ export default function MasterDataViewer({ connection, session }) {
                   </div>
                 </div>
               </>
-            )}
-          </div>
+          </CollapsibleSection>
         )}
       </div>
 
