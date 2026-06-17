@@ -288,11 +288,11 @@ export default function DataGrid({
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((r, i) => {
+              {visibleRows.map(r => {
                 const rk = rowKeyOf(r)
                 const changes = edits[rk]?.changes
                 return (
-                  <tr key={i}>
+                  <tr key={rk}>
                     {selectable && (
                       <td style={SELCELL}>
                         <input type="checkbox" checked={!!selectedKeys[rk]} onChange={() => onToggleRow?.(rk, r)} />

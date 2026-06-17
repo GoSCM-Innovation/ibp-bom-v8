@@ -1,13 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// MasterDataViewer.jsx — "Ver Dato Maestro" tab, Phase 1 (read-only).
+// MasterDataViewer.jsx — "Ver Dato Maestro" tab (view + inline edit + delete).
 //
 // Flow: pick area → version → table. We then read ONLY the schema (column names,
 // key names) and the row COUNT — never the rows. The user optionally defines
 // SERVER-SIDE filters ($filter, resolved by SAP) and presses "Mostrar datos" to
 // load the first page. Every read is paginated server-side ($skip/$top) over the
-// selected columns ($select) only — we never download a whole table. Editing and
-// deletion arrive in later phases; the $select always includes the key columns so
-// each row stays addressable then.
+// selected columns ($select) only — we never download a whole table. Edits (upsert)
+// and deletes go through the SAP transaction chain; the $select always includes the
+// key columns so each row stays addressable.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useI18n } from '../../context/I18nContext'
@@ -124,7 +124,8 @@ export default function MasterDataViewer({ connection, session }) {
   const [deleting, setDeleting]           = useState(false)
   const [deleteResult, setDeleteResult]   = useState(null)
 
-  const abortRef = useRef(null)
+  const abortRef  = useRef(null)
+  const writeBusy = useRef(false)   // synchronous guard against double-submit (save/delete)
 
   // ── Load catalog on mount / session change ──
   useEffect(() => {
@@ -321,6 +322,8 @@ export default function MasterDataViewer({ connection, session }) {
   const doSave = useCallback(async () => {
     const entries = Object.values(edits)
     if (!entries.length || !schema) return
+    if (writeBusy.current) return            // already sending → ignore double-click
+    writeBusy.current = true
     const keyNames = schema.keyNames
     // Uniform attribute set across the batch (keys + union of all changed fields)
     // so every POSTed row carries the same columns (postTransChunk derives
@@ -360,6 +363,7 @@ export default function MasterDataViewer({ connection, session }) {
       setSaveResult({ status: 'error', message: errText(e) })
     } finally {
       setSaving(false)
+      writeBusy.current = false
     }
   }, [edits, schema, connection, session, version, mdt, pa, query, runLoad, t])
 
@@ -401,6 +405,8 @@ export default function MasterDataViewer({ connection, session }) {
   const doDelete = useCallback(async () => {
     const entries = Object.values(selected)
     if (!entries.length || !schema) return
+    if (writeBusy.current) return            // already sending → ignore double-click
+    writeBusy.current = true
     const keyNames = schema.keyNames
     // Delete payload carries ONLY the business keys of each record to remove.
     const delRows = entries.map(row => {
@@ -433,6 +439,7 @@ export default function MasterDataViewer({ connection, session }) {
       setDeleteResult({ status: 'error', message: errText(e) })
     } finally {
       setDeleting(false)
+      writeBusy.current = false
     }
   }, [selected, schema, connection, session, version, mdt, pa, t, refreshAfterDelete])
 

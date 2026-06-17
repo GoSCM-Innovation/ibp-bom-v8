@@ -868,6 +868,5 @@
   "viewer.next": "Next ›",
   "viewer.pageOf": "Page {page} of {pages}",
   "viewer.goto": "Go to",
-  "viewer.pageSize": "Rows per page",
-  "viewer.placeholderTrans": "The Transactional Data viewer is coming in the next phase."
+  "viewer.pageSize": "Rows per page"
 }

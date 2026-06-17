@@ -868,6 +868,5 @@
   "viewer.next": "Siguiente ›",
   "viewer.pageOf": "Página {page} de {pages}",
   "viewer.goto": "Ir a",
-  "viewer.pageSize": "Filas por página",
-  "viewer.placeholderTrans": "El visor de Dato Transaccional llega en la siguiente fase."
+  "viewer.pageSize": "Filas por página"
 }

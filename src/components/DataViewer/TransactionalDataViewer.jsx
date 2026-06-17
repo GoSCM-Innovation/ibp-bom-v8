@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// TransactionalDataViewer.jsx — "Ver Dato Transaccional" tab, Phase 1 (read-only).
+// TransactionalDataViewer.jsx — "Ver Dato Transaccional" tab (view + key-figure edit).
 //
 // Key figures, not master attributes: the user picks a planning area, version and
 // a LEVEL (dimensions + time granularity) plus the key figures to show. SAP
@@ -43,6 +43,23 @@ const PAGE_SIZES = [50, 100, 200, 500]
 function loadPageSize() {
   const n = parseInt(localStorage.getItem(PAGESIZE_KEY) || '500', 10)
   return PAGE_SIZES.includes(n) ? n : 500
+}
+
+// Conversion master (units/currencies) is tiny but fetchConversionValues doesn't
+// cache, and switching tabs remounts this component — so without a cache every
+// re-open re-reads both MDTs. Cache per connection+area+kind for 24 h (mirrors
+// fetchVsmt/fetchKfCatalog) so the recurring egress is avoided.
+const CONV_KEY = (connId, area, kind) => `ibp:viewer:conv:${connId}:${area}:${kind}`
+const CONV_TTL = 24 * 60 * 60 * 1000
+async function loadConvCached(connection, session, area, kind) {
+  const key = CONV_KEY(connection.id, area, kind)
+  try {
+    const c = JSON.parse(localStorage.getItem(key))
+    if (c && Date.now() - c.ts < CONV_TTL) return c.data
+  } catch { /* ignore */ }
+  const data = await fetchConversionValues(connection, session, area, kind)
+  if (data && data.length) { try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })) } catch { /* quota */ } }
+  return data
 }
 function errText(e) {
   if (e == null) return 'Error'
@@ -158,7 +175,8 @@ export default function TransactionalDataViewer({ connection, session }) {
   const [saving, setSaving]           = useState(false)
   const [saveResult, setSaveResult]   = useState(null)
 
-  const abortRef = useRef(null)
+  const abortRef   = useRef(null)
+  const writeBusy  = useRef(false)   // synchronous guard against double-submit
 
   // ── Load catalog (per area) ──
   useEffect(() => {
@@ -186,8 +204,8 @@ export default function TransactionalDataViewer({ connection, session }) {
   useEffect(() => {
     if (!catalog?.pa) return
     let alive = true
-    fetchConversionValues(connection, session, catalog.pa, 'UOM').then(u => { if (alive) setUnits(u) }).catch(() => {})
-    fetchConversionValues(connection, session, catalog.pa, 'CURR').then(c => { if (alive) setCurrencies(c) }).catch(() => {})
+    loadConvCached(connection, session, catalog.pa, 'UOM').then(u => { if (alive) setUnits(u) }).catch(() => {})
+    loadConvCached(connection, session, catalog.pa, 'CURR').then(c => { if (alive) setCurrencies(c) }).catch(() => {})
     return () => { alive = false }
   }, [connection.id, session?.com0720?.user, catalog?.pa]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -227,8 +245,12 @@ export default function TransactionalDataViewer({ connection, session }) {
     if (timeField && dateTo)   parts.push(`${timeField} le datetime'${dateTo}T23:59:59'`)
     if (selUom)  parts.push(`UOMTOID eq '${esc(selUom)}'`)
     if (selCurr) parts.push(`CURRTOID eq '${esc(selCurr)}'`)
+    // CRÍTICO: acotar la LECTURA a la versión seleccionada — si no, se lee la versión
+    // por defecto pero la escritura (postKfChunk) sí va a `version`, corrompiendo otra
+    // versión. Base ('') no lleva predicado (igual que KeyFigureMigration y la escritura).
+    if (version) parts.push(`VERSIONID eq '${esc(version)}'`)
     return parts.join(' and ') || undefined
-  }, [conds, timeField, dateFrom, dateTo, selUom, selCurr])
+  }, [conds, timeField, dateFrom, dateTo, selUom, selCurr, version])
 
   // ── Load one page (server-side) ──
   const runLoad = useCallback(async q => {
@@ -311,6 +333,8 @@ export default function TransactionalDataViewer({ connection, session }) {
     entries.forEach(e => Object.keys(e.changes).forEach(f => union.add(f)))
     const changedKfs = kfs.filter(k => union.has(k))
     if (!changedKfs.length) return
+    if (writeBusy.current) return            // already sending → ignore double-click
+    writeBusy.current = true
     // AggregationLevelFieldsString = level dims + changed KFs + time (mirrors the KF
     // migration's field order). Each row carries the level identity, the time period
     // as ISO (the import body format), and the KF values (changed → new; untouched in
@@ -347,6 +371,7 @@ export default function TransactionalDataViewer({ connection, session }) {
       setSaveResult({ status: 'error', message: msg })
     } finally {
       setSaving(false)
+      writeBusy.current = false
     }
   }, [edits, query, connection, session, version, catalog, runLoad, t])
 

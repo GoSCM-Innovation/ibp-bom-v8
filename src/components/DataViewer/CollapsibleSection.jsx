@@ -6,7 +6,7 @@
 // refresh / "show data" buttons) stay visible in the header in BOTH states, so
 // the primary controls remain reachable even when the body is hidden.
 //
-// Reusable across the master-data and (future) transactional viewers.
+// Reusable across the master-data and transactional viewers.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BOX = { background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 16px', marginBottom: 12 }
