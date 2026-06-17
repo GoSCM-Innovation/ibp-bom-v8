@@ -852,6 +852,7 @@
   "viewer.txKfs": "Key figures",
   "viewer.txUom": "Unidad destino",
   "viewer.txCurr": "Moneda destino",
+  "viewer.txNonZero": "Ocultar filas en cero (solo valores ≠ 0)",
   "viewer.txDateFrom": "Desde",
   "viewer.txDateTo": "Hasta",
   "viewer.txPickSearch": "Buscar…",

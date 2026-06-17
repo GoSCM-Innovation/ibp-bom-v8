@@ -159,6 +159,7 @@ export default function TransactionalDataViewer({ connection, session }) {
   const [conds, setConds]       = useState([])   // attribute conditions
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
+  const [nonZeroOnly, setNonZeroOnly] = useState(true)   // hide zero rows by default (like KF migration)
 
   // ── Grid query ──
   const [query, setQuery]       = useState(null)   // { page, pageSize, sort, filter, total, columns, keyNames }
@@ -293,24 +294,32 @@ export default function TransactionalDataViewer({ connection, session }) {
     const columns  = [...selectedAttrs, timeField, ...selectedKfs]
     const keyNames = [...selectedAttrs, timeField]
     const select   = columns.join(',')
+    // "Ocultar valores cero": replica el filtro no-cero de la migración de KF. SAP
+    // ignora `ne 0`, así que se usa `(KF gt 0 or KF lt 0)` por cada KF; la fila entra
+    // si CUALQUIER key figure seleccionada es ≠ 0. Opción del usuario (default on).
+    let filter = kfFilter
+    if (nonZeroOnly && selectedKfs.length) {
+      const nz = '(' + selectedKfs.map(kf => `${kf} gt 0 or ${kf} lt 0`).join(' or ') + ')'
+      filter = kfFilter ? `${kfFilter} and ${nz}` : nz
+    }
     // The count (countKf) can take seconds; show progress before the grid renders.
     setApplying(true)
     try {
       let total = 0
       try {
-        total = await countKf(connection, session, catalog.pa, { select, filter: kfFilter, retries: 1, timeout: 60000 })
+        total = await countKf(connection, session, catalog.pa, { select, filter, retries: 1, timeout: 60000 })
       } catch (e) {
         setApplyError(convHint(e, t) || t('viewer.loadError', { msg: errText(e) }))
         return
       }
       // Snapshot the APPLIED level into the query so a later edit/save uses exactly
       // what was loaded (not drafts the user may have changed since).
-      setQuery({ page: 1, pageSize, sort: null, filter: kfFilter, total, columns, keyNames, attrs: [...selectedAttrs], timeField, kfs: [...selectedKfs] })
+      setQuery({ page: 1, pageSize, sort: null, filter, total, columns, keyNames, attrs: [...selectedAttrs], timeField, kfs: [...selectedKfs] })
       setSelCollapsed(true); setDataCollapsed(true)
     } finally {
       setApplying(false)
     }
-  }, [canShow, selectedAttrs, timeField, selectedKfs, kfFilter, pageSize, connection, session, catalog, edits, t])
+  }, [canShow, selectedAttrs, timeField, selectedKfs, kfFilter, nonZeroOnly, pageSize, connection, session, catalog, edits, t])
 
   // ── Editing helpers — only key figures (measures) of the applied query ──
   const editableCols = query?.kfs || []
@@ -510,6 +519,12 @@ export default function TransactionalDataViewer({ connection, session }) {
                 <input type="date" style={{ ...INPUT, width: 'auto' }} value={dateTo} onChange={e => setDateTo(e.target.value)} />
               </div>
             </div>
+
+            {/* Value option: hide zero rows (like the KF migration's non-zero filter) */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text2)', marginBottom: 12, cursor: 'pointer' }}>
+              <input type="checkbox" checked={nonZeroOnly} onChange={e => setNonZeroOnly(e.target.checked)} />
+              {t('viewer.txNonZero')}
+            </label>
 
             {/* Attribute filters */}
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
