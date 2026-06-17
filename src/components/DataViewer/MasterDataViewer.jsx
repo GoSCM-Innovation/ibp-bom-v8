@@ -110,6 +110,7 @@ export default function MasterDataViewer({ connection, session }) {
   const [rows, setRows]         = useState([])
   const [gridLoading, setGridLoading] = useState(false)
   const [gridError, setGridError]     = useState('')
+  const [applying, setApplying]       = useState(false)   // count phase of "Mostrar datos"/"Aplicar"
 
   // ── Editing (Phase 2) ──
   const [editMode, setEditMode]       = useState(false)
@@ -304,18 +305,25 @@ export default function MasterDataViewer({ connection, session }) {
     }
     // A new column/filter set re-reads rows → drop the row selection (it can be redone).
     setSelected({})
-    let total = schema.total
-    if (extraFilter) {
-      try {
-        total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter, retries: 1, timeout: 60000 })
-      } catch { /* keep base total */ }
+    // Show the user we're working during the (possibly slow) count phase — before the
+    // grid (with its own overlay) even renders. Cleared in finally.
+    setApplying(true)
+    try {
+      let total = schema.total
+      if (extraFilter) {
+        try {
+          total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter, retries: 1, timeout: 60000 })
+        } catch { /* keep base total */ }
+      }
+      // Commit the draft column selection — this is the ONLY place a fetch is
+      // triggered for column changes, so editing columns never hits SAP on its own.
+      setAppliedCols(selectedCols)
+      setQuery({ page: 1, pageSize, sort: null, filter: extraFilter, total })
+      // Data is loaded → collapse config to give the grid room.
+      setSelCollapsed(true); setDataCollapsed(true)
+    } finally {
+      setApplying(false)
     }
-    // Commit the draft column selection — this is the ONLY place a fetch is
-    // triggered for column changes, so editing columns never hits SAP on its own.
-    setAppliedCols(selectedCols)
-    setQuery({ page: 1, pageSize, sort: null, filter: extraFilter, total })
-    // Data is loaded → collapse config to give the grid room.
-    setSelCollapsed(true); setDataCollapsed(true)
   }, [mdt, schema, extraFilter, selectedCols, connection, session, pa, version, pageSize, edits, t])
 
   // ── Save edits: review-confirmed upsert → commit → poll → messages ──
@@ -570,8 +578,8 @@ export default function MasterDataViewer({ connection, session }) {
             onToggle={() => setDataCollapsed(v => !v)}
             summary={dataSummary}
             actions={
-              <button style={btnPrimary(!schema.allColumns.length)} disabled={!schema.allColumns.length} onClick={applyAndShow}>
-                {!query ? t('viewer.showData') : (pendingChanges ? t('viewer.applyChanges') : t('viewer.applyFilter'))}
+              <button style={btnPrimary(!schema.allColumns.length || applying)} disabled={!schema.allColumns.length || applying} onClick={applyAndShow}>
+                {applying ? `⏳ ${t('viewer.loading')}` : (!query ? t('viewer.showData') : (pendingChanges ? t('viewer.applyChanges') : t('viewer.applyFilter')))}
               </button>
             }
           >
@@ -657,12 +665,17 @@ export default function MasterDataViewer({ connection, session }) {
 
       {/* Grid / placeholder */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: isMobile ? '0 12px 12px' : '0 20px 16px' }}>
-        {!mdt && (
+        {applying && !query && (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
+            ⏳ {t('viewer.loadingData')}
+          </div>
+        )}
+        {!applying && !mdt && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>
             {t('viewer.selectAreaFirst')}
           </div>
         )}
-        {mdt && schema && !query && !schemaLoading && (
+        {!applying && mdt && schema && !query && !schemaLoading && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>
             {t('viewer.notShown')}
           </div>

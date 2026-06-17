@@ -167,6 +167,7 @@ export default function TransactionalDataViewer({ connection, session }) {
   const [gridLoading, setGridLoading] = useState(false)
   const [gridError, setGridError]     = useState('')
   const [applyError, setApplyError]   = useState('')   // pre-show errors (count / conversion)
+  const [applying, setApplying]       = useState(false) // count phase of "Mostrar datos"/"Aplicar"
 
   // ── Editing (Phase 2): only key figures are editable; level (dims+time) locked ──
   const [editMode, setEditMode]       = useState(false)
@@ -292,17 +293,23 @@ export default function TransactionalDataViewer({ connection, session }) {
     const columns  = [...selectedAttrs, timeField, ...selectedKfs]
     const keyNames = [...selectedAttrs, timeField]
     const select   = columns.join(',')
-    let total = 0
+    // The count (countKf) can take seconds; show progress before the grid renders.
+    setApplying(true)
     try {
-      total = await countKf(connection, session, catalog.pa, { select, filter: kfFilter, retries: 1, timeout: 60000 })
-    } catch (e) {
-      setApplyError(convHint(e, t) || t('viewer.loadError', { msg: errText(e) }))
-      return
+      let total = 0
+      try {
+        total = await countKf(connection, session, catalog.pa, { select, filter: kfFilter, retries: 1, timeout: 60000 })
+      } catch (e) {
+        setApplyError(convHint(e, t) || t('viewer.loadError', { msg: errText(e) }))
+        return
+      }
+      // Snapshot the APPLIED level into the query so a later edit/save uses exactly
+      // what was loaded (not drafts the user may have changed since).
+      setQuery({ page: 1, pageSize, sort: null, filter: kfFilter, total, columns, keyNames, attrs: [...selectedAttrs], timeField, kfs: [...selectedKfs] })
+      setSelCollapsed(true); setDataCollapsed(true)
+    } finally {
+      setApplying(false)
     }
-    // Snapshot the APPLIED level into the query so a later edit/save uses exactly
-    // what was loaded (not drafts the user may have changed since).
-    setQuery({ page: 1, pageSize, sort: null, filter: kfFilter, total, columns, keyNames, attrs: [...selectedAttrs], timeField, kfs: [...selectedKfs] })
-    setSelCollapsed(true); setDataCollapsed(true)
   }, [canShow, selectedAttrs, timeField, selectedKfs, kfFilter, pageSize, connection, session, catalog, edits, t])
 
   // ── Editing helpers — only key figures (measures) of the applied query ──
@@ -449,8 +456,8 @@ export default function TransactionalDataViewer({ connection, session }) {
             onToggle={() => setDataCollapsed(v => !v)}
             summary={levelSummary}
             actions={
-              <button style={btnPrimary(!canShow)} disabled={!canShow} onClick={applyAndShow}>
-                {!query ? t('viewer.showData') : t('viewer.applyFilter')}
+              <button style={btnPrimary(!canShow || applying)} disabled={!canShow || applying} onClick={applyAndShow}>
+                {applying ? `⏳ ${t('viewer.loading')}` : (!query ? t('viewer.showData') : t('viewer.applyFilter'))}
               </button>
             }
           >
@@ -536,10 +543,13 @@ export default function TransactionalDataViewer({ connection, session }) {
 
       {/* Grid / placeholder */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: isMobile ? '0 12px 12px' : '0 20px 16px' }}>
-        {!catalog && !catalogError && (
+        {applying && !query && (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>⏳ {t('viewer.loadingData')}</div>
+        )}
+        {!applying && !catalog && !catalogError && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>{t('viewer.loadingSchema')}</div>
         )}
-        {catalog && !query && (
+        {!applying && catalog && !query && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>{t('viewer.txSelectLevel')}</div>
         )}
         {query && (

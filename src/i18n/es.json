@@ -802,6 +802,7 @@
   "viewer.keyTag": "clave",
   "viewer.notShown": "Define filtros (opcional) y pulsa «Mostrar datos».",
   "viewer.empty": "Sin filas para mostrar.",
+  "viewer.loadingData": "Cargando datos… (consultando SAP)",
   "viewer.fullscreen": "⛶ Pantalla completa",
   "viewer.fullscreenTitle": "Maximizar la tabla a pantalla completa",
   "viewer.exitFullscreen": "⤡ Salir",

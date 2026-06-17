@@ -802,6 +802,7 @@
   "viewer.keyTag": "key",
   "viewer.notShown": "Define filters (optional) and press “Show data”.",
   "viewer.empty": "No rows to show.",
+  "viewer.loadingData": "Loading data… (querying SAP)",
   "viewer.fullscreen": "⛶ Fullscreen",
   "viewer.fullscreenTitle": "Maximize the table to fullscreen",
   "viewer.exitFullscreen": "⤡ Exit",

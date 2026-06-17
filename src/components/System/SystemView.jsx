@@ -44,11 +44,16 @@ export default function SystemView({ connection, session, onLogout }) {
   ]
 
   const [activeApp, setActiveApp] = useState(APPS[0]?.id || null)
+  // The Data Viewer tabs (viewMaster/viewTrans) stay MOUNTED once visited so leaving
+  // and returning preserves their state (selection, loaded page, edits) instead of
+  // resetting. `visited` tracks which of them have been opened at least once.
+  const [visited, setVisited] = useState(() => (activeApp ? { [activeApp]: true } : {}))
 
   // Switching sub-tab leaves the Migration view (unmount cancels the run) — confirm first.
   function selectApp(id) {
     if (id === activeApp) return
     if (activeApp === 'migration' && !confirmLeaveMigration()) return
+    setVisited(v => (v[id] ? v : { ...v, [id]: true }))
     setActiveApp(id)
   }
 
@@ -127,8 +132,17 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
         {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
         {activeApp === 'migration'    && <MigrationTabs  connection={connection} session={session} />}
-        {activeApp === 'viewMaster'   && <MasterDataViewer connection={connection} session={session} />}
-        {activeApp === 'viewTrans'    && <TransactionalDataViewer connection={connection} session={session} />}
+        {/* Data Viewer tabs stay mounted once visited (state persists across tab switches). */}
+        {visited.viewMaster && (
+          <div style={{ display: activeApp === 'viewMaster' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <MasterDataViewer connection={connection} session={session} />
+          </div>
+        )}
+        {visited.viewTrans && (
+          <div style={{ display: activeApp === 'viewTrans' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <TransactionalDataViewer connection={connection} session={session} />
+          </div>
+        )}
       </div>
     </div>
   )
