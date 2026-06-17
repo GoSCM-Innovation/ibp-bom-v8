@@ -860,6 +860,8 @@
   "viewer.txNeedCurr": "This key figure requires a target currency (CURRTOID). Select one and retry.",
   "viewer.txLevelSummary": "{attrs} dims × {time}",
   "viewer.txKfSummary": "{n} key figure(s)",
+  "viewer.txEditHint": "Edit mode: only key figures are editable; dimensions and time are locked. Calculated key figures cannot be saved.",
+  "viewer.txCalcKf": "Key figure {kf} is calculated (not editable): SAP rejected the change.",
   "viewer.loading": "Loading…",
   "viewer.loadError": "Could not load the data: {msg}",
   "viewer.prev": "‹ Previous",

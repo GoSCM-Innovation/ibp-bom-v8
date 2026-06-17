@@ -77,7 +77,7 @@ export default function DataGrid({
   page, pageCount, pageSize, pageSizeOptions = [50, 100, 200, 500],
   onPageChange, onPageSizeChange,
   // Phase 2 editing (all optional — absent ⇒ read-only grid):
-  editMode = false, editableCols = [], edits = {}, editCount = 0,
+  editMode = false, editableCols = [], edits = {}, editCount = 0, editHint,
   onToggleEdit, onCellEdit, onSaveEdits, onDiscardEdits,
   // Phase 3 row selection / delete (optional — absent ⇒ no checkboxes):
   selectedKeys = {}, selCount = 0, onToggleRow, onToggleAllPage, onDeleteSelected,
@@ -85,6 +85,7 @@ export default function DataGrid({
   const { t } = useI18n()
   const keySet = new Set(keyNames)
   const editableSet = new Set(editableCols)
+  const editHintText = editHint || t('viewer.editHint')
   const [gotoVal, setGotoVal] = useState('')
   const [colFilters, setColFilters] = useState({})   // { [col]: text } — prefix match, current page only
   const [fullscreen, setFullscreen] = useState(false)
@@ -191,7 +192,7 @@ export default function DataGrid({
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 2px 6px', flexShrink: 0, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: 'var(--text3)' }}>ⓘ {t('viewer.colFilterNote')}</span>
         {!editMode && <span style={{ fontSize: 11, color: 'var(--text3)' }}>ⓘ {t('viewer.gridHint')}</span>}
-        {editMode && <span style={{ fontSize: 11, color: 'var(--accent)' }}>✎ {t('viewer.editHint')}</span>}
+        {editMode && <span style={{ fontSize: 11, color: 'var(--accent)' }}>✎ {editHintText}</span>}
         {active.length > 0 && (
           <span style={{ fontSize: 11, color: 'var(--accent)' }}>
             {t('viewer.showingOf', { n: visibleRows.length.toLocaleString(), total: rows.length.toLocaleString() })}
@@ -211,7 +212,7 @@ export default function DataGrid({
           <button
             style={{ ...topBtn, ...(editMode ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}
             onClick={() => { setEditing(null); onToggleEdit() }}
-            title={t('viewer.editHint')}
+            title={editHintText}
           >
             ✎ {editMode ? t('viewer.editActive') : t('viewer.edit')}
           </button>

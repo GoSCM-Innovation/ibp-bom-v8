@@ -860,6 +860,8 @@
   "viewer.txNeedCurr": "Esta key figure requiere una moneda destino (CURRTOID). Selecciónala y reintenta.",
   "viewer.txLevelSummary": "{attrs} dim. × {time}",
   "viewer.txKfSummary": "{n} key figure(s)",
+  "viewer.txEditHint": "Modo edición: solo las key figures son editables; dimensiones y tiempo están bloqueados. Las key figures calculadas no se pueden guardar.",
+  "viewer.txCalcKf": "La key figure {kf} es calculada (no editable): SAP rechazó el cambio.",
   "viewer.loading": "Cargando…",
   "viewer.loadError": "No se pudieron cargar los datos: {msg}",
   "viewer.prev": "‹ Anterior",

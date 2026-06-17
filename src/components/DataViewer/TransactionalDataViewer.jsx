@@ -17,11 +17,15 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   fetchKfCatalog, invalidateKfCatalog, fetchConversionValues,
   countKf, readKfPage,
+  fetchCsrf, getTransactionId, initiateParallelProcess, postKfChunk,
+  commitTransaction, waitForProcessed, readMessages,
+  odataDateToIso, chunkByBytes, MAX_POST_BYTES,
 } from '../../services/planningDataApi'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
 import { SearchSelect } from '../Migration/FilterControls'
 import CollapsibleSection from './CollapsibleSection'
 import DataGrid from './DataGrid'
+import EditReviewModal from './EditReviewModal'
 
 // Standard SAP IBP time levels (timestamp fields). week is the usual default.
 const TIME_LEVELS = [
@@ -147,6 +151,13 @@ export default function TransactionalDataViewer({ connection, session }) {
   const [gridError, setGridError]     = useState('')
   const [applyError, setApplyError]   = useState('')   // pre-show errors (count / conversion)
 
+  // ── Editing (Phase 2): only key figures are editable; level (dims+time) locked ──
+  const [editMode, setEditMode]       = useState(false)
+  const [edits, setEdits]             = useState({})    // { [rowKey]: { row, changes } }
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [saveResult, setSaveResult]   = useState(null)
+
   const abortRef = useRef(null)
 
   // ── Load catalog (per area) ──
@@ -201,6 +212,7 @@ export default function TransactionalDataViewer({ connection, session }) {
     setSelectedAttrs([]); setSelectedKfs([])
     setConds([]); setDateFrom(''); setDateTo(''); setSelUom(''); setSelCurr('')
     setQuery(null); setRows([]); setGridError(''); setApplyError('')
+    setEdits({}); setEditMode(false); setSaveResult(null)
     setSelCollapsed(false); setDataCollapsed(false)
   }, [area, version])
 
@@ -249,6 +261,11 @@ export default function TransactionalDataViewer({ connection, session }) {
   // "Mostrar datos" / "Aplicar": validate, count, then load page 1.
   const applyAndShow = useCallback(async () => {
     if (!canShow) { setApplyError(t('viewer.txNeedKf')); return }
+    // Re-reading at a new level/filter invalidates unsaved KF edits.
+    if (Object.keys(edits).length) {
+      if (!window.confirm(t('viewer.discardEditsConfirm'))) return
+      setEdits({})
+    }
     setApplyError('')
     const columns  = [...selectedAttrs, timeField, ...selectedKfs]
     const keyNames = [...selectedAttrs, timeField]
@@ -260,9 +277,78 @@ export default function TransactionalDataViewer({ connection, session }) {
       setApplyError(convHint(e, t) || t('viewer.loadError', { msg: errText(e) }))
       return
     }
-    setQuery({ page: 1, pageSize, sort: null, filter: kfFilter, total, columns, keyNames })
+    // Snapshot the APPLIED level into the query so a later edit/save uses exactly
+    // what was loaded (not drafts the user may have changed since).
+    setQuery({ page: 1, pageSize, sort: null, filter: kfFilter, total, columns, keyNames, attrs: [...selectedAttrs], timeField, kfs: [...selectedKfs] })
     setSelCollapsed(true); setDataCollapsed(true)
-  }, [canShow, selectedAttrs, timeField, selectedKfs, kfFilter, pageSize, connection, session, catalog, t])
+  }, [canShow, selectedAttrs, timeField, selectedKfs, kfFilter, pageSize, connection, session, catalog, edits, t])
+
+  // ── Editing helpers — only key figures (measures) of the applied query ──
+  const editableCols = query?.kfs || []
+  const onCellEdit = useCallback((rk, field, value, row) => {
+    setEdits(prev => {
+      const orig    = row[field]
+      const cur     = prev[rk] || { row, changes: {} }
+      const changes = { ...cur.changes }
+      if (String(value) === String(orig ?? '')) delete changes[field]
+      else changes[field] = value
+      const next = { ...prev }
+      if (Object.keys(changes).length === 0) delete next[rk]
+      else next[rk] = { row: cur.row, changes }
+      return next
+    })
+  }, [])
+  const editCount    = Object.keys(edits).length
+  const discardEdits = useCallback(() => setEdits({}), [])
+
+  // ── Save KF edits: getTransactionID → [IPP] → postKfChunk → commit → poll → msgs ──
+  const doSave = useCallback(async () => {
+    const entries = Object.values(edits)
+    if (!entries.length || !query) return
+    const { attrs, timeField: tf, kfs } = query
+    // Only the key figures actually changed (in their applied order).
+    const union = new Set()
+    entries.forEach(e => Object.keys(e.changes).forEach(f => union.add(f)))
+    const changedKfs = kfs.filter(k => union.has(k))
+    if (!changedKfs.length) return
+    // AggregationLevelFieldsString = level dims + changed KFs + time (mirrors the KF
+    // migration's field order). Each row carries the level identity, the time period
+    // as ISO (the import body format), and the KF values (changed → new; untouched in
+    // this row but in the batch's union → original value, an idempotent no-op).
+    const fields = [...attrs, ...changedKfs, tf].join(',')
+    const postRows = entries.map(({ row, changes }) => {
+      const o = {}
+      for (const a of attrs) o[a] = row[a] ?? ''
+      o[tf] = odataDateToIso(row[tf])
+      for (const k of changedKfs) o[k] = (k in changes) ? changes[k] : (row[k] ?? '0')
+      return o
+    })
+
+    setSaving(true); setSaveResult(null)
+    try {
+      let csrf = null
+      try { csrf = await fetchCsrf(connection, session) } catch { /* proxy fetches per POST */ }
+      const txId = await getTransactionId(connection, session)
+      try { await initiateParallelProcess(connection, session, txId, { planningArea: catalog.pa, versionId: version, transactionName: 'IBP-Viewer-KF-EDIT' }) } catch { /* best effort */ }
+      const chunks = chunkByBytes(postRows, MAX_POST_BYTES, 5000)
+      for (const chunk of chunks) {
+        await postKfChunk(connection, session, catalog.pa, txId, chunk, { fields, versionId: version, doCommit: false, csrf })
+      }
+      await commitTransaction(connection, session, txId, { csrf })
+      const st   = await waitForProcessed(connection, session, txId, { timeoutMs: 120000 })
+      const msgs = await readMessages(connection, session, catalog.pa, txId)
+      const errors = (msgs || []).filter(m => ['E', 'A'].includes(m.Severity))
+      const status = errors.length ? 'warning' : (st === 'ERROR' ? 'error' : 'ok')
+      setSaveResult({ status, count: postRows.length, errors, message: st === 'ERROR' ? t('viewer.saveProcessError') : '' })
+      if (status === 'ok') { setEdits({}); runLoad(query) }
+    } catch (e) {
+      // A calculated key figure rejects the POST (HTTP 500 "invalid column name").
+      const msg = e?.isCalculated ? t('viewer.txCalcKf', { kf: e.calculatedKf || '' }) : errText(e)
+      setSaveResult({ status: 'error', message: msg })
+    } finally {
+      setSaving(false)
+    }
+  }, [edits, query, connection, session, version, catalog, runLoad, t])
 
   const onPageChange     = p  => setQuery(q => q ? { ...q, page: Math.min(Math.max(1, p), pageCount) } : q)
   const onPageSizeChange = sz => { setPageSize(sz); setQuery(q => q ? { ...q, pageSize: sz, page: 1 } : q) }
@@ -446,9 +532,28 @@ export default function TransactionalDataViewer({ connection, session }) {
             pageSizeOptions={PAGE_SIZES}
             onPageChange={onPageChange}
             onPageSizeChange={onPageSizeChange}
+            editMode={editMode}
+            editableCols={editableCols}
+            edits={edits}
+            editCount={editCount}
+            editHint={t('viewer.txEditHint')}
+            onToggleEdit={() => setEditMode(v => !v)}
+            onCellEdit={onCellEdit}
+            onSaveEdits={() => { setSaveResult(null); setShowSaveModal(true) }}
+            onDiscardEdits={discardEdits}
           />
         )}
       </div>
+
+      <EditReviewModal
+        open={showSaveModal}
+        edits={edits}
+        keyNames={query?.keyNames || []}
+        saving={saving}
+        result={saveResult}
+        onConfirm={doSave}
+        onClose={() => setShowSaveModal(false)}
+      />
     </div>
   )
 }
