@@ -536,7 +536,7 @@ export default function MasterDataViewer({ connection, session }) {
               <label style={LABEL}>{t('viewer.version')}</label>
               <select style={SELECT} value={version} onChange={e => setVersion(e.target.value)} disabled={!pa}>
                 <option value="">{t('viewer.versionBase')}</option>
-                {versions.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+                {versions.map(v => <option key={v.id} value={v.id}>{v.id}{v.name && v.name !== v.id ? ` — ${v.name}` : ''}</option>)}
               </select>
             </div>
             <div>

@@ -435,7 +435,7 @@ export default function TransactionalDataViewer({ connection, session }) {
               <label style={LABEL}>{t('viewer.version')}</label>
               <select style={SELECT} value={version} onChange={e => setVersion(e.target.value)} disabled={!catalog}>
                 <option value="">{t('viewer.versionBase')}</option>
-                {versions.filter(v => v.id).map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+                {versions.filter(v => v.id).map(v => <option key={v.id} value={v.id}>{v.id}{v.name && v.name !== v.id ? ` — ${v.name}` : ''}</option>)}
               </select>
             </div>
           </div>
