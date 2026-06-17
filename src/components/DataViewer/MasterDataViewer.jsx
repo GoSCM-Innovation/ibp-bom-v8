@@ -693,6 +693,7 @@ export default function MasterDataViewer({ connection, session }) {
             page={query.page}
             pageCount={pageCount}
             pageSize={query.pageSize}
+            total={query.total}
             pageSizeOptions={PAGE_SIZES}
             onPageChange={onPageChange}
             onPageSizeChange={onPageSizeChange}

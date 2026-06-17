@@ -74,7 +74,7 @@ const cellText = v => { const c = formatCell(v); return c == null ? '' : String(
 export default function DataGrid({
   columns, rows, keyNames = [], loading, error,
   sort, onSort, onReorder,
-  page, pageCount, pageSize, pageSizeOptions = [50, 100, 200, 500],
+  page, pageCount, pageSize, total, pageSizeOptions = [50, 100, 200, 500],
   onPageChange, onPageSizeChange,
   // Phase 2 editing (all optional — absent ⇒ read-only grid):
   editMode = false, editableCols = [], edits = {}, editCount = 0, editHint,
@@ -362,6 +362,11 @@ export default function DataGrid({
 
       {/* Pagination bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 2px', flexShrink: 0, flexWrap: 'wrap' }}>
+        {total != null && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+            {t('viewer.totalRows', { n: Number(total).toLocaleString() })}
+          </span>
+        )}
         <button disabled={loading || page <= 1} onClick={() => onPageChange(page - 1)} style={navBtn(loading || page <= 1)}>
           {t('viewer.prev')}
         </button>
