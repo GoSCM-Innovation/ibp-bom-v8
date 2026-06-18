@@ -102,6 +102,7 @@ export function MultiValueSelect({ value, onChange, loadValues, placeholder, dis
   const [error, setError]     = useState(false)
   const [all, setAll]         = useState(null)   // null = not loaded yet
   const [q, setQ]             = useState('')
+  const [typed, setTyped]     = useState('')     // free-text being entered (added on Enter/comma)
   const boxRef = useRef(null)
 
   useEffect(() => {
@@ -123,11 +124,23 @@ export function MultiValueSelect({ value, onChange, loadValues, placeholder, dis
     }
   }
 
-  const selected = new Set(splitValues(value))
+  const selectedArr = splitValues(value)
+  const selected = new Set(selectedArr)
   const toggle = v => {
     const next = new Set(selected)
     if (next.has(v)) next.delete(v); else next.add(v)
     onChange([...next].join(','))
+  }
+  const removeToken = tok => onChange(selectedArr.filter(t => t !== tok).join(','))
+  // Commit the free-typed text as one or more raw tokens (comma-separated), keeping
+  // the stored value raw — the chips render the readable label, not what's stored.
+  const commitTyped = () => {
+    const toks = splitValues(typed)
+    setTyped('')
+    if (!toks.length) return
+    const merged = [...selectedArr]
+    for (const tk of toks) if (!merged.includes(tk)) merged.push(tk)
+    onChange(merged.join(','))
   }
   const ql = q.toLowerCase()
   // Match against both the raw token and its human label, so a search like "28/7"
@@ -136,28 +149,63 @@ export function MultiValueSelect({ value, onChange, loadValues, placeholder, dis
     !q || v.toLowerCase().includes(ql) || displayValue(v).toLowerCase().includes(ql))
 
   return (
-    <div ref={boxRef} style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', gap: 4 }}>
-      <input
-        value={value || ''}
-        disabled={disabled}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={{
-          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
-          color: 'var(--text)', fontSize: 11, padding: '4px 8px', flex: 1, minWidth: 0,
-          outline: 'none', fontFamily: 'var(--mono)',
-        }}
-      />
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={openDropdown}
-        title={t('flt.loadVals')}
-        style={{
-          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
-          color: 'var(--text2)', fontSize: 10, padding: '4px 7px', cursor: 'pointer', flexShrink: 0,
-        }}
-      >▾</button>
+    <div ref={boxRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+        {/* Input-like box holding the selected values as readable chips + a free-text field. */}
+        <div
+          style={{
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+            flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+            gap: 4, padding: '3px 6px', opacity: disabled ? 0.6 : 1,
+          }}
+        >
+          {selectedArr.map(tok => (
+            <span
+              key={tok}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%',
+                background: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--text)',
+                borderRadius: 4, padding: '2px 4px 2px 6px', fontSize: 11, fontFamily: 'var(--mono)',
+              }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayValue(tok)}</span>
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => removeToken(tok)}
+                  title={t('flt.remove')}
+                  style={{ background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, flexShrink: 0 }}
+                >×</button>
+              )}
+            </span>
+          ))}
+          <input
+            value={typed}
+            disabled={disabled}
+            onChange={e => setTyped(e.target.value)}
+            onBlur={commitTyped}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitTyped() }
+              else if (e.key === 'Backspace' && !typed && selectedArr.length) { e.preventDefault(); removeToken(selectedArr[selectedArr.length - 1]) }
+            }}
+            placeholder={selectedArr.length ? '' : placeholder}
+            style={{
+              background: 'none', border: 'none', color: 'var(--text)', fontSize: 11,
+              padding: '1px 2px', flex: 1, minWidth: 60, outline: 'none', fontFamily: 'var(--mono)',
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={openDropdown}
+          title={t('flt.loadVals')}
+          style={{
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+            color: 'var(--text2)', fontSize: 10, padding: '4px 7px', cursor: 'pointer', flexShrink: 0,
+          }}
+        >▾</button>
+      </div>
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, marginTop: 3,
