@@ -11,6 +11,25 @@ export function splitValues(value) {
   return String(value || '').split(',').map(s => s.trim()).filter(Boolean)
 }
 
+// OData v2 date strings come back as "/Date(1753734272000+0000)/". They CANNOT be
+// compared as quoted strings (SAP: "Invalid parametertype used at function 'eq'") —
+// a date field needs a date literal. We emit a datetimeoffset literal because the
+// tenant returns the value with an explicit +0000 offset.
+const ODATA_DATE_RE = /^\/Date\((\d+)([+-]\d{4})?\)\/$/
+
+// Returns the OData literal for a value: a datetimeoffset literal for /Date(...)/
+// values, otherwise a normal quoted string (single quotes doubled).
+function odataLiteral(val) {
+  const s = String(val)
+  const m = s.match(ODATA_DATE_RE)
+  if (m) {
+    // epoch ms → ISO UTC, dropping milliseconds: datetimeoffset'2026-07-28T20:51:12Z'
+    const iso = new Date(parseInt(m[1], 10)).toISOString().replace(/\.\d{3}Z$/, 'Z')
+    return `datetimeoffset'${iso}'`
+  }
+  return `'${s.replace(/'/g, "''")}'`
+}
+
 // Builds an OData $filter fragment from UI conditions:
 //   [{ field, op: 'in'|'sw', value: 'A' | 'A,B,C' }]
 //     → "(FIELD eq 'A' or FIELD eq 'B') and startswith(FIELD2,'X')"
@@ -28,16 +47,25 @@ export function buildConditionFilter(conds) {
   for (const c of (conds || [])) {
     const vals = splitValues(c.value)
     if (!c.field || vals.length === 0) continue
+    // startswith() is a string function — it only applies to text fields, so keep
+    // the raw quoted form here (a date value wouldn't make sense with 'sw' anyway).
     if (c.op === 'sw') parts.push(`startswith(${c.field},'${esc(vals[0])}')`)
-    else if (vals.length === 1) parts.push(`${c.field} eq '${esc(vals[0])}'`)
-    else parts.push('(' + vals.map(v => `${c.field} eq '${esc(v)}'`).join(' or ') + ')')
+    else if (vals.length === 1) parts.push(`${c.field} eq ${odataLiteral(vals[0])}`)
+    else parts.push('(' + vals.map(v => `${c.field} eq ${odataLiteral(v)}`).join(' or ') + ')')
   }
   return parts.join(' and ')
 }
 
+// Human-readable label for a single value: OData date strings become locale dates,
+// everything else is shown as-is.
+export function displayValue(val) {
+  const m = String(val).match(ODATA_DATE_RE)
+  return m ? new Date(parseInt(m[1], 10)).toLocaleString() : String(val)
+}
+
 // Compact human chip for an active condition (shown next to the table/section).
 export function condChip(c) {
-  const vals = splitValues(c.value)
+  const vals = splitValues(c.value).map(displayValue)
   if (!c.field || vals.length === 0) return null
   if (c.op === 'sw') return `${c.field} ⌐ ${vals[0]}…`
   if (vals.length === 1) return `${c.field} = ${vals[0]}`

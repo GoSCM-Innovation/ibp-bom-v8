@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useRef, useEffect } from 'react'
 import { useI18n } from '../../context/I18nContext'
-import { splitValues } from '../../services/filterUtils'
+import { splitValues, displayValue } from '../../services/filterUtils'
 
 // Dropdown with a built-in TEXT SEARCH — for long option lists (fields, key
 // figures, units…) where a native <select> is hard to scan. Click opens a panel
@@ -130,7 +130,10 @@ export function MultiValueSelect({ value, onChange, loadValues, placeholder, dis
     onChange([...next].join(','))
   }
   const ql = q.toLowerCase()
-  const filtered = (all || []).filter(v => !q || v.toLowerCase().includes(ql))
+  // Match against both the raw token and its human label, so a search like "28/7"
+  // finds a date value stored as "/Date(...)/".
+  const filtered = (all || []).filter(v =>
+    !q || v.toLowerCase().includes(ql) || displayValue(v).toLowerCase().includes(ql))
 
   return (
     <div ref={boxRef} style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', gap: 4 }}>
@@ -190,7 +193,7 @@ export function MultiValueSelect({ value, onChange, loadValues, placeholder, dis
                 }}
               >
                 <input type="checkbox" checked={selected.has(v)} onChange={() => toggle(v)} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayValue(v)}</span>
               </label>
             ))}
           </div>
