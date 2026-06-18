@@ -90,7 +90,11 @@ export default function App() {
       return <GlobalResumen connections={connections} sessions={sessions} onLogin={(id) => setLoginTarget(id)} onConfigure={() => setActiveId('connections')} />
     }
     if (activeConn) {
-      return <SystemView connection={activeConn} session={sessions[activeConn.id]} onLogout={() => handleLogout(activeConn.id)} />
+      // key={activeConn.id} fuerza el remontaje al cambiar de conexión: aísla TODO
+      // el estado en memoria (selección de área/versión/tabla, filtros, filas, etc.)
+      // de cada sub-pestaña. Sin esto, React reutiliza la instancia al saltar de una
+      // conexión a otra y arrastra datos de la conexión anterior.
+      return <SystemView key={activeConn.id} connection={activeConn} session={sessions[activeConn.id]} onLogout={() => handleLogout(activeConn.id)} />
     }
     return null
   }
