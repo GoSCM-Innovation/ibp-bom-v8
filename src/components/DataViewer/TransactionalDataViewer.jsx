@@ -180,6 +180,7 @@ export default function TransactionalDataViewer({ connection, session }) {
 
   const abortRef   = useRef(null)
   const writeBusy  = useRef(false)   // synchronous guard against double-submit
+  const reorderOnlyRef = useRef(false) // skip the load effect on column-reorder (display only)
 
   // ── Load catalog (per area) ──
   useEffect(() => {
@@ -285,7 +286,17 @@ export default function TransactionalDataViewer({ connection, session }) {
     }
   }, [catalog, connection, session, t])
 
-  useEffect(() => { if (query) runLoad(query) }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // A column reorder is display-only — the data is unchanged, so skip the refetch.
+    if (reorderOnlyRef.current) { reorderOnlyRef.current = false; return }
+    if (query) runLoad(query)
+  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reorder columns by dragging headers — visual only, no server call.
+  const onReorderColumns = useCallback(newOrder => {
+    reorderOnlyRef.current = true
+    setQuery(q => (q ? { ...q, columns: newOrder } : q))
+  }, [])
 
   const canShow = !!catalog?.pa && !!timeField && selectedKfs.length > 0
 
@@ -587,6 +598,7 @@ export default function TransactionalDataViewer({ connection, session }) {
         {query && (
           <DataGrid
             columns={query.columns}
+            onReorder={onReorderColumns}
             rows={rows}
             keyNames={query.keyNames}
             loading={gridLoading}
