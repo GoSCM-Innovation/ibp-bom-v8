@@ -309,12 +309,17 @@ export default function MasterDataViewer({ connection, session }) {
     // grid (with its own overlay) even renders. Cleared in finally.
     setApplying(true)
     try {
+      // Recount on EVERY "Aplicar" — the data may be a new run with a different row
+      // count, so reusing the cached schema.total would leave the total/pagination
+      // stale. With no filter, extraFilter is undefined → this returns the full table
+      // count, which is also the fresh schema.total (updated below for the panel text).
       let total = schema.total
-      if (extraFilter) {
-        try {
-          total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter, retries: 1, timeout: 60000 })
-        } catch { /* keep base total */ }
-      }
+      try {
+        total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter, retries: 1, timeout: 60000 })
+      } catch { /* keep previous total */ }
+      // Without a filter the recount IS the whole-table count → refresh the panel's
+      // "N registros" text too. With a filter, schema.total stays the unfiltered total.
+      if (!extraFilter) setSchema(s => s ? { ...s, total } : s)
       // Commit the draft column selection — this is the ONLY place a fetch is
       // triggered for column changes, so editing columns never hits SAP on its own.
       setAppliedCols(selectedCols)
