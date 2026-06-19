@@ -45,7 +45,7 @@ function parseImportText(text, t) {
       com0326:  c.com0326  && typeof c.com0326  === 'object' ? { url: c.com0326.url  || '', user: c.com0326.user  || '' } : undefined,
       com0068:  c.com0068  && typeof c.com0068  === 'object' ? { url: c.com0068.url  || '', user: c.com0068.user  || '' } : undefined,
       com0924:  c.com0924  && typeof c.com0924  === 'object' ? { url: c.com0924.url  || '', user: c.com0924.user  || '' } : undefined,
-      com0720:  c.com0720  && typeof c.com0720  === 'object' ? { url: c.com0720.url  || '', user: c.com0720.user  || '' } : undefined,
+      com0720:  c.com0720  && typeof c.com0720  === 'object' ? { url: c.com0720.url  || '', urlTx: c.com0720.urlTx || '', user: c.com0720.user  || '' } : undefined,
     })
   })
 

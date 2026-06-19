@@ -112,23 +112,13 @@ async function withRetry(fn, { retries = 2, signal } = {}) {
 
 // ─── Service URL ───────────────────────────────────────────────────────────────
 
-// Derives the PLANNING_DATA_API_SRV URL from the master-data (com0720) URL. Both
-// live under the same /sap/opu/odata/IBP/ prefix and the same comm. scenario, so a
-// service-name swap is safe and keeps a single configured endpoint per connection.
+// The PLANNING_DATA_API_SRV URL is configured EXPLICITLY per connection
+// (com0720.urlTx). SAP_COM_0720 enables both services with the same user, but the
+// transactional URL is entered by hand in the connection form — no derivation. An
+// empty value means the connection predates this field; the caller surfaces a clear
+// "configure the transactional URL" hint instead of guessing.
 export function planningServiceRoot(connection) {
-  const master = connection?.com0720?.url || ''
-  if (!master) return ''
-  if (/MASTER_DATA_API_SRV/i.test(master)) {
-    return master.replace(/MASTER_DATA_API_SRV/i, 'PLANNING_DATA_API_SRV')
-  }
-  // Fallback: a bare host or a base path → append the standard service path.
-  const trimmed = master.replace(/\/+$/, '')
-  if (/\/sap\/opu\/odata\/ibp$/i.test(trimmed)) return `${trimmed}/PLANNING_DATA_API_SRV`
-  if (/PLANNING_DATA_API_SRV/i.test(trimmed)) return trimmed
-  try {
-    const u = new URL(trimmed)
-    return `${u.origin}/sap/opu/odata/IBP/PLANNING_DATA_API_SRV`
-  } catch { return trimmed }
+  return connection?.com0720?.urlTx || ''
 }
 
 // Central helper: every call reuses com0720 credentials but targets the planning URL.

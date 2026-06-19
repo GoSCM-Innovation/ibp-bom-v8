@@ -24,8 +24,9 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
       user: initial?.com0924?.user || '',
     },
     com0720: {
-      url:  initial?.com0720?.url  || '',
-      user: initial?.com0720?.user || '',
+      url:   initial?.com0720?.url   || '',   // MASTER_DATA_API_SRV
+      urlTx: initial?.com0720?.urlTx || '',   // PLANNING_DATA_API_SRV (mismo acuerdo y usuario)
+      user:  initial?.com0720?.user  || '',
     },
   })
   const [error, setError] = useState('')
@@ -47,6 +48,17 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     return null
   }
 
+  // SAP_COM_0720 habilita DOS servicios (maestro + transaccional) con el mismo
+  // usuario: si se usa el bloque, ambas URLs y el usuario son obligatorios.
+  function validate0720(a) {
+    const hasAny = a.url || a.urlTx || a.user
+    if (!hasAny) return null
+    if (!a.url)   return t('form.errAgreeMissingUrl', { name: 'SAP_COM_0720' })
+    if (!a.urlTx) return t('form.errAgree0720MissingUrlTx')
+    if (!a.user)  return t('form.errAgreeMissingUser', { name: 'SAP_COM_0720' })
+    return null
+  }
+
   function handleSave() {
     if (!form.name)    { setError(t('form.errNameRequired')); return }
     if (!form.ambiente) { setError(t('form.errEnvRequired')); return }
@@ -54,7 +66,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     const err326      = validateAgreement(form.com0326, 'SAP_COM_0326')
     const err068      = validateAgreement(form.com0068, 'SAP_COM_0068')
     const errMetering = validateAgreement(form.com0924, 'SAP_COM_0924')
-    const err0720     = validateAgreement(form.com0720, 'SAP_COM_0720')
+    const err0720     = validate0720(form.com0720)
     if (err326)      { setError(err326);      return }
     if (err068)      { setError(err068);      return }
     if (errMetering) { setError(errMetering); return }
@@ -71,7 +83,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     const has326      = form.com0326.url || form.com0326.user
     const has068      = form.com0068.url || form.com0068.user
     const hasMetering = form.com0924.url || form.com0924.user
-    const has0720     = form.com0720.url || form.com0720.user
+    const has0720     = form.com0720.url || form.com0720.urlTx || form.com0720.user
 
     if (has326) {
       conn.com0326 = { url: form.com0326.url.replace(/\/$/, ''), user: form.com0326.user }
@@ -92,7 +104,11 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
     }
 
     if (has0720) {
-      conn.com0720 = { url: form.com0720.url.replace(/\/$/, ''), user: form.com0720.user }
+      conn.com0720 = {
+        url:   form.com0720.url.replace(/\/$/, ''),
+        urlTx: form.com0720.urlTx.replace(/\/$/, ''),
+        user:  form.com0720.user,
+      }
     } else {
       delete conn.com0720
     }
@@ -149,14 +165,16 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
         isMobile={isMobile}
       />
 
-      {/* SAP_COM_0720 */}
+      {/* SAP_COM_0720 — habilita dos servicios (maestro + transaccional), mismo usuario */}
       <AgreementSection
         title={t('form.agree0720Title')}
         subtitle={t('form.agree0720Subtitle')}
         values={form.com0720}
         onChange={(k, v) => setAgreement('com0720', k, v)}
+        urlLabel={t('form.agree0720UrlMasterLabel')}
         urlPlaceholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata/IBP/MASTER_DATA_API_SRV"
-        urlLabel={t('form.agreeUrlLabel')}
+        url2Label={t('form.agree0720UrlTxLabel')}
+        url2Placeholder="https://tenant-api.scmibp.ondemand.com/sap/opu/odata/IBP/PLANNING_DATA_API_SRV"
         userLabel={t('form.userLabel')}
         isMobile={isMobile}
       />
@@ -188,7 +206,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }) {
   )
 }
 
-function AgreementSection({ title, subtitle, values, onChange, urlPlaceholder, urlLabel, userLabel, isMobile }) {
+function AgreementSection({ title, subtitle, values, onChange, urlPlaceholder, urlLabel, url2Label, url2Placeholder, userLabel, isMobile }) {
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ marginBottom: 10 }}>
@@ -199,6 +217,9 @@ function AgreementSection({ title, subtitle, values, onChange, urlPlaceholder, u
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
         <Field label={urlLabel} value={values.url} onChange={v => onChange('url', v)} placeholder={urlPlaceholder || 'https://tenant-api.scmibp.ondemand.com/...'} mono />
+        {url2Label && (
+          <Field label={url2Label} value={values.urlTx} onChange={v => onChange('urlTx', v)} placeholder={url2Placeholder || 'https://tenant-api.scmibp.ondemand.com/...'} mono />
+        )}
         <Field label={userLabel} value={values.user} onChange={v => onChange('user', v)} placeholder="COM_USER" mono />
       </div>
     </div>

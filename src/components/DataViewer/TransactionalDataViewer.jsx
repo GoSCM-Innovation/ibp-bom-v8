@@ -184,6 +184,12 @@ export default function TransactionalDataViewer({ connection, session }) {
   // ── Load catalog (per area) ──
   useEffect(() => {
     let alive = true
+    // No transactional URL configured (e.g. a connection saved before this field
+    // existed) → don't attempt a read against an empty service root; show a clear hint.
+    if (!connection?.com0720?.urlTx) {
+      setCatalog(null); setCatalogError(t('viewer.txNoUrl')); setCatalogLoading(false)
+      return
+    }
     setCatalogLoading(true); setCatalogError('')
     fetchKfCatalog(connection, session, { pa: area || undefined })
       .then(cat => {
