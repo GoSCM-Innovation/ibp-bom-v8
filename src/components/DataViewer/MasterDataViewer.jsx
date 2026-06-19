@@ -177,9 +177,16 @@ export default function MasterDataViewer({ connection, session }) {
     const ac = new AbortController()
     setSchemaLoading(true)
     Promise.all([
-      // Schema is version-independent; read it WITHOUT the version filter (a
-      // version-filtered sample read can be pathologically slow on some tenants).
-      fetchFieldNames(connection, session, mdt, { planningArea: pa, versionId: '', signal: ac.signal }),
+      // Schema is normally version-independent, so read it WITHOUT the version
+      // filter (a version-filtered sample read can be pathologically slow on some
+      // tenants). BUT version-specific master data only has rows UNDER a version —
+      // a version-less sample returns 0 rows and yields no columns ("Columnas 0/0").
+      // So if the fast read finds nothing and a version is selected, retry WITH it.
+      (async () => {
+        const f = await fetchFieldNames(connection, session, mdt, { planningArea: pa, versionId: '', signal: ac.signal })
+        if (f || !version) return f
+        return fetchFieldNames(connection, session, mdt, { planningArea: pa, versionId: version, signal: ac.signal })
+      })(),
       fetchKeyNames(connection, session, mdt, { planningArea: pa, versionId: version, signal: ac.signal }),
       fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, retries: 1, timeout: 60000, signal: ac.signal }),
     ]).then(([fields, keys, total]) => {
