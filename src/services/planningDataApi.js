@@ -145,23 +145,28 @@ const qenc = v => encodeURIComponent(v)
 // Returns the planning area entity-set name exposed to this user (e.g. ASIBPTS,
 // LAALIAXIS). The area is the base set: not generic, not a <PA>Trans/<PA>Message.
 export async function discoverPlanningArea(conn, session, { signal } = {}) {
-  const resp = await pcall(conn, session, { path: '/?$format=json', signal, timeout: 110000 })
-  if (!resp.ok) throw await httpError(resp)
-  const data = await resp.json()
-  const sets = data?.d?.EntitySets ?? []
-  const base = sets.filter(s =>
-    !GENERIC_SETS.has(s) && !s.endsWith('Trans') && !s.endsWith('Message')
-  )
-  return base   // usually length 1; UI lets the user pick if more than one
+  // Idempotent discovery read → retry transient 5xx (mirrors countKf/readKfPage).
+  return withRetry(async () => {
+    const resp = await pcall(conn, session, { path: '/?$format=json', signal, timeout: 110000 })
+    if (!resp.ok) throw await httpError(resp)
+    const data = await resp.json()
+    const sets = data?.d?.EntitySets ?? []
+    return sets.filter(s =>
+      !GENERIC_SETS.has(s) && !s.endsWith('Trans') && !s.endsWith('Message')
+    )   // usually length 1; UI lets the user pick if more than one
+  }, { retries: 3, signal })
 }
 
 // Reads the service $metadata (XML) and extracts the dimensions and key figures of
 // the given planning area, classified via sap:aggregation-role. Parsed with the
 // browser DOMParser. Cached in localStorage (24 h) per connection.
 export async function fetchKfMetadata(conn, session, pa, { signal } = {}) {
-  const resp = await pcall(conn, session, { path: '/$metadata', signal, timeout: 110000 })
-  if (!resp.ok) throw await httpError(resp)
-  const xml  = await resp.text()
+  // Idempotent metadata read → retry transient 5xx (mirrors countKf/readKfPage).
+  const xml = await withRetry(async () => {
+    const resp = await pcall(conn, session, { path: '/$metadata', signal, timeout: 110000 })
+    if (!resp.ok) throw await httpError(resp)
+    return resp.text()
+  }, { retries: 3, signal })
   const doc  = new DOMParser().parseFromString(xml, 'application/xml')
   const types = [...doc.getElementsByTagName('EntityType')]
   const et = types.find(t => t.getAttribute('Name') === pa)
@@ -183,13 +188,18 @@ export async function fetchKfMetadata(conn, session, pa, { signal } = {}) {
 
 // Lists planning versions of the area: { id, name } (id '' / __BASELINE = base).
 export async function fetchVersions(conn, session, pa, { signal } = {}) {
-  const resp = await pcall(conn, session, {
-    path: `/${pa}?$select=VERSIONID,VERSIONNAME&$format=json`, signal,
-  })
-  if (!resp.ok) throw await httpError(resp)
-  const data = await resp.json()
-  const rows = data?.d?.results ?? []
-  return rows.map(r => ({ id: r.VERSIONID, name: r.VERSIONNAME || r.VERSIONID }))
+  // Bound the read with $top: an UNBOUNDED area read can trip SAP's "Data Services
+  // internal server error" on large areas (same family the small-$top countKf guards
+  // against). Versions are few, so $top=1000 is ample. Idempotent → retry 5xx.
+  return withRetry(async () => {
+    const resp = await pcall(conn, session, {
+      path: `/${pa}?$select=VERSIONID,VERSIONNAME&$top=1000&$format=json`, signal,
+    })
+    if (!resp.ok) throw await httpError(resp)
+    const data = await resp.json()
+    const rows = data?.d?.results ?? []
+    return rows.map(r => ({ id: r.VERSIONID, name: r.VERSIONNAME || r.VERSIONID }))
+  }, { retries: 3, signal })
 }
 
 // Planning-area list exposed to this user (cached 24 h per connection). The

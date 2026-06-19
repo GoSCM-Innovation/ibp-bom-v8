@@ -21,8 +21,9 @@ import {
   commitTransaction, waitForProcessed, readMessages,
   odataDateToIso, chunkByBytes, MAX_POST_BYTES,
 } from '../../services/planningDataApi'
+import { fetchAttrDistinctValues } from '../../services/masterDataApi'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
-import { SearchSelect } from '../Migration/FilterControls'
+import { SearchSelect, MultiValueSelect } from '../Migration/FilterControls'
 import CollapsibleSection from './CollapsibleSection'
 import DataGrid from './DataGrid'
 import EditReviewModal from './EditReviewModal'
@@ -539,9 +540,19 @@ export default function TransactionalDataViewer({ connection, session }) {
                     <option value="in">{t('flt.opIn')}</option>
                     <option value="sw">{t('flt.opSw')}</option>
                   </select>
-                  <input value={c.value} onChange={e => setCond(i, { value: e.target.value })}
-                    placeholder={c.op === 'sw' ? t('flt.valuePh') : t('flt.valuesPh')}
-                    style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 11, padding: '4px 8px', flex: 1, minWidth: 140, outline: 'none', fontFamily: 'var(--mono)' }} />
+                  {c.op === 'sw' ? (
+                    <input value={c.value} onChange={e => setCond(i, { value: e.target.value })}
+                      placeholder={t('flt.valuePh')}
+                      style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 11, padding: '4px 8px', flex: 1, minWidth: 140, outline: 'none', fontFamily: 'var(--mono)' }} />
+                  ) : (
+                    <MultiValueSelect
+                      value={c.value}
+                      onChange={v => setCond(i, { value: v })}
+                      placeholder={t('flt.valuesPh')}
+                      disabled={!c.field}
+                      loadValues={() => fetchAttrDistinctValues(connection, session, c.field, { planningArea: catalog.pa })}
+                    />
+                  )}
                   <button title={t('flt.remove')} onClick={() => removeCond(i)} style={{ ...BTN_SEC, padding: '5px 9px', color: 'var(--red)', borderColor: 'var(--border)' }}>×</button>
                 </div>
               ))}
