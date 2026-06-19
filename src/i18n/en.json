@@ -644,6 +644,7 @@
   "kfm.title": "Transactional Data Migration (Key Figures)",
   "kfm.subtitle": "Migrate key figure values between SAP IBP systems. Define the level on the destination; the source is read at that same level.",
   "kfm.catErr": "Failed to read catalog: {msg}",
+  "kfm.noTxUrl": "This connection has no Transactional Data Integration URL (PLANNING_DATA_API_SRV) configured, which is required to migrate key figures. Edit the connection and add it.",
   "kfm.loginMissing": "User and password required",
   "kfm.login401": "Invalid user or password",
   "kfm.loginNet": "Connection error with the source",

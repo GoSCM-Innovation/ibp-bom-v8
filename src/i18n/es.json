@@ -644,6 +644,7 @@
   "kfm.title": "Migración de Dato Transaccional (Key Figures)",
   "kfm.subtitle": "Migra valores de key figures entre sistemas SAP IBP. Define el nivel en el destino; el origen se lee a ese mismo nivel.",
   "kfm.catErr": "Error al leer el catálogo: {msg}",
+  "kfm.noTxUrl": "Esta conexión no tiene configurada la URL de Integración de Datos Transaccionales (PLANNING_DATA_API_SRV), necesaria para migrar key figures. Edita la conexión y agrégala.",
   "kfm.loginMissing": "Usuario y contraseña requeridos",
   "kfm.login401": "Usuario o contraseña incorrectos",
   "kfm.loginNet": "Error de conexión con el origen",

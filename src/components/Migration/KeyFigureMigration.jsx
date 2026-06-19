@@ -81,9 +81,13 @@ export default function KeyFigureMigration({ connection, session }) {
   // Destination = current connection; source = another connection with SAP_COM_0720.
   // Other connections with COM_0720, plus THIS connection itself (listed first) —
   // to migrate between areas/versions of the same system.
+  // KF migration reads/writes via the PLANNING service → a connection is only
+  // eligible if it has the transactional URL (com0720.urlTx) too, not just the
+  // master URL. Otherwise its catalog read would hit an empty service root.
   const allConns = useMemo(() => {
-    const others = getAll().filter(c => c.id !== connection.id && c.com0720?.url && c.com0720?.user)
-    const self   = (connection.com0720?.url && connection.com0720?.user) ? [connection] : []
+    const usable = c => c.com0720?.url && c.com0720?.urlTx && c.com0720?.user
+    const others = getAll().filter(c => c.id !== connection.id && usable(c))
+    const self   = usable(connection) ? [connection] : []
     return [...self, ...others]
   }, [connection])
 
@@ -176,8 +180,14 @@ export default function KeyFigureMigration({ connection, session }) {
   // ── Discover destination planning areas on mount (auto-select if only one) ──
   useEffect(() => {
     let alive = true
-    setDstLoading(true); setCatError('')
     setDstPa(''); setDstCat(null)
+    // Destination = current connection. Without the transactional URL the planning
+    // service root is empty → show the same clear hint as the viewer, don't read.
+    if (!connection?.com0720?.urlTx) {
+      setDstAreas([]); setCatError(t('kfm.noTxUrl')); setDstLoading(false)
+      return
+    }
+    setDstLoading(true); setCatError('')
     fetchKfAreas(connection, session)
       .then(areas => { if (!alive) return; setDstAreas(areas); if (areas.length === 1) setDstPa(areas[0]) })
       .catch(e => { if (alive) setCatError(t('kfm.catErr', { msg: errText(e) })) })
