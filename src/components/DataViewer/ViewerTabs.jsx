@@ -52,6 +52,19 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
   // Persist definitions (selección/meta) whenever the tab set or active tab changes.
   useEffect(() => { saveTabs(kind, connId, { activeId, tabs }) }, [kind, connId, activeId, tabs])
 
+  // ── Fullscreen — owned here (not in DataGrid) so the tab strip stays on top and
+  // usable while the grid is maximised. Esc exits; body scroll locked meanwhile. ──
+  const [fullscreen, setFullscreen] = useState(false)
+  const toggleFullscreen = useCallback(() => setFullscreen(v => !v), [])
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKey = e => { if (e.key === 'Escape') setFullscreen(false) }
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [fullscreen])
+
   const selectTab = useCallback(id => {
     setMounted(m => (m[id] ? m : { ...m, [id]: true }))
     setState(s => (s.activeId === id ? s : { ...s, activeId: id }))
@@ -143,9 +156,19 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
     color: atLimit ? 'var(--text3)' : 'var(--text2)', fontSize: 18, lineHeight: 1,
     cursor: atLimit ? 'not-allowed' : 'pointer',
   }
+  // Exit-fullscreen button shown in the strip while fullscreen, so the user can
+  // always leave — even on a tab with no grid (where the grid's own button is absent).
+  const exitFsBtn = {
+    flexShrink: 0, alignSelf: 'center', marginLeft: 'auto',
+    padding: '5px 10px', borderRadius: 7, border: '1px solid var(--accent)',
+    background: 'none', color: 'var(--accent)', fontSize: 11, fontWeight: 700,
+    cursor: 'pointer', whiteSpace: 'nowrap',
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div style={fullscreen
+      ? { display: 'flex', flexDirection: 'column', position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--bg)' }
+      : { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Tab strip */}
       <div style={strip} className="viewer-tabstrip">
         {sorted.map((tab, i) => {
@@ -186,6 +209,11 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
           style={plusBtn}
           title={atLimit ? t('viewer.tabLimit', { n: TAB_LIMIT }) : t('viewer.tabNew')}
         >+</button>
+        {fullscreen && (
+          <button type="button" onClick={toggleFullscreen} style={exitFsBtn} title={t('viewer.exitFullscreenTitle')}>
+            {t('viewer.exitFullscreen')}
+          </button>
+        )}
       </div>
 
       {/* Content — every MOUNTED tab stays in the tree (state preserved); only the
@@ -199,6 +227,8 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
               {renderTab(tab, {
                 active,
                 onMeta: (def, meta) => updateTab(tab.id, def, meta),
+                fullscreen,
+                onToggleFullscreen: toggleFullscreen,
               })}
             </div>
           )

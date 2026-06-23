@@ -76,7 +76,9 @@ function btnPrimary(disabled) {
 //   initial — { pa, version, mdt } to hydrate the selección on a restored tab
 //   onMeta  — report identity (def + meta, meta carries a `dirty` flag) so the tab
 //             is labelled/sorted and the shell can confirm before closing with edits
-export default function MasterDataViewer({ connection, session, active = true, initial = null, onMeta }) {
+//   fullscreen / onToggleFullscreen — controlled by the shell so the tab strip stays
+//             on top while fullscreen; the grid's fullscreen button calls the toggle
+export default function MasterDataViewer({ connection, session, active = true, initial = null, onMeta, fullscreen = false, onToggleFullscreen }) {
   const { t } = useI18n()
   const isMobile = useIsMobile()
 
@@ -551,6 +553,9 @@ export default function MasterDataViewer({ connection, session, active = true, i
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Config (selección + columnas/filtros). Hidden in fullscreen ONCE data is
+          loaded, to maximise the grid; still shown for an empty tab so it stays usable. */}
+      {(!fullscreen || !query) && (
       <div style={{ padding: isMobile ? '12px' : '16px 20px', flexShrink: 0 }}>
         {catalogError && (
           <div style={{ ...SECTION, borderColor: 'var(--red)', color: 'var(--red)', fontSize: 12 }}>
@@ -705,6 +710,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
           </CollapsibleSection>
         )}
       </div>
+      )}
 
       {/* Grid / placeholder */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: isMobile ? '0 12px 12px' : '0 20px 16px' }}>
@@ -753,6 +759,8 @@ export default function MasterDataViewer({ connection, session, active = true, i
             onToggleRow={onToggleRow}
             onToggleAllPage={onToggleAllPage}
             onDeleteSelected={() => { setDeleteResult(null); setShowDeleteModal(true) }}
+            fullscreen={fullscreen}
+            onToggleFullscreen={onToggleFullscreen}
           />
         )}
       </div>

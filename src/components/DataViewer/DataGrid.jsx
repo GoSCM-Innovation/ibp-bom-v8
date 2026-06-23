@@ -16,7 +16,7 @@
 // modal); this grid only overlays them and reports changes via onCellEdit. Key and
 // read-only columns are never editable.
 // ─────────────────────────────────────────────────────────────────────────────
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { formatCell } from '../../services/catalogHelpers'
 
@@ -81,6 +81,9 @@ export default function DataGrid({
   onToggleEdit, onCellEdit, onSaveEdits, onDiscardEdits,
   // Phase 3 row selection / delete (optional — absent ⇒ no checkboxes):
   selectedKeys = {}, selCount = 0, onToggleRow, onToggleAllPage, onDeleteSelected,
+  // Fullscreen is controlled by the ViewerTabs shell (so the tab strip stays visible
+  // and usable while fullscreen). Absent ⇒ the button is hidden.
+  fullscreen = false, onToggleFullscreen,
 }) {
   const { t } = useI18n()
   const keySet = new Set(keyNames)
@@ -88,7 +91,6 @@ export default function DataGrid({
   const editHintText = editHint || t('viewer.editHint')
   const [gotoVal, setGotoVal] = useState('')
   const [colFilters, setColFilters] = useState({})   // { [col]: text } — prefix match, current page only
-  const [fullscreen, setFullscreen] = useState(false)
   const [colWidths, setColWidths] = useState({})     // { [col]: px } — explicit width (drag/auto-fit); absent = auto-fit
   const [dragOverCol, setDragOverCol] = useState(null)
   const [editing, setEditing] = useState(null)       // { rk, field } currently in an input
@@ -97,16 +99,6 @@ export default function DataGrid({
   const tableRef   = useRef(null)
   const measureRef = useRef(null)   // reused offscreen canvas for text measurement
   const dragColRef = useRef(null)   // column being dragged to reorder
-
-  // Esc exits fullscreen; lock body scroll while the overlay is open.
-  useEffect(() => {
-    if (!fullscreen) return
-    const onKey = e => { if (e.key === 'Escape') setFullscreen(false) }
-    window.addEventListener('keydown', onKey)
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow }
-  }, [fullscreen])
 
   const sortIndicator = c => (!sort || sort.field !== c) ? '' : (sort.dir === 'desc' ? ' ▼' : ' ▲')
 
@@ -182,9 +174,9 @@ export default function DataGrid({
   const allChecked  = selectable && visibleRows.length > 0 && visibleRows.every(r => selectedKeys[rowKeyOf(r)])
   const someChecked = selectable && visibleRows.some(r => selectedKeys[rowKeyOf(r)])
 
-  const rootStyle = fullscreen
-    ? { display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--bg)', padding: 16 }
-    : { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }
+  // The ViewerTabs shell now provides the fullscreen overlay (so the tab strip stays
+  // on top and usable); the grid itself just fills its container in both modes.
+  const rootStyle = { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }
 
   return (
     <div style={rootStyle}>
@@ -217,13 +209,15 @@ export default function DataGrid({
             ✎ {editMode ? t('viewer.editActive') : t('viewer.edit')}
           </button>
         )}
-        <button
-          style={topBtn}
-          onClick={() => setFullscreen(v => !v)}
-          title={fullscreen ? t('viewer.exitFullscreenTitle') : t('viewer.fullscreenTitle')}
-        >
-          {fullscreen ? t('viewer.exitFullscreen') : t('viewer.fullscreen')}
-        </button>
+        {onToggleFullscreen && (
+          <button
+            style={topBtn}
+            onClick={onToggleFullscreen}
+            title={fullscreen ? t('viewer.exitFullscreenTitle') : t('viewer.fullscreenTitle')}
+          >
+            {fullscreen ? t('viewer.exitFullscreen') : t('viewer.fullscreen')}
+          </button>
+        )}
       </div>
 
       <div style={{
