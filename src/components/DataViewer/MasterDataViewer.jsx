@@ -70,7 +70,13 @@ function btnPrimary(disabled) {
   }
 }
 
-export default function MasterDataViewer({ connection, session }) {
+// Props beyond connection/session are supplied by the ViewerTabs shell:
+//   active  — is this the currently shown tab? (false → render nothing, but the
+//             component stays mounted so its state/loaded page survive)
+//   initial — { pa, version, mdt } to hydrate the selección on a restored tab
+//   onMeta  — report identity (def + meta, meta carries a `dirty` flag) so the tab
+//             is labelled/sorted and the shell can confirm before closing with edits
+export default function MasterDataViewer({ connection, session, active = true, initial = null, onMeta }) {
   const { t } = useI18n()
   const isMobile = useIsMobile()
 
@@ -87,10 +93,10 @@ export default function MasterDataViewer({ connection, session }) {
   const [selCollapsed, setSelCollapsed]   = useState(false)
   const [dataCollapsed, setDataCollapsed] = useState(false)
 
-  // ── Selection ──
-  const [pa, setPa]           = useState('')
-  const [version, setVersion] = useState('')   // '' = base / no version
-  const [mdt, setMdt]         = useState('')
+  // ── Selection (hydrated from a restored tab's definition, if any) ──
+  const [pa, setPa]           = useState(() => initial?.pa || '')
+  const [version, setVersion] = useState(() => initial?.version || '')   // '' = base / no version
+  const [mdt, setMdt]         = useState(() => initial?.mdt || '')
 
   // ── Schema of the selected table ──
   const [schema, setSchema]               = useState(null)   // { allColumns, keyNames, total }
@@ -156,9 +162,18 @@ export default function MasterDataViewer({ connection, session }) {
   // Auto-select the only planning area, if there is just one.
   useEffect(() => { if (!pa && pas.length === 1) setPa(pas[0].id) }, [pas, pa])
 
-  // Reset downstream selection when context changes.
-  useEffect(() => { setVersion(''); setMdt('') }, [pa])
-  useEffect(() => { setMdt('') }, [version])
+  // Reset downstream selection ONLY when the upstream value actually CHANGES (not on
+  // mount), so a restored tab keeps its hydrated pa/version/mdt. We compare against a
+  // prev-value ref rather than using a "first run" flag because React StrictMode
+  // double-invokes effects in dev, which would defeat a flag and wipe the hydration.
+  const prevPa = useRef(pa)
+  useEffect(() => {
+    if (prevPa.current !== pa) { prevPa.current = pa; setVersion(''); setMdt('') }
+  }, [pa])
+  const prevVersion = useRef(version)
+  useEffect(() => {
+    if (prevVersion.current !== version) { prevVersion.current = version; setMdt('') }
+  }, [version])
 
   // ── On table change: reset grid + read schema (NO rows) ──
   useEffect(() => {
@@ -389,6 +404,18 @@ export default function MasterDataViewer({ connection, session }) {
 
   // ── Row selection (Phase 3 delete) ──
   const selCount = Object.keys(selected).length
+
+  // ── Report identity (+ unsaved-edits flag) to the ViewerTabs shell ──
+  // Ref so a re-created parent callback doesn't churn the effect; updateTab de-dupes
+  // identical reports, so this fires cheaply on every selección/dirty change.
+  const onMetaRef = useRef(onMeta); onMetaRef.current = onMeta
+  useEffect(() => {
+    onMetaRef.current?.(
+      { pa, version, mdt },
+      { areaId: pa, versionId: version, leafLabel: mdt, dirty: editCount > 0 || selCount > 0 },
+    )
+  }, [pa, version, mdt, editCount, selCount])
+
   const onToggleRow = useCallback((rk, row) => {
     setSelected(prev => {
       const next = { ...prev }
@@ -516,6 +543,10 @@ export default function MasterDataViewer({ connection, session }) {
   const dataSummary = schema
     ? `${t('viewer.colsSummary', { n: selectedCols.length, total: schema.allColumns.length })} · ${t('viewer.filtersSummary', { n: conds.length })}`
     : ''
+
+  // Background tab: keep all state/hooks alive but render nothing — frees the grid
+  // DOM while preserving the loaded page in memory (instant, no refetch, on return).
+  if (!active) return null
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (

@@ -130,7 +130,9 @@ function MultiPick({ label, options, selected, onChange, labels = {}, t }) {
   )
 }
 
-export default function TransactionalDataViewer({ connection, session }) {
+// Props beyond connection/session are supplied by the ViewerTabs shell — see
+// MasterDataViewer for the contract (active / initial / onMeta / onDirty).
+export default function TransactionalDataViewer({ connection, session, active = true, initial = null, onMeta }) {
   const { t } = useI18n()
   const isMobile = useIsMobile()
 
@@ -143,12 +145,12 @@ export default function TransactionalDataViewer({ connection, session }) {
   const [selCollapsed, setSelCollapsed]   = useState(false)
   const [dataCollapsed, setDataCollapsed] = useState(false)
 
-  // ── Selection ──
-  const [area, setArea]       = useState('')
-  const [version, setVersion] = useState('')   // '' = base
-  const [selectedAttrs, setSelectedAttrs] = useState([])
-  const [timeField, setTimeField]         = useState('')
-  const [selectedKfs, setSelectedKfs]     = useState([])
+  // ── Selection (hydrated from a restored tab's definition, if any) ──
+  const [area, setArea]       = useState(() => initial?.area || '')
+  const [version, setVersion] = useState(() => initial?.version || '')   // '' = base
+  const [selectedAttrs, setSelectedAttrs] = useState(() => initial?.selectedAttrs || [])
+  const [timeField, setTimeField]         = useState(() => initial?.timeField || '')
+  const [selectedKfs, setSelectedKfs]     = useState(() => initial?.selectedKfs || [])
 
   // ── Conversions ──
   const [units, setUnits]           = useState([])
@@ -234,8 +236,15 @@ export default function TransactionalDataViewer({ connection, session }) {
     }
   }, [timeLevelsAvail, timeField])
 
-  // Reset level + grid when the area/version changes.
+  // Reset level + grid ONLY when area/version actually CHANGE (not on mount), so a
+  // restored tab keeps its hydrated level (attrs/time/KFs). A prev-value ref rather
+  // than a "first run" flag — React StrictMode double-invokes effects in dev, which
+  // would defeat a flag and wipe the hydration.
+  const prevAV = useRef(`${area} ${version}`)
   useEffect(() => {
+    const k = `${area} ${version}`
+    if (prevAV.current === k) return
+    prevAV.current = k
     abortRef.current?.abort()
     setSelectedAttrs([]); setSelectedKfs([])
     setConds([]); setDateFrom(''); setDateTo(''); setSelUom(''); setSelCurr('')
@@ -357,6 +366,15 @@ export default function TransactionalDataViewer({ connection, session }) {
   const editCount    = Object.keys(edits).length
   const discardEdits = useCallback(() => setEdits({}), [])
 
+  // ── Report identity (+ unsaved-edits flag) to the ViewerTabs shell (ref avoids churn) ──
+  const onMetaRef = useRef(onMeta); onMetaRef.current = onMeta
+  useEffect(() => {
+    onMetaRef.current?.(
+      { area, version, selectedAttrs, timeField, selectedKfs },
+      { areaId: area, versionId: version, leafLabel: selectedKfs.length ? t('viewer.tabKfCount', { n: selectedKfs.length }) : '', dirty: editCount > 0 },
+    )
+  }, [area, version, selectedAttrs, timeField, selectedKfs, editCount, t])
+
   // ── Save KF edits: getTransactionID → [IPP] → postKfChunk → commit → poll → msgs ──
   const doSave = useCallback(async () => {
     const entries = Object.values(edits)
@@ -434,6 +452,9 @@ export default function TransactionalDataViewer({ connection, session }) {
   const levelSummary = catalog
     ? `${t('viewer.txLevelSummary', { attrs: selectedAttrs.length, time: timeLabel(timeField) })} · ${t('viewer.txKfSummary', { n: selectedKfs.length })}`
     : ''
+
+  // Background tab: keep state/hooks alive but render nothing (frees grid DOM).
+  if (!active) return null
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (

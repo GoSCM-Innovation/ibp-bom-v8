@@ -10,6 +10,7 @@ import Orchestrations from '../Orchestrations/Orchestrations'
 import MigrationTabs from '../Migration/MigrationTabs'
 import MasterDataViewer from '../DataViewer/MasterDataViewer'
 import TransactionalDataViewer from '../DataViewer/TransactionalDataViewer'
+import ViewerTabs from '../DataViewer/ViewerTabs'
 import ConnectionAvatar from '../Connections/ConnectionAvatar'
 import { getConnectionSapUrl } from '../../utils/sapUrl'
 import { connDisplayName } from '../../utils/connDisplayName'
@@ -132,15 +133,30 @@ export default function SystemView({ connection, session, onLogout }) {
         {activeApp === 'stats'        && <ResourceStats  connection={connection} session={session} />}
         {activeApp === 'metering'     && <Metering       connection={connection} session={session} />}
         {activeApp === 'migration'    && <MigrationTabs  connection={connection} session={session} />}
-        {/* Data Viewer tabs stay mounted once visited (state persists across tab switches). */}
+        {/* Data Viewers: each hosts its own multi-tab shell (ViewerTabs). They stay
+            mounted once visited so the open tabs + loaded data persist across app
+            sub-tab switches; ViewerTabs additionally only renders the active tab's
+            grid into the DOM. */}
         {visited.viewMaster && (
           <div style={{ display: activeApp === 'viewMaster' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <MasterDataViewer connection={connection} session={session} />
+            <ViewerTabs
+              connection={connection}
+              kind="master"
+              renderTab={(tab, p) => (
+                <MasterDataViewer connection={connection} session={session} initial={tab.def} {...p} />
+              )}
+            />
           </div>
         )}
         {visited.viewTrans && (
           <div style={{ display: activeApp === 'viewTrans' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <TransactionalDataViewer connection={connection} session={session} />
+            <ViewerTabs
+              connection={connection}
+              kind="trans"
+              renderTab={(tab, p) => (
+                <TransactionalDataViewer connection={connection} session={session} initial={tab.def} {...p} />
+              )}
+            />
           </div>
         )}
       </div>
