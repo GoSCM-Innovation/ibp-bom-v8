@@ -23,6 +23,8 @@ import {
 } from '../../services/planningDataApi'
 import { fetchAttrDistinctValues } from '../../services/masterDataApi'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
+import { rowsToCsv, downloadCsv } from '../../utils/csv'
+import { kfHardLimit, kfWarnLimit } from '../../config/migrationLimits'
 import { SearchSelect, MultiValueSelect } from '../Migration/FilterControls'
 import CollapsibleSection from './CollapsibleSection'
 import DataGrid from './DataGrid'
@@ -184,6 +186,11 @@ export default function TransactionalDataViewer({ connection, session, active = 
   const writeBusy  = useRef(false)   // synchronous guard against double-submit
   const reorderOnlyRef = useRef(false) // skip the load effect on column-reorder (display only)
 
+  // ── CSV export (all pages of the active query) ──
+  const [exporting, setExporting]           = useState(false)
+  const [exportProgress, setExportProgress] = useState(null)   // { loaded, total }
+  const exportAbortRef = useRef(null)
+
   // ── Load catalog (per area) ──
   useEffect(() => {
     let alive = true
@@ -205,7 +212,7 @@ export default function TransactionalDataViewer({ connection, session, active = 
     return () => { alive = false }
   }, [connection.id, session?.com0720?.user, area, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => () => { abortRef.current?.abort(); exportAbortRef.current?.abort() }, [])
 
   const refreshCatalog = useCallback(() => {
     invalidateKfCatalog(connection.id)
@@ -377,6 +384,50 @@ export default function TransactionalDataViewer({ connection, session, active = 
       { areaId: area, versionId: version, leafLabel: selectedKfs.length ? t('viewer.tabKfCount', { n: selectedKfs.length }) : '', dirty: editCount > 0 },
     )
   }, [area, version, selectedAttrs, timeField, selectedKfs, conds, dateFrom, dateTo, nonZeroOnly, selUom, selCurr, pageSize, editCount, t])
+
+  // Export ALL rows of the active query (every page) to a CSV — same server-side
+  // pagination as the grid but a BIG page (fewer ~6 s proxy round-trips). Exports the
+  // applied LEVEL's columns (attrs + time + KFs). Honours the KF row caps (sin tope en
+  // localhost; aviso/bloqueo en la web) to bound time + Vercel egress.
+  const exportCsv = useCallback(async () => {
+    if (!catalog?.pa || !query) return
+    const total = query.total ?? 0
+    const hard = kfHardLimit(), warn = kfWarnLimit()
+    if (total > hard) { window.alert(t('viewer.exportTooBig', { n: total.toLocaleString(), max: hard.toLocaleString() })); return }
+    if (total > warn && !window.confirm(t('viewer.exportWarn', { n: total.toLocaleString() }))) return
+
+    const ac = new AbortController()
+    exportAbortRef.current = ac
+    setExporting(true); setExportProgress({ loaded: 0, total })
+    const select  = query.columns.join(',')
+    const orderby = query.sort ? [`${query.sort.field}${query.sort.dir === 'desc' ? ' desc' : ''}`] : query.keyNames
+    const EXPORT_TOP = 5000
+    const all = []
+    let truncated = false
+    try {
+      for (let skip = 0; ; skip += EXPORT_TOP) {
+        if (ac.signal.aborted) return
+        const data = await readKfPage(connection, session, catalog.pa, {
+          select, filter: query.filter, skip, top: EXPORT_TOP, orderby, signal: ac.signal,
+        })
+        all.push(...data)
+        setExportProgress({ loaded: all.length, total })
+        if (data.length < EXPORT_TOP) break
+        if (all.length >= hard) { truncated = true; break }   // safety net if the count under-reported
+      }
+      if (ac.signal.aborted) return
+      downloadCsv(`${catalog.pa}_${version || 'base'}_${all.length}`, rowsToCsv(query.columns, all))
+      if (truncated) window.alert(t('viewer.exportTruncated', { max: hard.toLocaleString() }))
+    } catch (e) {
+      if (e?.name === 'AbortError' || ac.signal.aborted) return
+      window.alert(t('viewer.exportError', { msg: convHint(e, t) || errText(e) }))
+    } finally {
+      setExporting(false); setExportProgress(null)
+      if (exportAbortRef.current === ac) exportAbortRef.current = null
+    }
+  }, [catalog, query, connection, session, version, t])
+
+  const cancelExport = useCallback(() => exportAbortRef.current?.abort(), [])
 
   // ── Save KF edits: getTransactionID → [IPP] → postKfChunk → commit → poll → msgs ──
   const doSave = useCallback(async () => {
@@ -651,6 +702,10 @@ export default function TransactionalDataViewer({ connection, session, active = 
             onDiscardEdits={discardEdits}
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
+            onExport={exportCsv}
+            exporting={exporting}
+            exportProgress={exportProgress}
+            onCancelExport={cancelExport}
           />
         )}
       </div>

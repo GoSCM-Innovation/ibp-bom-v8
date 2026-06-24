@@ -21,6 +21,8 @@ import {
 } from '../../services/masterDataApi'
 import { getPas, getVersions, getMdts } from '../../services/catalogHelpers'
 import { buildConditionFilter, condChip } from '../../services/filterUtils'
+import { rowsToCsv, downloadCsv } from '../../utils/csv'
+import { masterHardLimit, masterWarnLimit } from '../../config/migrationLimits'
 import { SearchSelect, MultiValueSelect } from '../Migration/FilterControls'
 import ColumnPicker from './ColumnPicker'
 import CollapsibleSection from './CollapsibleSection'
@@ -139,6 +141,11 @@ export default function MasterDataViewer({ connection, session, active = true, i
   const abortRef  = useRef(null)
   const writeBusy = useRef(false)   // synchronous guard against double-submit (save/delete)
 
+  // ── CSV export (all pages of the active query) ──
+  const [exporting, setExporting]           = useState(false)
+  const [exportProgress, setExportProgress] = useState(null)   // { loaded, total }
+  const exportAbortRef = useRef(null)
+
   // ── Load catalog on mount / session change ──
   useEffect(() => {
     let alive = true
@@ -150,7 +157,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
     return () => { alive = false }
   }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => () => { abortRef.current?.abort(); exportAbortRef.current?.abort() }, [])
 
   // Invalidate the cached VSMT catalog and force a fresh discovery from SAP —
   // recovers an IBP config change (new area/version/table) without waiting out the
@@ -372,6 +379,57 @@ export default function MasterDataViewer({ connection, session, active = true, i
       setApplying(false)
     }
   }, [mdt, schema, extraFilter, selectedCols, connection, session, pa, version, pageSize, edits, t])
+
+  // Export ALL rows of the active query (every page) to a CSV. Reuses the same
+  // server-side pagination as the grid, but with a BIG page (fewer proxy round-trips
+  // → far less of the ~6 s/request fixed overhead). Honours the migration's row caps
+  // (sin tope en localhost; aviso/bloqueo en la web) to bound time + Vercel egress.
+  const exportCsv = useCallback(async () => {
+    if (!mdt || !schema || !query) return
+    const total = query.total ?? schema.total ?? 0
+    const hard = masterHardLimit(), warn = masterWarnLimit()
+    if (total > hard) { window.alert(t('viewer.exportTooBig', { n: total.toLocaleString(), max: hard.toLocaleString() })); return }
+    if (total > warn && !window.confirm(t('viewer.exportWarn', { n: total.toLocaleString() }))) return
+
+    const ac = new AbortController()
+    exportAbortRef.current = ac
+    setExporting(true); setExportProgress({ loaded: 0, total })
+    // Export EXACTLY the visible columns in their on-screen order. Keys are added to
+    // the read ($select) so $orderby stays stable across pages, but they reach the CSV
+    // only if they're already among the visible columns (rowsToCsv emits exportCols).
+    const exportCols = appliedCols.length ? appliedCols : [...schema.allColumns]
+    const select  = [...new Set([...exportCols, ...schema.keyNames])]
+    const orderby = query.sort
+      ? [`${query.sort.field}${query.sort.dir === 'desc' ? ' desc' : ''}`]
+      : (schema.keyNames.length ? schema.keyNames : undefined)
+    const EXPORT_TOP = 5000
+    const all = []
+    let truncated = false
+    try {
+      for (let skip = 0; ; skip += EXPORT_TOP) {
+        if (ac.signal.aborted) return
+        const data = await readEntityPage(connection, session, mdt, {
+          skip, top: EXPORT_TOP, planningArea: pa, versionId: version,
+          select, orderby, extraFilter: query.filter, signal: ac.signal,
+        })
+        all.push(...data)
+        setExportProgress({ loaded: all.length, total })
+        if (data.length < EXPORT_TOP) break
+        if (all.length >= hard) { truncated = true; break }   // safety net if the count under-reported
+      }
+      if (ac.signal.aborted) return
+      downloadCsv(`${mdt}_${version || 'base'}_${all.length}`, rowsToCsv(exportCols, all))
+      if (truncated) window.alert(t('viewer.exportTruncated', { max: hard.toLocaleString() }))
+    } catch (e) {
+      if (e?.name === 'AbortError' || ac.signal.aborted) return
+      window.alert(t('viewer.exportError', { msg: errText(e) }))
+    } finally {
+      setExporting(false); setExportProgress(null)
+      if (exportAbortRef.current === ac) exportAbortRef.current = null
+    }
+  }, [mdt, schema, query, appliedCols, connection, session, pa, version, t])
+
+  const cancelExport = useCallback(() => exportAbortRef.current?.abort(), [])
 
   // ── Save edits: review-confirmed upsert → commit → poll → messages ──
   const doSave = useCallback(async () => {
@@ -782,6 +840,10 @@ export default function MasterDataViewer({ connection, session, active = true, i
             onDeleteSelected={() => { setDeleteResult(null); setShowDeleteModal(true) }}
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
+            onExport={exportCsv}
+            exporting={exporting}
+            exportProgress={exportProgress}
+            onCancelExport={cancelExport}
           />
         )}
       </div>

@@ -24,3 +24,4 @@ export const KF_MAX_HARD = 400_000       // ≈0,3 GB de tráfico
 export function masterHardLimit() { return isLocalRun() ? Infinity : MASTER_MAX_HARD }
 export function masterWarnLimit() { return isLocalRun() ? Infinity : MASTER_MAX_WARN }
 export function kfHardLimit()     { return isLocalRun() ? Infinity : KF_MAX_HARD }
+export function kfWarnLimit()     { return isLocalRun() ? Infinity : KF_MAX_WARN }

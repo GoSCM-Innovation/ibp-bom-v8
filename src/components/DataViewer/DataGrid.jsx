@@ -84,6 +84,10 @@ export default function DataGrid({
   // Fullscreen is controlled by the ViewerTabs shell (so the tab strip stays visible
   // and usable while fullscreen). Absent ⇒ the button is hidden.
   fullscreen = false, onToggleFullscreen,
+  // CSV export (optional — absent ⇒ no button). The PARENT does the paged read-all +
+  // download (it owns the filter/columns/credentials); this grid only renders the
+  // button, or — while running — the progress text + a cancel button.
+  onExport, exporting = false, exportProgress = null, onCancelExport,
 }) {
   const { t } = useI18n()
   const keySet = new Set(keyNames)
@@ -208,6 +212,20 @@ export default function DataGrid({
           >
             ✎ {editMode ? t('viewer.editActive') : t('viewer.edit')}
           </button>
+        )}
+        {onExport && (
+          exporting ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+                ⏳ {t('viewer.exporting', { loaded: (exportProgress?.loaded ?? 0).toLocaleString(), total: (exportProgress?.total ?? 0).toLocaleString() })}
+              </span>
+              <button style={dangerBtn} onClick={() => onCancelExport?.()}>{t('viewer.exportCancel')}</button>
+            </span>
+          ) : (
+            <button style={topBtn} onClick={() => onExport()} title={t('viewer.exportTitle')}>
+              ⬇ {t('viewer.export')}
+            </button>
+          )
         )}
         {onToggleFullscreen && (
           <button
