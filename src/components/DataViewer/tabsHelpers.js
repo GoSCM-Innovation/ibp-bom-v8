@@ -62,11 +62,23 @@ export function sortTabs(tabs) {
     .map(([tab]) => tab)
 }
 
-// Compact tab label: "ÁREA · VERSIÓN · hoja". Falls back to "Nueva pestaña" while
-// the tab has no área selected yet.
+// Full tab label "ÁREA · VERSIÓN · hoja" — used for the hover tooltip (title), where
+// the complete context is welcome. Falls back to "Nueva pestaña" while no área yet.
 export function tabLabel(meta, t) {
   if (!meta || !meta.areaId) return t('viewer.tabUntitled')
   return [meta.areaId, meta.versionId || t('viewer.tabBase'), meta.leafLabel]
     .filter(Boolean)
     .join(' · ')
+}
+
+// Compact two-line label for the tab strip:
+//   primary   — la hoja (tabla maestra / "N KF"); cae al área mientras no se elige
+//               tabla/nivel, o "Nueva pestaña" para una pestaña vacía.
+//   secondary — la versión (o "base"); vacío para una pestaña sin título.
+// El área se transmite por el color de acento + el separador de grupo + el tooltip
+// completo (tabLabel), así que se omite a propósito del texto de cada pestaña para
+// que la etiqueta sea minimalista y no ocupe ancho repitiendo el área en cada una.
+export function tabLabelParts(meta, t) {
+  if (!meta || !meta.areaId) return { primary: t('viewer.tabUntitled'), secondary: '' }
+  return { primary: meta.leafLabel || meta.areaId, secondary: meta.versionId || t('viewer.tabBase') }
 }

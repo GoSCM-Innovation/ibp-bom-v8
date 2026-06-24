@@ -785,6 +785,7 @@
   "viewer.tabUntitled": "New tab",
   "viewer.tabBase": "base",
   "viewer.tabClose": "Close tab",
+  "viewer.tabDuplicate": "Duplicate tab (same configuration, independent)",
   "viewer.tabCloseDirty": "This tab has unsaved changes. Close it anyway?",
   "viewer.tabLimit": "Maximum of {n} open tabs",
   "viewer.tabKfCount": "{n} KF",

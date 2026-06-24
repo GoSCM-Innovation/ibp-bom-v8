@@ -785,6 +785,7 @@
   "viewer.tabUntitled": "Nueva pestaña",
   "viewer.tabBase": "base",
   "viewer.tabClose": "Cerrar pestaña",
+  "viewer.tabDuplicate": "Duplicar pestaña (misma configuración, independiente)",
   "viewer.tabCloseDirty": "Esta pestaña tiene cambios sin guardar. ¿Cerrarla de todos modos?",
   "viewer.tabLimit": "Máximo de {n} pestañas abiertas",
   "viewer.tabKfCount": "{n} KF",

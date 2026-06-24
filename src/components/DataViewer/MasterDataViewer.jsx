@@ -107,14 +107,17 @@ export default function MasterDataViewer({ connection, session, active = true, i
   const [selectedCols, setSelectedCols]   = useState([])   // draft: edited freely, no fetch
   const [appliedCols, setAppliedCols]     = useState([])   // committed on "Aplicar" — what `rows` reflect & the grid renders
 
-  // ── Filters ──
-  const [conds, setConds]           = useState([])     // [{ field, op:'in'|'sw', value }]
+  // ── Filters (hydrated from a restored/duplicated tab's definition, if any) ──
+  const [conds, setConds]           = useState(() => initial?.conds || [])  // [{ field, op:'in'|'sw', value }]
   const [filterTest, setFilterTest] = useState(null)   // { loading?, n?, total?, error? }
+  // Column choice carried by a duplicated/restored tab — consumed once on the first
+  // schema load (then we fall back to the saved/default selection for later tables).
+  const hydrateColsRef = useRef(initial?.cols || null)
 
   // ── Grid query (null until "Mostrar datos") ──
   // { page, pageSize, sort:{field,dir}|null, filter, total }
   const [query, setQuery]       = useState(null)
-  const [pageSize, setPageSize] = useState(loadPageSize)
+  const [pageSize, setPageSize] = useState(() => initial?.pageSize || loadPageSize())
   const [rows, setRows]         = useState([])
   const [gridLoading, setGridLoading] = useState(false)
   const [gridError, setGridError]     = useState('')
@@ -178,10 +181,19 @@ export default function MasterDataViewer({ connection, session, active = true, i
   }, [version])
 
   // ── On table change: reset grid + read schema (NO rows) ──
+  // Init to the current table so the FIRST run (mount) counts as "unchanged" — this
+  // keeps a restored/duplicated tab's hydrated filters instead of wiping them. Using
+  // a prev-value ref (not a boolean flag) is StrictMode-safe, like the resets above.
+  const prevTableRef = useRef(`${pa}|${version}|${mdt}`)
   useEffect(() => {
+    const tableKey = `${pa}|${version}|${mdt}`
+    const tableChanged = prevTableRef.current !== tableKey
+    prevTableRef.current = tableKey
     abortRef.current?.abort()
     setQuery(null); setRows([]); setGridError('')
-    setConds([]); setFilterTest(null)
+    // Filters are table-specific → wipe them only when the table actually CHANGES,
+    // never on the initial mount (where hydrated filters must be preserved).
+    if (tableChanged) { setConds([]); setFilterTest(null) }
     setSchema(null); setSchemaError('')
     // Drop any unsaved edits and leave edit mode — they belonged to the old table.
     setEdits({}); setEditMode(false); setSaveResult(null)
@@ -219,9 +231,15 @@ export default function MasterDataViewer({ connection, session, active = true, i
       if (validSaved.length && keyNames.length && !validSaved.some(c => keyNames.includes(c))) {
         validSaved = []
       }
-      const initial = validSaved.length ? validSaved : defaultSelection(allColumns, keyNames)
-      setSelectedCols(initial)
-      setAppliedCols(initial)
+      // A duplicated/restored tab carries its own column choice — honour it once on
+      // this first load (consume the ref), then fall back to saved/default after.
+      const hydrateCols = hydrateColsRef.current
+      hydrateColsRef.current = null
+      const validHydrate = hydrateCols ? hydrateCols.filter(c => allColumns.includes(c)) : []
+      const initialCols = validHydrate.length ? validHydrate
+        : (validSaved.length ? validSaved : defaultSelection(allColumns, keyNames))
+      setSelectedCols(initialCols)
+      setAppliedCols(initialCols)
     }).catch(e => { if (alive) setSchemaError(errText(e)) })
       .finally(() => { if (alive) setSchemaLoading(false) })
     return () => { alive = false; ac.abort() }
@@ -412,11 +430,14 @@ export default function MasterDataViewer({ connection, session, active = true, i
   // identical reports, so this fires cheaply on every selección/dirty change.
   const onMetaRef = useRef(onMeta); onMetaRef.current = onMeta
   useEffect(() => {
+    // def carries the full restorable CONFIG (selección + filtros + columnas + página)
+    // so "Duplicar pestaña" can clone an identical-but-independent tab. No rows here —
+    // data is re-read on demand. meta stays minimal (label / sort / colour / dirty).
     onMetaRef.current?.(
-      { pa, version, mdt },
+      { pa, version, mdt, conds, cols: selectedCols, pageSize },
       { areaId: pa, versionId: version, leafLabel: mdt, dirty: editCount > 0 || selCount > 0 },
     )
-  }, [pa, version, mdt, editCount, selCount])
+  }, [pa, version, mdt, conds, selectedCols, pageSize, editCount, selCount])
 
   const onToggleRow = useCallback((rk, row) => {
     setSelected(prev => {

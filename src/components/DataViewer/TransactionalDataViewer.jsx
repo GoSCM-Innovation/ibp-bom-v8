@@ -152,21 +152,21 @@ export default function TransactionalDataViewer({ connection, session, active = 
   const [timeField, setTimeField]         = useState(() => initial?.timeField || '')
   const [selectedKfs, setSelectedKfs]     = useState(() => initial?.selectedKfs || [])
 
-  // ── Conversions ──
+  // ── Conversions (hydrated from a restored/duplicated tab, if any) ──
   const [units, setUnits]           = useState([])
   const [currencies, setCurrencies] = useState([])
-  const [selUom, setSelUom]   = useState('')
-  const [selCurr, setSelCurr] = useState('')
+  const [selUom, setSelUom]   = useState(() => initial?.selUom || '')
+  const [selCurr, setSelCurr] = useState(() => initial?.selCurr || '')
 
-  // ── Filters ──
-  const [conds, setConds]       = useState([])   // attribute conditions
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo]     = useState('')
-  const [nonZeroOnly, setNonZeroOnly] = useState(true)   // hide zero rows by default (like KF migration)
+  // ── Filters (hydrated from a restored/duplicated tab, if any) ──
+  const [conds, setConds]       = useState(() => initial?.conds || [])   // attribute conditions
+  const [dateFrom, setDateFrom] = useState(() => initial?.dateFrom || '')
+  const [dateTo, setDateTo]     = useState(() => initial?.dateTo || '')
+  const [nonZeroOnly, setNonZeroOnly] = useState(() => initial?.nonZeroOnly ?? true)   // hide zero rows by default (like KF migration)
 
   // ── Grid query ──
   const [query, setQuery]       = useState(null)   // { page, pageSize, sort, filter, total, columns, keyNames }
-  const [pageSize, setPageSize] = useState(loadPageSize)
+  const [pageSize, setPageSize] = useState(() => initial?.pageSize || loadPageSize())
   const [rows, setRows]         = useState([])
   const [gridLoading, setGridLoading] = useState(false)
   const [gridError, setGridError]     = useState('')
@@ -369,11 +369,14 @@ export default function TransactionalDataViewer({ connection, session, active = 
   // ── Report identity (+ unsaved-edits flag) to the ViewerTabs shell (ref avoids churn) ──
   const onMetaRef = useRef(onMeta); onMetaRef.current = onMeta
   useEffect(() => {
+    // def carries the full restorable CONFIG (área/versión + nivel + filtros + opciones)
+    // so "Duplicar pestaña" clones an identical-but-independent tab; data is re-read on
+    // demand. meta stays minimal (label / sort / colour / dirty).
     onMetaRef.current?.(
-      { area, version, selectedAttrs, timeField, selectedKfs },
+      { area, version, selectedAttrs, timeField, selectedKfs, conds, dateFrom, dateTo, nonZeroOnly, selUom, selCurr, pageSize },
       { areaId: area, versionId: version, leafLabel: selectedKfs.length ? t('viewer.tabKfCount', { n: selectedKfs.length }) : '', dirty: editCount > 0 },
     )
-  }, [area, version, selectedAttrs, timeField, selectedKfs, editCount, t])
+  }, [area, version, selectedAttrs, timeField, selectedKfs, conds, dateFrom, dateTo, nonZeroOnly, selUom, selCurr, pageSize, editCount, t])
 
   // ── Save KF edits: getTransactionID → [IPP] → postKfChunk → commit → poll → msgs ──
   const doSave = useCallback(async () => {

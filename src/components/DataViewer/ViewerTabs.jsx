@@ -19,7 +19,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { loadTabs, saveTabs, sortTabs, areaColor, tabLabel, TAB_LIMIT } from './tabsHelpers'
+import { loadTabs, saveTabs, sortTabs, areaColor, tabLabel, tabLabelParts, TAB_LIMIT } from './tabsHelpers'
 
 const newId = () => (globalThis.crypto?.randomUUID?.() || `t${Date.now()}_${Math.round(Math.random() * 1e9)}`)
 
@@ -76,6 +76,24 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
       const id = newId()
       setMounted(m => ({ ...m, [id]: true }))
       return { tabs: [...s.tabs, { id, def: null, meta: null }], activeId: id }
+    })
+  }, [])
+
+  // Duplicate a tab: clone its definition (selección + filtros + columnas + nivel) so
+  // the new tab is identical but fully independent — its own id, own mounted state,
+  // own inner viewer. We deep-clone the def (plain JSON) so later edits in one tab
+  // never leak into the other. Data is NOT copied: the duplicate hydrates the same
+  // configuration and the user presses "Mostrar datos" (no extra row read on copy).
+  const duplicateTab = useCallback(id => {
+    setState(s => {
+      if (s.tabs.length >= TAB_LIMIT) return s
+      const src = s.tabs.find(x => x.id === id)
+      if (!src) return s
+      const nid = newId()
+      const def  = src.def ? JSON.parse(JSON.stringify(src.def)) : null
+      const meta = src.meta ? { ...src.meta, dirty: false } : null   // clone starts clean
+      setMounted(m => ({ ...m, [nid]: true }))
+      return { tabs: [...s.tabs, { id: nid, def, meta }], activeId: nid }
     })
   }, [])
 
@@ -150,6 +168,13 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
     width: 16, height: 16, borderRadius: 4, border: 'none', background: 'none',
     color: 'var(--text3)', fontSize: 14, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
   }
+  // Duplicate button — shown only on the active tab (keeps idle tabs minimal).
+  const dupBtn = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: 16, height: 16, borderRadius: 4, border: 'none', background: 'none',
+    color: 'var(--text3)', fontSize: 11, lineHeight: 1,
+    cursor: atLimit ? 'not-allowed' : 'pointer', flexShrink: 0,
+  }
   const plusBtn = {
     flexShrink: 0, alignSelf: 'center', margin: '0 4px', width: 28, height: 28,
     borderRadius: 7, border: '1px dashed var(--border2)', background: 'none',
@@ -176,7 +201,8 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
           const newGroup = i > 0 && (tab.meta?.areaId || '') !== prevArea
           const color = areaColor(tab.meta?.areaId)
           const active = tab.id === activeId
-          const label = tabLabel(tab.meta, t)
+          const label = tabLabel(tab.meta, t)               // full string → tooltip
+          const { primary, secondary } = tabLabelParts(tab.meta, t)
           return (
             <Fragment key={tab.id}>
               {newGroup && <div aria-hidden style={{ width: 1, background: 'var(--border)', margin: '7px 5px', flexShrink: 0 }} />}
@@ -187,17 +213,37 @@ export default function ViewerTabs({ connection, kind, renderTab }) {
                 style={tabStyle(active, color)}
                 title={label}
               >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>
-                  {label}
+                <span style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, lineHeight: 1.2 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontWeight: active ? 700 : 600 }}>
+                    {primary}
+                  </span>
+                  {secondary && (
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10, color: 'var(--text3)' }}>
+                      {secondary}
+                    </span>
+                  )}
                 </span>
-                <button
-                  type="button"
-                  onClick={e => { e.stopPropagation(); closeTab(tab.id) }}
-                  style={closeBtn}
-                  title={t('viewer.tabClose')}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--red)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text3)' }}
-                >×</button>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                  {active && (
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); duplicateTab(tab.id) }}
+                      disabled={atLimit}
+                      style={dupBtn}
+                      title={atLimit ? t('viewer.tabLimit', { n: TAB_LIMIT }) : t('viewer.tabDuplicate')}
+                      onMouseEnter={e => { if (!atLimit) { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)' } }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text3)' }}
+                    >⧉</button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); closeTab(tab.id) }}
+                    style={closeBtn}
+                    title={t('viewer.tabClose')}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--red)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text3)' }}
+                  >×</button>
+                </span>
               </div>
             </Fragment>
           )
