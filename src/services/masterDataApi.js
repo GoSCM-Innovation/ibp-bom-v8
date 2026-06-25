@@ -337,6 +337,36 @@ export async function fetchDistinctValues(conn, session, name, field, { planning
   return out.sort()
 }
 
+// ─── Field labels (descriptions) ──────────────────────────────────────────────
+// Human-readable label for every master-data field, parsed from the service
+// $metadata's sap:label. The MASTER_DATA $metadata is ~4.8 MB — too big to relay
+// through the Vercel proxy (its ~4.5 MB response limit) — so the proxy reads it
+// server-side and returns only a compact { field: label } map (api/proxy.js →
+// extractLabels). Authoritative & complete: it's the master service's own metadata.
+// Best-effort: returns {} on ANY failure so callers degrade to ID-only. Cached 24 h
+// per connection (the metadata is large; one read/day is plenty).
+const MDLABELS_KEY = id => `ibp:mdlabels:${id}`
+
+export async function fetchMasterFieldLabels(conn, session, { signal } = {}) {
+  const ck = MDLABELS_KEY(conn.id)
+  try {
+    const cached = JSON.parse(localStorage.getItem(ck))
+    if (cached && Date.now() - cached.ts < VSMT_TTL) return cached.labels || {}
+  } catch { /* ignore cache read errors */ }
+  try {
+    const resp = await proxyCall({ connection: conn, session, com: COM, path: '/$metadata', extractLabels: true, timeout: 110000, signal })
+    if (!resp.ok) return {}
+    const data   = await resp.json()
+    const labels = data?.labels || {}
+    try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), labels })) } catch { /* quota */ }
+    return labels
+  } catch { return {} }
+}
+
+export function invalidateMasterFieldLabels(connId) {
+  try { localStorage.removeItem(MDLABELS_KEY(connId)) } catch { /* ignore */ }
+}
+
 // Locates an MDT (of the given planning area) exposing `field` and returns its
 // DISTINCT values via fetchDistinctValues. Used by the KF migration to populate
 // attribute-filter dropdowns (BRAND, family…): the planning service refuses

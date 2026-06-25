@@ -48,7 +48,7 @@ const item = sel => ({
 
 const isDesc = c => /DESCR/i.test(c)
 
-export default function ColumnPicker({ allColumns, keyNames = [], selected, onChange, connId }) {
+export default function ColumnPicker({ allColumns, keyNames = [], selected, onChange, connId, labels = {} }) {
   const { t } = useI18n()
   const [open, setOpen]       = useState(false)
   const [q, setQ]             = useState('')
@@ -92,7 +92,7 @@ export default function ColumnPicker({ allColumns, keyNames = [], selected, onCh
   }
 
   const ql = q.toLowerCase()
-  const filtered = allColumns.filter(c => !q || c.toLowerCase().includes(ql))
+  const filtered = allColumns.filter(c => !q || c.toLowerCase().includes(ql) || String(labels[c] || '').toLowerCase().includes(ql))
   const customNames = Object.keys(presets)
 
   return (
@@ -134,9 +134,11 @@ export default function ColumnPicker({ allColumns, keyNames = [], selected, onCh
 
           <div style={{ maxHeight: 260, overflowY: 'auto' }}>
             {filtered.map(c => (
-              <label key={c} style={item(selSet.has(c))}>
+              <label key={c} style={item(selSet.has(c))} title={labels[c] && labels[c] !== c ? `${c} — ${labels[c]}` : c}>
                 <input type="checkbox" checked={selSet.has(c)} onChange={() => toggle(c)} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {c}{labels[c] && labels[c] !== c ? <span style={{ color: 'var(--text3)' }}> — {labels[c]}</span> : null}
+                </span>
                 {keySet.has(c) && <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--accent)', flexShrink: 0 }}>{t('viewer.keyTag')}</span>}
               </label>
             ))}

@@ -15,6 +15,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   fetchVsmt, buildCatalog, invalidateVsmtCache,
   fetchCount, readEntityPage, fetchFieldNames, fetchKeyNames, fetchDistinctValues,
+  fetchMasterFieldLabels, invalidateMasterFieldLabels,
   fetchCsrf, getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
   chunkByBytes, MAX_POST_BYTES, READONLY_FIELDS,
@@ -91,6 +92,10 @@ export default function MasterDataViewer({ connection, session, active = true, i
   // Bump to force a fresh catalog read after invalidating the cache ("↺ Actualizar").
   const [catalogTick, setCatalogTick]       = useState(0)
 
+  // Field labels (descriptions) for the filter field + column selectors — parsed
+  // from the MASTER_DATA $metadata server-side (best-effort; {} → ID-only fallback).
+  const [fieldLabels, setFieldLabels] = useState({})
+
   // ── Collapsible config panels ──
   // Open while configuring; auto-collapse once data is loaded (applyAndShow) and
   // re-open when the table changes (schema effect). Toggleable any time by hand.
@@ -157,6 +162,16 @@ export default function MasterDataViewer({ connection, session, active = true, i
     return () => { alive = false }
   }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load field labels (descriptions) once per connection — best-effort, cached 24 h.
+  // Independent of the table selection: the label map covers every MDT's fields.
+  useEffect(() => {
+    let alive = true
+    fetchMasterFieldLabels(connection, session)
+      .then(l => { if (alive) setFieldLabels(l || {}) })
+      .catch(() => { /* ID-only fallback */ })
+    return () => { alive = false }
+  }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => () => { abortRef.current?.abort(); exportAbortRef.current?.abort() }, [])
 
   // Invalidate the cached VSMT catalog and force a fresh discovery from SAP —
@@ -164,6 +179,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
   // 24 h cache TTL. Mirrors the "↺ Actualizar" button in the Migration tabs.
   const refreshCatalog = useCallback(() => {
     invalidateVsmtCache(connection.id)
+    invalidateMasterFieldLabels(connection.id)
     setCatalogTick(n => n + 1)
   }, [connection.id])
 
@@ -590,8 +606,11 @@ export default function MasterDataViewer({ connection, session, active = true, i
   const setCond    = (i, patch) => setConds(c => c.map((x, idx) => idx === i ? { ...x, ...patch } : x))
 
   const fieldOptions = useMemo(
-    () => (schema?.allColumns || []).slice().sort().map(c => ({ value: c, label: c })),
-    [schema]
+    () => (schema?.allColumns || []).slice().sort().map(c => ({
+      value: c,
+      label: fieldLabels[c] && fieldLabels[c] !== c ? `${c} — ${fieldLabels[c]}` : c,
+    })),
+    [schema, fieldLabels]
   )
 
   async function testFilter() {
@@ -719,6 +738,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
                     selected={selectedCols}
                     onChange={onColumnsChange}
                     connId={connection.id}
+                    labels={fieldLabels}
                   />
                   <span style={{ fontSize: 12, color: 'var(--text2)' }}>
                     {t('viewer.rowCount', { n: (schema.total ?? 0).toLocaleString() })}

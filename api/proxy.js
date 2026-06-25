@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   const {
     url, serviceRoot, user, password, method = 'GET', body, timeout = 30000,
-    fetchCsrf, csrfToken: providedToken, cookies: providedCookies,
+    fetchCsrf, csrfToken: providedToken, cookies: providedCookies, extractLabels,
   } = req.body
 
   if (!user || !password) return res.status(400).json({ error: 'Missing user or password' })
@@ -33,6 +33,48 @@ export default async function handler(req, res) {
       const token   = r.headers.get('x-csrf-token')
       const cookies = (r.headers.getSetCookie?.() ?? []).map(c => c.split(';')[0]).join('; ')
       return res.json({ csrfToken: token, cookies })
+    }
+
+    // Mode: fetch a (potentially multi-MB) $metadata XML server-side and return
+    // ONLY a compact { field: label } map parsed from sap:label. The MASTER_DATA
+    // $metadata is ~4.8 MB and exceeds Vercel's serverless RESPONSE limit, so it
+    // can't be relayed to the browser — but the function can read it (inbound is
+    // fine) and forward just a few KB. Node has no DOMParser, so we extract the
+    // attributes with a regex over each <Property> tag (order-independent).
+    if (extractLabels) {
+      if (!url) return res.status(400).json({ error: 'Missing url' })
+      try { new URL(url) } catch { return res.status(400).json({ error: 'URL inválida' }) }
+      const r = await fetch(url, {
+        method: 'GET',
+        headers: { ...baseHeaders, 'Accept': 'application/xml, text/xml, */*' },
+        signal: AbortSignal.timeout(timeout),
+      })
+      if (!r.ok) {
+        const text = await r.text().catch(() => '')
+        return res.status(r.status).json({ error: `SAP IBP returned ${r.status}`, detail: text.substring(0, 500) })
+      }
+      const xml = await r.text()
+      // Decode XML entities — SAP labels routinely use NUMERIC refs for accented
+      // characters (&#243;=ó, &#225;=á, &#241;=ñ…) plus the named ones. Numeric refs
+      // first, then named, with &amp; LAST so a decoded "&" can't be re-interpreted.
+      const decode = s => s
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&')
+      const labels = {}
+      const propRe = /<Property\b[^>]*>/g
+      let m
+      while ((m = propRe.exec(xml)) !== null) {
+        const tag = m[0]
+        const name  = tag.match(/\bName="([^"]*)"/)?.[1]
+        const label = tag.match(/\bsap:label="([^"]*)"/)?.[1]
+        // First real label wins (skip placeholder labels equal to the field name),
+        // so a later entity type can supply a label the first one lacked.
+        if (name && label && label !== name && labels[name] == null) labels[name] = decode(label)
+      }
+      return res.json({ labels })
     }
 
     if (!url) return res.status(400).json({ error: 'Missing url' })

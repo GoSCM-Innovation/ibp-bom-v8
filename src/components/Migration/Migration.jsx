@@ -7,6 +7,7 @@ import {
   fetchVsmt, buildCatalog, fetchImportableMdts,
   invalidateVsmtCache, invalidateImportableCache,
   fetchCount, readEntityPage, readKeyRows, fetchFieldNames, fetchKeyNames, fetchCsrf,
+  fetchMasterFieldLabels, invalidateMasterFieldLabels,
   getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
   PAGE_SIZE, PARALLEL_R, PARALLEL_W, BASE_VERSION_ID, READONLY_FIELDS,
@@ -220,6 +221,10 @@ export default function Migration({ connection, session }) {
   // entity set). null = not loaded yet → no filtering applied (safe fallback).
   const [importableSet, setImportableSet] = useState(null)
 
+  // SOURCE field labels (descriptions) for the per-table filter selectors — parsed
+  // from the source MASTER_DATA $metadata server-side (best-effort; {} → ID-only).
+  const [srcFieldLabels, setSrcFieldLabels] = useState({})
+
   // ── PA / Version selectors ──
   const [srcPa, setSrcPa]         = useState('')
   const [srcVersion, setSrcVersion] = useState('')
@@ -347,6 +352,16 @@ export default function Migration({ connection, session }) {
       .then(rows => { if (alive) setSrcCatalog(buildCatalog(rows)) })
       .catch(e   => { if (alive) setCatalogError(t('mig.catalogError', { msg: e.message })) })
       .finally(  () => { if (alive) setSrcLoading(false) })
+    return () => { alive = false }
+  }, [srcConnId, srcTempCreds?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load SOURCE field labels (descriptions) for the filter selectors — best-effort.
+  useEffect(() => {
+    if (!srcConn || !srcSession) { setSrcFieldLabels({}); return }
+    let alive = true
+    fetchMasterFieldLabels(srcConn, srcSession)
+      .then(l => { if (alive) setSrcFieldLabels(l || {}) })
+      .catch(() => { /* ID-only fallback */ })
     return () => { alive = false }
   }, [srcConnId, srcTempCreds?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1040,7 +1055,8 @@ export default function Migration({ connection, session }) {
                   // bump catalogTick to force a fresh fetch from SAP.
                   invalidateVsmtCache(connection.id)
                   invalidateImportableCache(connection.id)
-                  if (srcConn) { invalidateVsmtCache(srcConn.id); invalidateImportableCache(srcConn.id) }
+                  invalidateMasterFieldLabels(connection.id)
+                  if (srcConn) { invalidateVsmtCache(srcConn.id); invalidateImportableCache(srcConn.id); invalidateMasterFieldLabels(srcConn.id) }
                   setConnsTick(n => n + 1)
                   setCatalogTick(n => n + 1)
                 }}
@@ -1430,7 +1446,7 @@ export default function Migration({ connection, session }) {
                             <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                               <SearchSelect
                                 value={c.field}
-                                options={mdtFieldOpts[mdt].map(f => ({ value: f, label: f }))}
+                                options={mdtFieldOpts[mdt].map(f => ({ value: f, label: srcFieldLabels[f] && srcFieldLabels[f] !== f ? `${f} — ${srcFieldLabels[f]}` : f }))}
                                 onChange={v => setMdtFilters(p => ({ ...p, [mdt]: conds.map((x, xi) => xi === ci ? { ...x, field: v, value: '' } : x) }))}
                                 placeholder={t('flt.fieldPh')}
                                 searchPlaceholder={t('kfm.typeToFilter')}
