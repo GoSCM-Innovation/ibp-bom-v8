@@ -33,3 +33,8 @@ dist-ssr
 # Scripts locales (solo en la PC del desarrollador)
 migrar-local.bat
 servidor-local.mjs
+
+# Empaquetado del ejecutable (artefactos, no se versionan)
+IBP-Migracion.exe
+.exe-build/
+exe/assets.generated.mjs
