@@ -334,10 +334,14 @@ export default function KeyFigureMigration({ connection, session }) {
   // ── Migration engine ──
   const needsUom  = steps.some(s => s.convs?.includes('UOM'))
   const needsCurr = steps.some(s => s.convs?.includes('CURR'))
-  // Identical origin/target (same system + area + version) is blocked — it would
-  // just overwrite values with themselves. Same system with a different area or
-  // version is the supported intra-system migration.
-  const sameTarget = !!srcConn && srcConn.id === connection.id && !!srcPa && srcPa === dstPa && (srcVersion || '') === (dstVersion || '')
+  // Reading and writing hit the SAME place (system + area + version). On its own that
+  // is only a no-op when NOTHING is remapped — every level attribute reads from its own
+  // name AND every KF keeps its name — so only THEN is it blocked. With a remap (e.g.
+  // CUSTID ← ATRIBUTOZ, which re-aggregates the KF to a different level, or a KF rename)
+  // writing back into the same area/version is a legitimate in-place operation.
+  const sameLocation = !!srcConn && srcConn.id === connection.id && !!srcPa && srcPa === dstPa && (srcVersion || '') === (dstVersion || '')
+  const hasRemap = levelAttrs.some(a => { const s = resolveSrcAttr(a); return s && s !== a }) || steps.some(s => s.srcKf && s.srcKf !== s.dstKf)
+  const sameTarget = sameLocation && !hasRemap
   const canMigrate = !running && !!srcConn && !!srcSession && !!dstCat && !!srcCat &&
     levelAttrs.length > 0 && steps.length > 0 && steps.every(s => s.srcKf) && unmappedAttrs.length === 0 &&
     (!needsUom || selUom) && (!needsCurr || selCurr) && !sameTarget
@@ -381,7 +385,9 @@ export default function KeyFigureMigration({ connection, session }) {
 
   // Human label of the selected time level (for the proposed/deduced level display).
   const timeLabel = t(`kfm.time_${(TIME_LEVELS.find(x => x.field === timeField) || {}).key}`)
-  const levelStr = dims => [...dims, timeLabel].join(' × ')
+  // Level label that annotates any remapped attribute as "DST ← SRC" so the user sees
+  // that (e.g.) CUSTID will be READ from ATRIBUTOZ before running. No remap → plain name.
+  const levelStrMapped = dims => [...dims.map(a => { const s = resolveSrcAttr(a); return s && s !== a ? `${a} ← ${s}` : a }), timeLabel].join(' × ')
 
   const runMigration = useCallback(async () => {
     setShowConfirm(false)
@@ -895,7 +901,7 @@ export default function KeyFigureMigration({ connection, session }) {
               </select>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-              {levelAttrs.length > 0 ? t('kfm.levelPreview', { attrs: [...levelAttrs, t(`kfm.time_${(TIME_LEVELS.find(x=>x.field===timeField)||{}).key}`)].join(' · ') }) : t('kfm.levelHint')}
+              {levelAttrs.length > 0 ? t('kfm.levelPreview', { attrs: [...levelAttrs.map(a => { const s = resolveSrcAttr(a); return s && s !== a ? `${a} ← ${s}` : a }), t(`kfm.time_${(TIME_LEVELS.find(x=>x.field===timeField)||{}).key}`)].join(' · ') }) : t('kfm.levelHint')}
             </div>
           </div>
           <input style={{ ...INPUT, marginBottom: 8 }} placeholder={t('kfm.attrSearch')} value={attrSearch} onChange={e => setAttrSearch(e.target.value)} />
@@ -916,20 +922,39 @@ export default function KeyFigureMigration({ connection, session }) {
             })}
           </div>
 
-          {/* Attribute mapping (only custom attrs whose source name differs) */}
-          {unmappedAttrs.length > 0 && (
+          {/* Source attribute per level attribute. Default = same name in the source.
+              Override to READ a destination attribute from a DIFFERENT source attribute
+              (e.g. CUSTID ← ATRIBUTOZ) — SAP then aggregates the KF to that level. An
+              attribute with no same-named source counterpart is required (red border). */}
+          {levelAttrs.length > 0 && (
             <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-              <div style={{ fontSize: 11, color: 'var(--yellow, #e6a817)', marginBottom: 8 }}>{t('kfm.attrMapHint')}</div>
-              {unmappedAttrs.map(a => (
-                <div key={a} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontFamily: 'var(--mono)', flex: '0 0 200px' }}>{a} ({t('kfm.dst')})</span>
-                  <span style={{ color: 'var(--text3)' }}>←</span>
-                  <select style={{ ...SELECT, flex: 1 }} value={attrMap[a] || ''} onChange={e => setAttrMap(p => ({ ...p, [a]: e.target.value }))}>
-                    <option value="">{t('kfm.selectSrcAttr')}</option>
-                    {[...srcAttrSet].filter(s => !s.startsWith('PERIODID')).sort().map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-              ))}
+              <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>{t('kfm.attrSrcTitle')}</div>
+              {levelAttrs.map(a => {
+                const inSrc = srcAttrSet.has(a)
+                const cur = attrMap[a] || (inSrc ? a : '')
+                const overridden = !!attrMap[a] && attrMap[a] !== a
+                const missing = !cur
+                return (
+                  <div key={a} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--mono)', flex: '0 0 200px', color: 'var(--text)' }}>{a} <span style={{ color: 'var(--text3)' }}>({t('kfm.dst')})</span></span>
+                    <span style={{ color: overridden ? 'var(--accent)' : 'var(--text3)' }}>←</span>
+                    <select
+                      style={{ ...SELECT, flex: 1, borderColor: missing ? 'var(--red)' : overridden ? 'var(--accent)' : 'var(--border)' }}
+                      value={cur}
+                      onChange={e => {
+                        const v = e.target.value
+                        setAttrMap(p => { const n = { ...p }; if (!v || v === a) delete n[a]; else n[a] = v; return n })
+                      }}
+                    >
+                      {!inSrc && <option value="">{t('kfm.selectSrcAttr')}</option>}
+                      {[...srcAttrSet].filter(s => !s.startsWith('PERIODID')).sort().map(s => (
+                        <option key={s} value={s}>{s === a ? t('kfm.srcSameName', { a: s }) : s}</option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })}
+              <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{t('kfm.attrSrcHint')}</div>
             </div>
           )}
         </div>
@@ -1379,8 +1404,18 @@ export default function KeyFigureMigration({ connection, session }) {
               {t('kfm.confirmSimpleIntro', { n: steps.length, ver: dstVersion || 'Base' })}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
-              {t('kfm.confirmLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(levelAttrs)}</span>
+              {t('kfm.confirmLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStrMapped(levelAttrs)}</span>
             </div>
+            {sameLocation && (
+              <div style={{
+                fontSize: 11, color: 'var(--yellow, #e6a817)', lineHeight: 1.5, marginBottom: 10,
+                background: 'color-mix(in srgb, var(--yellow, #e6a817) 10%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--yellow, #e6a817) 30%, transparent)',
+                borderRadius: 6, padding: '7px 10px',
+              }}>
+                ⚠ {t('kfm.sameAreaNote')}
+              </div>
+            )}
             {extraKfFilter && (
               <div style={{
                 fontSize: 11, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 10,
