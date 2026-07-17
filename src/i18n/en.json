@@ -676,7 +676,6 @@
   "kfm.selectSrcAttr": "Source attribute…",
   "kfm.attrSrcTitle": "Source of each level attribute",
   "kfm.attrSrcHint": "By default each attribute is read from the same name in the source. Change it to read an attribute from ANOTHER (e.g. CUSTID ← ATRIBUTOZ): SAP then re-aggregates (sums) the KF to that level on read.",
-  "kfm.srcSameName": "{a} — same name",
   "kfm.sameAreaNote": "Source and destination are the same area and version: this writes onto the same KF (in-place upsert). Destination members matching the read values are overwritten with the aggregated value.",
   "kfm.sectionKf": "Destination key figures to fill ({n})",
   "kfm.kfHint": "Check the DESTINATION key figures ({dst}) you want to fill. Then, per step, choose which SOURCE key figure ({src}) feeds each one.",

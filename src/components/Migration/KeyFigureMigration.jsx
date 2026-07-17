@@ -299,6 +299,13 @@ export default function KeyFigureMigration({ connection, session }) {
       const lbl = srcCat?.labels?.[a]
       return { value: a, label: lbl && lbl !== a ? `${a} — ${lbl}` : a }
     }), [srcFilterAttrs, srcCat])
+  // Options for the per-level-attribute SOURCE picker (searchable, with descriptions).
+  // Same field set the mapping <select> used (only PERIODID excluded); label = "ID — desc".
+  const srcAttrOptions = useMemo(() =>
+    [...srcAttrSet].filter(s => !s.startsWith('PERIODID')).sort().map(s => {
+      const lbl = srcCat?.labels?.[s]
+      return { value: s, label: lbl && lbl !== s ? `${s} — ${lbl}` : s }
+    }), [srcAttrSet, srcCat])
 
   const filteredAttrs = useMemo(() => dstAttrs.filter(a => !attrSearch || a.toLowerCase().includes(attrSearch.toLowerCase()) || (dstCat?.labels?.[a] || '').toLowerCase().includes(attrSearch.toLowerCase())), [dstAttrs, attrSearch, dstCat])
   const filteredKfs   = useMemo(() => dstKfs.filter(k => !kfSearch || k.toLowerCase().includes(kfSearch.toLowerCase()) || (dstCat?.labels?.[k] || '').toLowerCase().includes(kfSearch.toLowerCase())), [dstKfs, kfSearch, dstCat])
@@ -934,23 +941,24 @@ export default function KeyFigureMigration({ connection, session }) {
                 const cur = attrMap[a] || (inSrc ? a : '')
                 const overridden = !!attrMap[a] && attrMap[a] !== a
                 const missing = !cur
+                const dstLbl = dstCat?.labels?.[a]
                 return (
                   <div key={a} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontFamily: 'var(--mono)', flex: '0 0 200px', color: 'var(--text)' }}>{a} <span style={{ color: 'var(--text3)' }}>({t('kfm.dst')})</span></span>
+                    <span style={{ flex: '0 0 210px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)' }}>{a} <span style={{ color: 'var(--text3)' }}>({t('kfm.dst')})</span></span>
+                      {dstLbl && dstLbl !== a && <span style={{ fontSize: 10, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={dstLbl}>{dstLbl}</span>}
+                    </span>
                     <span style={{ color: overridden ? 'var(--accent)' : 'var(--text3)' }}>←</span>
-                    <select
-                      style={{ ...SELECT, flex: 1, borderColor: missing ? 'var(--red)' : overridden ? 'var(--accent)' : 'var(--border)' }}
+                    <SearchSelect
                       value={cur}
-                      onChange={e => {
-                        const v = e.target.value
-                        setAttrMap(p => { const n = { ...p }; if (!v || v === a) delete n[a]; else n[a] = v; return n })
-                      }}
-                    >
-                      {!inSrc && <option value="">{t('kfm.selectSrcAttr')}</option>}
-                      {[...srcAttrSet].filter(s => !s.startsWith('PERIODID')).sort().map(s => (
-                        <option key={s} value={s}>{s === a ? t('kfm.srcSameName', { a: s }) : s}</option>
-                      ))}
-                    </select>
+                      options={srcAttrOptions}
+                      onChange={v => setAttrMap(p => { const n = { ...p }; if (!v || v === a) delete n[a]; else n[a] = v; return n })}
+                      placeholder={t('kfm.selectSrcAttr')}
+                      searchPlaceholder={t('kfm.typeToFilter')}
+                      invalid={missing}
+                      style={{ flex: 1, minWidth: 0 }}
+                      btnStyle={overridden && !missing ? { borderColor: 'var(--accent)' } : undefined}
+                    />
                   </div>
                 )
               })}
