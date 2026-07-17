@@ -392,9 +392,13 @@ export default function KeyFigureMigration({ connection, session }) {
 
   // Human label of the selected time level (for the proposed/deduced level display).
   const timeLabel = t(`kfm.time_${(TIME_LEVELS.find(x => x.field === timeField) || {}).key}`)
-  // Level label that annotates any remapped attribute as "DST ← SRC" so the user sees
-  // that (e.g.) CUSTID will be READ from ATRIBUTOZ before running. No remap → plain name.
-  const levelStrMapped = dims => [...dims.map(a => { const s = resolveSrcAttr(a); return s && s !== a ? `${a} ← ${s}` : a }), timeLabel].join(' × ')
+  // DESTINATION level, plainly (attrs + time). The source remap is shown separately,
+  // never mixed into this line — this label lives under a "destination" header.
+  const levelStr = dims => [...dims, timeLabel].join(' × ')
+  // Remapped attributes read from a DIFFERENT source ("CUSTID ← ZCUST…"), '' if none.
+  const remapSummary = levelAttrs
+    .map(a => { const s = resolveSrcAttr(a); return s && s !== a ? `${a} ← ${s}` : null })
+    .filter(Boolean).join(', ')
 
   const runMigration = useCallback(async () => {
     setShowConfirm(false)
@@ -908,7 +912,7 @@ export default function KeyFigureMigration({ connection, session }) {
               </select>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-              {levelAttrs.length > 0 ? t('kfm.levelPreview', { attrs: [...levelAttrs.map(a => { const s = resolveSrcAttr(a); return s && s !== a ? `${a} ← ${s}` : a }), t(`kfm.time_${(TIME_LEVELS.find(x=>x.field===timeField)||{}).key}`)].join(' · ') }) : t('kfm.levelHint')}
+              {levelAttrs.length > 0 ? t('kfm.levelPreview', { attrs: [...levelAttrs, t(`kfm.time_${(TIME_LEVELS.find(x=>x.field===timeField)||{}).key}`)].join(' · ') }) : t('kfm.levelHint')}
             </div>
           </div>
           <input style={{ ...INPUT, marginBottom: 8 }} placeholder={t('kfm.attrSearch')} value={attrSearch} onChange={e => setAttrSearch(e.target.value)} />
@@ -1412,8 +1416,13 @@ export default function KeyFigureMigration({ connection, session }) {
               {t('kfm.confirmSimpleIntro', { n: steps.length, ver: dstVersion || 'Base' })}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
-              {t('kfm.confirmLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStrMapped(levelAttrs)}</span>
+              {t('kfm.confirmLevel')}: <span style={{ fontFamily: 'var(--mono)' }}>{levelStr(levelAttrs)}</span>
             </div>
+            {remapSummary && (
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
+                {t('kfm.confirmRemap')}: <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>{remapSummary}</span>
+              </div>
+            )}
             {sameLocation && (
               <div style={{
                 fontSize: 11, color: 'var(--yellow, #e6a817)', lineHeight: 1.5, marginBottom: 10,
