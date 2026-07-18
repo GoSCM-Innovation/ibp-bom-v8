@@ -247,9 +247,9 @@ export default function TransactionalDataViewer({ connection, session, active = 
   // restored tab keeps its hydrated level (attrs/time/KFs). A prev-value ref rather
   // than a "first run" flag — React StrictMode double-invokes effects in dev, which
   // would defeat a flag and wipe the hydration.
-  const prevAV = useRef(`${area} ${version}`)
+  const prevAV = useRef(`${area}\u0000${version}`)
   useEffect(() => {
-    const k = `${area} ${version}`
+    const k = `${area}\u0000${version}`
     if (prevAV.current === k) return
     prevAV.current = k
     abortRef.current?.abort()

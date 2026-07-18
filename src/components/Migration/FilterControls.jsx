@@ -95,6 +95,8 @@ export function SearchSelect({ value, options, onChange, placeholder, searchPlac
 // Text input (comma-separated values) + dropdown of real values, lazy-loaded via
 // `loadValues` on first open. Picking a value toggles it in the comma list; free
 // typing stays available (e.g. when the value list is unavailable or truncated).
+// PASTING a list (Excel column, tab/;/, separated) commits every token as chips
+// at once — the bulk way to filter by many materials/centers without typing.
 export function MultiValueSelect({ value, onChange, loadValues, placeholder, disabled }) {
   const { t } = useI18n()
   const [open, setOpen]       = useState(false)
@@ -184,6 +186,19 @@ export function MultiValueSelect({ value, onChange, loadValues, placeholder, dis
             disabled={disabled}
             onChange={e => setTyped(e.target.value)}
             onBlur={commitTyped}
+            onPaste={e => {
+              // Bulk paste: an Excel column (newlines), tab/;-separated list, or a
+              // comma list becomes chips in one go. Single tokens keep default paste.
+              const text = e.clipboardData?.getData('text') ?? ''
+              if (!/[\r\n\t;,]/.test(text)) return
+              e.preventDefault()
+              const toks = text.split(/[\r\n\t;,]+/).map(s => s.trim().replace(/^["']+|["']+$/g, '')).filter(Boolean)
+              if (toks.length === 0) return
+              const merged = [...selectedArr]
+              for (const tk of toks) if (!merged.includes(tk)) merged.push(tk)
+              onChange(merged.join(','))
+              setTyped('')
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitTyped() }
               else if (e.key === 'Backspace' && !typed && selectedArr.length) { e.preventDefault(); removeToken(selectedArr[selectedArr.length - 1]) }
@@ -229,6 +244,14 @@ export function MultiValueSelect({ value, onChange, loadValues, placeholder, dis
             {!loading && error && <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--yellow, #e6a817)' }}>{t('flt.valsErr')}</div>}
             {!loading && !error && all != null && all.length === 0 && (
               <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--text3)' }}>{t('flt.valsEmpty')}</div>
+            )}
+            {/* fetchDistinctValues reads at most 5 000 rows — a key attribute with a
+                bigger master (e.g. 15k products) yields a TRUNCATED list. Say so
+                instead of letting the dropdown pass for complete. */}
+            {!loading && !error && all != null && all.length >= 5000 && (
+              <div style={{ padding: '6px 10px', fontSize: 10, color: 'var(--yellow, #e6a817)', borderBottom: '1px solid var(--border)' }}>
+                ⚠ {t('flt.valsTruncated')}
+              </div>
             )}
             {!loading && filtered.map(v => (
               <label
