@@ -31,22 +31,29 @@ function odataLiteral(val) {
 }
 
 // Builds an OData $filter fragment from UI conditions:
-//   [{ field, op: 'in'|'sw', value: 'A' | 'A,B,C' }]
-//     → "(FIELD eq 'A' or FIELD eq 'B') and startswith(FIELD2,'X')"
-// Only INCLUSION operators: 'in' (or-chain of eq) and 'sw' (startswith). These
-// are transparent — you migrate exactly the named values, nothing hidden.
+//   [{ field, op: 'in'|'sw'|'nb', value: 'A' | 'A,B,C' | (ignored for 'nb') }]
+//     → "(FIELD eq 'A' or FIELD eq 'B') and startswith(FIELD2,'X') and FIELD3 gt ''"
+// Only INCLUSION operators: 'in' (or-chain of eq), 'sw' (startswith) and 'nb'
+// (not blank). These are transparent — you migrate exactly what they name.
 // Exclusion ('ne') was removed on purpose: verified live that any predicate on a
 // field also DROPS rows whose field is EMPTY (BRAND ne 'X' = 3138, not 8005; the
 // ~4.9k blank-brand rows vanish and no syntax recovers them — eq null / eq '' both
 // match 0). "Exclude X" therefore silently lost the blanks. To exclude, the user
 // selects every OTHER value from the real-values dropdown — explicit, no surprise.
+// 'nb' leverages that same behaviour ON PURPOSE: FIELD gt '' keeps only rows whose
+// field holds a non-empty value (NULL and '' both fail the comparison). Verified
+// live against PLANNING_DATA_API_SRV (CTYTTS): gt '' → 223.554 of 447.845 (exactly
+// the non-blank groups). Do NOT use ne '' — SAP IGNORES it silently (returns the
+// full count); ne null and startswith(F,'') are rejected with 400.
 // Conditions AND together. Returns '' when no condition is complete.
 export function buildConditionFilter(conds) {
   const esc = v => String(v).replace(/'/g, "''")   // OData: single quote → doubled
   const parts = []
   for (const c of (conds || [])) {
+    if (!c.field) continue
+    if (c.op === 'nb') { parts.push(`${c.field} gt ''`); continue }   // takes no value
     const vals = splitValues(c.value)
-    if (!c.field || vals.length === 0) continue
+    if (vals.length === 0) continue
     // startswith() is a string function — it only applies to text fields, so keep
     // the raw quoted form here (a date value wouldn't make sense with 'sw' anyway).
     if (c.op === 'sw') parts.push(`startswith(${c.field},'${esc(vals[0])}')`)
@@ -65,8 +72,10 @@ export function displayValue(val) {
 
 // Compact human chip for an active condition (shown next to the table/section).
 export function condChip(c) {
+  if (!c.field) return null
+  if (c.op === 'nb') return `${c.field} ≠ ∅`
   const vals = splitValues(c.value).map(displayValue)
-  if (!c.field || vals.length === 0) return null
+  if (vals.length === 0) return null
   if (c.op === 'sw') return `${c.field} ⌐ ${vals[0]}…`
   if (vals.length === 1) return `${c.field} = ${vals[0]}`
   if (vals.length <= 3)  return `${c.field} ∈ [${vals.join(', ')}]`

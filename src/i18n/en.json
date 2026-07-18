@@ -746,6 +746,8 @@
   "flt.fieldPh": "Field…",
   "flt.opIn": "equals / in list",
   "flt.opSw": "starts with",
+  "flt.opNb": "is not empty",
+  "flt.nbNote": "no value — just requires the attribute to be filled",
   "flt.btnShort": "Filter",
   "flt.valuesPh": "Values (comma-separated)…",
   "flt.valuePh": "Prefix…",

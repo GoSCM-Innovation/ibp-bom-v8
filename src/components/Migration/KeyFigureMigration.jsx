@@ -1014,13 +1014,22 @@ export default function KeyFigureMigration({ connection, session }) {
               />
               <select
                 value={c.op}
-                onChange={e => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, op: e.target.value } : x))}
+                onChange={e => {
+                  const v = e.target.value
+                  // 'nb' takes no value — clear any leftover so the chip/preview stay honest.
+                  setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, op: v, ...(v === 'nb' ? { value: '' } : {}) } : x))
+                }}
                 style={{ ...SELECT, flex: '0 0 150px', fontSize: 11, padding: '4px 6px' }}
               >
                 <option value="in">{t('flt.opIn')}</option>
                 <option value="sw">{t('flt.opSw')}</option>
+                <option value="nb">{t('flt.opNb')}</option>
               </select>
-              {c.op === 'sw' ? (
+              {c.op === 'nb' ? (
+                <span style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text3)', fontStyle: 'italic', padding: '4px 2px' }}>
+                  {t('flt.nbNote')}
+                </span>
+              ) : c.op === 'sw' ? (
                 <input
                   value={c.value}
                   onChange={e => setAttrFilters(p => p.map((x, xi) => xi === ci ? { ...x, value: e.target.value } : x))}

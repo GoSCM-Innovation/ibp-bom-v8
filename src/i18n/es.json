@@ -746,6 +746,8 @@
   "flt.fieldPh": "Campo…",
   "flt.opIn": "igual / en lista",
   "flt.opSw": "comienza con",
+  "flt.opNb": "no está vacío",
+  "flt.nbNote": "sin valor — solo exige que el atributo tenga dato",
   "flt.btnShort": "Filtro",
   "flt.valuesPh": "Valores (separados por coma)…",
   "flt.valuePh": "Prefijo…",
