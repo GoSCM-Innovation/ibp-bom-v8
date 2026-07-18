@@ -140,6 +140,10 @@ export default function KeyFigureMigration({ connection, session }) {
   const [attrSearch, setAttrSearch] = useState('')
   const [steps, setSteps]           = useState([])   // [{ dstKf, srcKf }]
   const [kfSearch, setKfSearch]     = useState('')
+  // Bulk add: paste a KF list (from Excel/notepad) instead of ticking one by one
+  const [showPaste, setShowPaste]     = useState(false)
+  const [pasteText, setPasteText]     = useState('')
+  const [pasteResult, setPasteResult] = useState(null)   // { added, missing: [], dupes }
   // Per-destination-attribute → source attribute mapping (only when names differ)
   const [attrMap, setAttrMap]       = useState({})
   // ── Pre-migration source filters (selective migration) ──
@@ -258,7 +262,7 @@ export default function KeyFigureMigration({ connection, session }) {
   }, [running])
 
   // Reset selections when catalogs change
-  useEffect(() => { setLevelAttrs([]); setSteps([]); setAttrMap({}) }, [dstCat])
+  useEffect(() => { setLevelAttrs([]); setSteps([]); setAttrMap({}); setPasteResult(null); setPasteText('') }, [dstCat])
   useEffect(() => { setAttrFilters([]); setDateFrom(''); setDateTo(''); setFltCount(null) }, [srcCat])
 
   // Combined OData fragment for the selective filters ('' = no filter → full level).
@@ -317,6 +321,58 @@ export default function KeyFigureMigration({ connection, session }) {
 
   // Resolve source KF of a step: explicit → same name if present → dst name (best effort)
   function defaultSrcKf(dstKf) { return srcKfSet.has(dstKf) ? dstKf : '' }
+
+  // ── Bulk add from a pasted list ──
+  // One KF per line (a line may also hold several IDs separated by , or ;) — each
+  // is added with the same-named source, like ticking it by hand. A TAB inside a
+  // line (two-column Excel copy) means "SOURCE<TAB>DESTINATION" for renamed pairs.
+  // Matching is case-insensitive against the catalogs; pasted order is kept and
+  // already-selected KFs are skipped. Unknown IDs are reported, never dropped silently.
+  function handlePasteApply() {
+    const dstByUpper = new Map(dstKfs.map(k => [k.toUpperCase(), k]))
+    const srcByUpper = new Map([...srcKfSet].map(k => [k.toUpperCase(), k]))
+    const clean = tok => tok.trim().replace(/^["']+|["']+$/g, '')
+    const pairs = []
+    for (const rawLine of pasteText.split(/\r?\n/)) {
+      const line = rawLine.trim()
+      if (!line) continue
+      if (line.includes('\t')) {
+        const [a, b] = line.split('\t').map(clean).filter(Boolean)
+        if (a) pairs.push({ src: b ? a : '', dst: b || a })
+      } else {
+        for (const tok of line.split(/[,;]/).map(clean).filter(Boolean)) pairs.push({ src: '', dst: tok })
+      }
+    }
+    const missing = [], added = []
+    let dupes = 0
+    const have = new Set(steps.map(s => s.dstKf))
+    for (const p of pairs) {
+      const dst = dstByUpper.get(p.dst.toUpperCase())
+      if (!dst) { missing.push(p.dst); continue }
+      if (have.has(dst)) { dupes++; continue }
+      have.add(dst)
+      const src = srcByUpper.get((p.src || dst).toUpperCase()) || ''
+      added.push({ dstKf: dst, srcKf: src, convs: undefined })
+    }
+    if (added.length > 0) {
+      setSteps(prev => [...prev, ...added])
+      // Detect conversions like the manual checkbox flow, 3 at a time (each probe
+      // is a real read against the source; an unresolved one settles at run start).
+      const queue = [...added]
+      Array.from({ length: 3 }, async () => {
+        for (;;) {
+          const s = queue.shift()
+          if (!s) return
+          try {
+            const convs = await detectConversions(srcConn, srcSession, srcCat.pa, s.srcKf || s.dstKf)
+            setSteps(prev => prev.map(x => x.dstKf === s.dstKf ? { ...x, convs } : x))
+          } catch { /* run start resolves it */ }
+        }
+      })
+      setPasteText('')
+    }
+    setPasteResult({ added: added.length, missing, dupes })
+  }
 
   // ── Source inline login ──
   async function handleSrcLogin(e) {
@@ -1088,9 +1144,45 @@ export default function KeyFigureMigration({ connection, session }) {
       {/* ── Key figures (steps) ── */}
       {dstCat && srcCat && levelAttrs.length > 0 && (
         <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'baseline' }}>
             <div style={SECTION_HDR}>{t('kfm.sectionKf', { n: steps.length })}</div>
+            <button
+              type="button"
+              onClick={() => { setShowPaste(p => !p); setPasteResult(null) }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text3)', padding: '0 2px', fontWeight: 600 }}
+            >
+              {showPaste ? t('kfm.pasteClose') : t('kfm.pasteBtn')}
+            </button>
           </div>
+          {showPaste && (
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--border2)', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+              <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 6 }}>{t('kfm.pasteHint')}</div>
+              <textarea
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                placeholder={'ZWKFORECASTCCOLABPROM1\nZWKFORECASTCCOLABPROM2\n…'}
+                rows={6}
+                style={{ ...INPUT, fontFamily: 'var(--mono)', resize: 'vertical', marginBottom: 8, display: 'block' }}
+              />
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" onClick={handlePasteApply} disabled={!pasteText.trim()} style={btnPrimary(!pasteText.trim())}>
+                  {t('kfm.pasteApply')}
+                </button>
+                {pasteResult && (
+                  <span style={{ fontSize: 11 }}>
+                    {pasteResult.added > 0 && <span style={{ color: 'var(--green)' }}>✓ {t('kfm.pasteAdded', { n: pasteResult.added })}</span>}
+                    {pasteResult.dupes > 0 && <span style={{ color: 'var(--text3)' }}> · {t('kfm.pasteDupes', { n: pasteResult.dupes })}</span>}
+                    {pasteResult.added === 0 && pasteResult.dupes === 0 && pasteResult.missing.length === 0 && <span style={{ color: 'var(--text3)' }}>—</span>}
+                  </span>
+                )}
+              </div>
+              {pasteResult?.missing?.length > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--yellow, #e6a817)', marginTop: 6, fontFamily: 'var(--mono)' }}>
+                  ⚠ {t('kfm.pasteMissing', { n: pasteResult.missing.length, list: pasteResult.missing.slice(0, 10).join(', ') + (pasteResult.missing.length > 10 ? ` +${pasteResult.missing.length - 10}` : '') })}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
             {t('kfm.kfHint', { dst: connection.name, src: srcConn?.name || t('kfm.srcLabel') })}
           </div>
