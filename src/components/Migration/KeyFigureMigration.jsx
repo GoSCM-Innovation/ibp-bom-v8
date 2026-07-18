@@ -163,10 +163,13 @@ export default function KeyFigureMigration({ connection, session }) {
   // ── Run state ──
   const cancelledRef = useRef(false)
   const abortRef     = useRef(null)
+  const runSnapRef   = useRef(null)   // frozen config of the LAST run (feeds the PDF report)
   const [running, setRunning]   = useState(false)
   const [progress, setProgress] = useState(null)
   const [results, setResults]   = useState(null)
   const [expanded, setExpanded] = useState(null)
+  const [pdfBusy, setPdfBusy]   = useState(false)
+  const [pdfErr, setPdfErr]     = useState('')
 
   // ── Pre-migration level check (deduce each KF's level from the chosen dims) ──
   const [showConfirm, setShowConfirm] = useState(false)
@@ -465,6 +468,22 @@ export default function KeyFigureMigration({ connection, session }) {
     runStartRef.current = Date.now()
     setRunElapsed(0)
     const dstPa = dstCat.pa, srcPa = srcCat.pa
+    // Freeze the run configuration NOW — the PDF report must describe what
+    // actually ran, even if the form is edited after the run finishes.
+    runSnapRef.current = {
+      startedAt: new Date().toISOString(),
+      srcConn: srcConn?.name || '', srcPa, srcVersion: srcVersion || '',
+      dstConn: connection.name, dstPa, dstVersion: dstVersion || '',
+      txName: txName.trim() || 'IBP-ControlTower-KF',
+      levelAttrs: [...levelAttrs],
+      attrSources: levelAttrs.map(a => ({ dst: a, src: resolveSrcAttr(a) || '' })),
+      timeField, timeLabel,
+      conds: attrFilters.filter(c => c.field).map(c => ({ field: c.field, op: c.op, value: c.value })),
+      dateFrom, dateTo, filterStr: extraKfFilter || '',
+      uom: needsUom ? selUom : '', curr: needsCurr ? selCurr : '',
+      steps: steps.map(s => ({ src: s.srcKf, dst: s.dstKf })),
+    }
+    setPdfErr('')
     const all = []
     const push = r => { all.push(r); setResults([...all]) }
 
@@ -838,14 +857,28 @@ export default function KeyFigureMigration({ connection, session }) {
       const updated = [entry, ...loadKfHistory(connection.id)].slice(0, 50)
       saveKfHistory(connection.id, updated)
       setHistory(updated)
+      // Freeze the outcome onto the run snapshot (feeds the PDF export).
+      if (runSnapRef.current) runSnapRef.current = { ...runSnapRef.current, finishedAt: entry.date, durationMs: entry.durationMs, status: entry.status, totalRows: entry.totalRows }
     }
-  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr, extraKfFilter, txName]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connection, session, srcConn, srcSession, dstCat, srcCat, steps, levelAttrs, dstVersion, srcVersion, timeField, selUom, selCurr, resolveSrcAttr, extraKfFilter, attrFilters, dateFrom, dateTo, txName]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusLabel = s => s === 'ok' ? t('kfm.stOk') : s === 'error' ? t('kfm.stErr') : s === 'warning' ? t('kfm.stWarning') : s === 'processing' ? t('kfm.stProc') : s === 'skipped' ? t('mig.statusSkipped') : t('kfm.stCancel')
   const statusColor = s => s === 'ok' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'warning' ? 'var(--yellow, #e6a817)' : s === 'processing' ? 'var(--yellow, #e6a817)' : 'var(--text3)'
   const PHASE = { detect: t('kfm.phDetect'), count: t('kfm.phCount'), reading: t('kfm.phReading'), writing: t('kfm.phWriting'), committing: t('kfm.phCommit'), processing: t('kfm.phProcessing'), retrying: t('kfm.phRetrying') }
   // Concise phase names for the timing breakdown (reuses the master-data keys).
   const PHASE_SHORT = { count: t('kfm.tCount'), reading: t('mig.tReading'), writing: t('mig.tWriting'), committing: t('mig.tCommitting'), processing: t('mig.tProcessing'), messages: t('mig.tMessages') }
+
+  // ── PDF report of the finished run (config snapshot + results + timings) ──
+  // jspdf loads on demand (dynamic import) → its own async chunk, lean main bundle.
+  async function handleExportPdf() {
+    if (!results?.length || !runSnapRef.current) return
+    setPdfBusy(true); setPdfErr('')
+    try {
+      const { downloadKfReport } = await import('../../utils/kfReportPdf')
+      downloadKfReport({ snap: runSnapRef.current, results, t, fmtDuration, statusLabel, phaseShort: PHASE_SHORT, timedPhases: KF_TIMED_PHASES })
+    } catch (e) { setPdfErr(errText(e)) }
+    finally { setPdfBusy(false) }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
@@ -1146,13 +1179,25 @@ export default function KeyFigureMigration({ connection, session }) {
         <div style={{ ...SECTION, opacity: running ? 0.5 : 1, pointerEvents: running ? 'none' : 'auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'baseline' }}>
             <div style={SECTION_HDR}>{t('kfm.sectionKf', { n: steps.length })}</div>
-            <button
-              type="button"
-              onClick={() => { setShowPaste(p => !p); setPasteResult(null) }}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text3)', padding: '0 2px', fontWeight: 600 }}
-            >
-              {showPaste ? t('kfm.pasteClose') : t('kfm.pasteBtn')}
-            </button>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'baseline' }}>
+              {steps.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setSteps([]); setPasteResult(null) }}
+                  title={t('kfm.clearAllHint')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--red)', padding: '0 2px', fontWeight: 600 }}
+                >
+                  {t('kfm.clearAll', { n: steps.length })}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setShowPaste(p => !p); setPasteResult(null) }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text3)', padding: '0 2px', fontWeight: 600 }}
+              >
+                {showPaste ? t('kfm.pasteClose') : t('kfm.pasteBtn')}
+              </button>
+            </div>
           </div>
           {showPaste && (
             <div style={{ background: 'var(--bg)', border: '1px solid var(--border2)', borderRadius: 8, padding: 12, marginBottom: 10 }}>
@@ -1363,7 +1408,20 @@ export default function KeyFigureMigration({ connection, session }) {
       {/* ── Results — with per-KF timing, expandable phase breakdown and a summary ── */}
       {!running && results && results.length > 0 && (
         <div style={SECTION}>
-          <div style={SECTION_HDR}>{t('kfm.resultsTitle')}</div>
+          <div style={{ ...SECTION_HDR, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{t('kfm.resultsTitle')}</span>
+            <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              {pdfErr && <span style={{ fontSize: 10, color: 'var(--red)', textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>✕ {pdfErr}</span>}
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                disabled={pdfBusy}
+                style={{ ...BTN_SEC, padding: '3px 10px', fontSize: 10, letterSpacing: 0, textTransform: 'none' }}
+              >
+                {pdfBusy ? t('kfm.pdfBusy') : t('kfm.pdfBtn')}
+              </button>
+            </span>
+          </div>
 
           {/* Timing summary (groups share a transaction → dedupe by txId) */}
           {(() => {
