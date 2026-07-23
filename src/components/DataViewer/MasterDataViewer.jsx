@@ -16,6 +16,7 @@ import {
   fetchVsmt, buildCatalog, invalidateVsmtCache,
   fetchCount, readEntityPage, fetchFieldNames, fetchKeyNames, fetchDistinctValues,
   fetchMasterFieldLabels, invalidateMasterFieldLabels,
+  fetchSimpleMdtCatalog, invalidateSimpleMdtCatalog,
   fetchCsrf, getTransactionId, initiateParallelProcess, postTransChunk,
   commitTransaction, waitForProcessed, readMessages,
   chunkByBytes, MAX_POST_BYTES, READONLY_FIELDS,
@@ -30,6 +31,11 @@ import CollapsibleSection from './CollapsibleSection'
 import DataGrid from './DataGrid'
 import EditReviewModal from './EditReviewModal'
 import DeleteConfirmModal from './DeleteConfirmModal'
+
+// Virtual planning-area id that groups the SIMPLE (non-version-specific) master
+// data types. They carry no PlanningAreaID, so the API can't attribute them to a
+// real area; we surface them under this synthetic area (read + export only).
+const SIMPLE_PA = '__SIMPLE__'
 
 // ── localStorage keys ──
 const COLS_KEY     = (connId, mdt) => `ibp:viewer:cols:master:${connId}:${mdt}`
@@ -95,6 +101,11 @@ export default function MasterDataViewer({ connection, session, active = true, i
   // Field labels (descriptions) for the filter field + column selectors — parsed
   // from the MASTER_DATA $metadata server-side (best-effort; {} → ID-only fallback).
   const [fieldLabels, setFieldLabels] = useState({})
+
+  // Catalog of SIMPLE (non-version-specific) master data types — { [mdt]: { keys,
+  // fields } } from the $metadata. These never appear in VSMT, so without this they
+  // couldn't be listed. Surfaced under the virtual SIMPLE_PA area (read + export).
+  const [simpleCatalog, setSimpleCatalog] = useState({})
 
   // ── Collapsible config panels ──
   // Open while configuring; auto-collapse once data is loaded (applyAndShow) and
@@ -172,6 +183,15 @@ export default function MasterDataViewer({ connection, session, active = true, i
     return () => { alive = false }
   }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load the simple-MDT catalog once per connection (best-effort, cached 24 h).
+  useEffect(() => {
+    let alive = true
+    fetchSimpleMdtCatalog(connection, session)
+      .then(c => { if (alive) setSimpleCatalog(c || {}) })
+      .catch(() => { /* no simple area if this fails */ })
+    return () => { alive = false }
+  }, [connection.id, session?.com0720?.user, catalogTick]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => () => { abortRef.current?.abort(); exportAbortRef.current?.abort() }, [])
 
   // Invalidate the cached VSMT catalog and force a fresh discovery from SAP —
@@ -180,12 +200,25 @@ export default function MasterDataViewer({ connection, session, active = true, i
   const refreshCatalog = useCallback(() => {
     invalidateVsmtCache(connection.id)
     invalidateMasterFieldLabels(connection.id)
+    invalidateSimpleMdtCatalog(connection.id)
     setCatalogTick(n => n + 1)
   }, [connection.id])
 
-  const pas      = useMemo(() => getPas(catalog), [catalog])
-  const versions = useMemo(() => getVersions(catalog, pa), [catalog, pa])
-  const mdts     = useMemo(() => getMdts(catalog, pa, version), [catalog, pa, version])
+  // The virtual "simple master data" area: its tables come from the $metadata
+  // catalog, not from VSMT, and it has no versions. Reads must NOT carry a
+  // PlanningAreaID/VersionID filter (the tables reject it), so readPA/readVersion
+  // collapse to '' for it — every masterDataApi call uses these, never pa/version.
+  const isSimple      = pa === SIMPLE_PA
+  const simpleTables  = useMemo(() => Object.keys(simpleCatalog).sort(), [simpleCatalog])
+  const readPA        = isSimple ? '' : pa
+  const readVersion   = isSimple ? '' : version
+
+  const pas = useMemo(() => {
+    const base = getPas(catalog)
+    return simpleTables.length ? [...base, { id: SIMPLE_PA, desc: t('viewer.simpleArea') }] : base
+  }, [catalog, simpleTables, t])
+  const versions = useMemo(() => isSimple ? [] : getVersions(catalog, pa), [catalog, pa, isSimple])
+  const mdts     = useMemo(() => isSimple ? simpleTables : getMdts(catalog, pa, version), [catalog, pa, version, isSimple, simpleTables])
 
   // Auto-select the only planning area, if there is just one.
   useEffect(() => { if (!pa && pas.length === 1) setPa(pas[0].id) }, [pas, pa])
@@ -228,23 +261,12 @@ export default function MasterDataViewer({ connection, session, active = true, i
     let alive = true
     const ac = new AbortController()
     setSchemaLoading(true)
-    Promise.all([
-      // Schema is normally version-independent, so read it WITHOUT the version
-      // filter (a version-filtered sample read can be pathologically slow on some
-      // tenants). BUT version-specific master data only has rows UNDER a version —
-      // a version-less sample returns 0 rows and yields no columns ("Columnas 0/0").
-      // So if the fast read finds nothing and a version is selected, retry WITH it.
-      (async () => {
-        const f = await fetchFieldNames(connection, session, mdt, { planningArea: pa, versionId: '', signal: ac.signal })
-        if (f || !version) return f
-        return fetchFieldNames(connection, session, mdt, { planningArea: pa, versionId: version, signal: ac.signal })
-      })(),
-      fetchKeyNames(connection, session, mdt, { planningArea: pa, versionId: version, signal: ac.signal }),
-      fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, retries: 1, timeout: 60000, signal: ac.signal }),
-    ]).then(([fields, keys, total]) => {
+
+    // Commit the schema and derive the initial column selection. Shared by both the
+    // version-specific path (fields/keys sampled from a row) and the simple path
+    // (fields/keys taken from the $metadata catalog).
+    const applySchema = (allColumns, keyNames, total) => {
       if (!alive) return
-      const allColumns = fields || []
-      const keyNames   = keys || []
       setSchema({ allColumns, keyNames, total })
       const saved = loadCols(connection.id, mdt)
       let validSaved = saved ? saved.filter(c => allColumns.includes(c)) : []
@@ -263,10 +285,43 @@ export default function MasterDataViewer({ connection, session, active = true, i
         : (validSaved.length ? validSaved : defaultSelection(allColumns, keyNames))
       setSelectedCols(initialCols)
       setAppliedCols(initialCols)
+    }
+
+    // Virtual "simple" area: the schema (keys + fields) comes straight from the
+    // $metadata catalog, so it works even for an empty table. Only the row count
+    // needs a live read, and always WITHOUT a PlanningAreaID/VersionID filter (the
+    // simple tables reject it with 400 "Resource not found for the segment …").
+    if (isSimple) {
+      const entry = simpleCatalog[mdt]
+      if (!entry) { setSchemaLoading(false); return () => { alive = false; ac.abort() } }
+      fetchCount(connection, session, mdt, { planningArea: '', versionId: '', retries: 1, timeout: 60000, signal: ac.signal })
+        .then(total => applySchema(entry.fields || [], entry.keys || [], total))
+        // Count failed but the schema is known from metadata — show it with an
+        // unknown total rather than blocking the whole table on a slow count.
+        .catch(() => { if (alive && !ac.signal.aborted) applySchema(entry.fields || [], entry.keys || [], 0) })
+        .finally(() => { if (alive) setSchemaLoading(false) })
+      return () => { alive = false; ac.abort() }
+    }
+
+    Promise.all([
+      // Schema is normally version-independent, so read it WITHOUT the version
+      // filter (a version-filtered sample read can be pathologically slow on some
+      // tenants). BUT version-specific master data only has rows UNDER a version —
+      // a version-less sample returns 0 rows and yields no columns ("Columnas 0/0").
+      // So if the fast read finds nothing and a version is selected, retry WITH it.
+      (async () => {
+        const f = await fetchFieldNames(connection, session, mdt, { planningArea: pa, versionId: '', signal: ac.signal })
+        if (f || !version) return f
+        return fetchFieldNames(connection, session, mdt, { planningArea: pa, versionId: version, signal: ac.signal })
+      })(),
+      fetchKeyNames(connection, session, mdt, { planningArea: pa, versionId: version, signal: ac.signal }),
+      fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, retries: 1, timeout: 60000, signal: ac.signal }),
+    ]).then(([fields, keys, total]) => {
+      applySchema(fields || [], keys || [], total)
     }).catch(e => { if (alive) setSchemaError(errText(e)) })
       .finally(() => { if (alive) setSchemaLoading(false) })
     return () => { alive = false; ac.abort() }
-  }, [mdt, pa, version, connection.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mdt, pa, version, connection.id, isSimple, simpleCatalog]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist the column choice ONLY on explicit user edits for the CURRENT table.
   // (An effect keyed on [selectedCols, mdt] would fire on the transient render
@@ -340,7 +395,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
     const select = [...new Set([...appliedCols, ...schema.keyNames])]
     try {
       const data = await readEntityPage(connection, session, mdt, {
-        skip, top: q.pageSize, planningArea: pa, versionId: version,
+        skip, top: q.pageSize, planningArea: readPA, versionId: readVersion,
         select, orderby, extraFilter: q.filter, signal: ac.signal,
       })
       if (ac.signal.aborted) return
@@ -351,7 +406,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
     } finally {
       if (abortRef.current === ac) setGridLoading(false)
     }
-  }, [mdt, schema, appliedCols, connection, session, pa, version, t])
+  }, [mdt, schema, appliedCols, connection, session, readPA, readVersion, t])
 
   // Reload only when the query changes (page / sort / filter / applied columns).
   // Column edits do NOT fetch — they wait for "Aplicar" (see applyAndShow), so
@@ -380,7 +435,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
       // count, which is also the fresh schema.total (updated below for the panel text).
       let total = schema.total
       try {
-        total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter, retries: 1, timeout: 60000 })
+        total = await fetchCount(connection, session, mdt, { planningArea: readPA, versionId: readVersion, extraFilter, retries: 1, timeout: 60000 })
       } catch { /* keep previous total */ }
       // Without a filter the recount IS the whole-table count → refresh the panel's
       // "N registros" text too. With a filter, schema.total stays the unfiltered total.
@@ -394,7 +449,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
     } finally {
       setApplying(false)
     }
-  }, [mdt, schema, extraFilter, selectedCols, connection, session, pa, version, pageSize, edits, t])
+  }, [mdt, schema, extraFilter, selectedCols, connection, session, readPA, readVersion, pageSize, edits, t])
 
   // Export ALL rows of the active query (every page) to a CSV. Reuses the same
   // server-side pagination as the grid, but with a BIG page (fewer proxy round-trips
@@ -425,7 +480,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
       for (let skip = 0; ; skip += EXPORT_TOP) {
         if (ac.signal.aborted) return
         const data = await readEntityPage(connection, session, mdt, {
-          skip, top: EXPORT_TOP, planningArea: pa, versionId: version,
+          skip, top: EXPORT_TOP, planningArea: readPA, versionId: readVersion,
           select, orderby, extraFilter: query.filter, signal: ac.signal,
         })
         all.push(...data)
@@ -434,7 +489,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
         if (all.length >= hard) { truncated = true; break }   // safety net if the count under-reported
       }
       if (ac.signal.aborted) return
-      downloadCsv(`${mdt}_${version || 'base'}_${all.length}`, rowsToCsv(exportCols, all))
+      downloadCsv(`${mdt}_${(isSimple ? 'simple' : version) || 'base'}_${all.length}`, rowsToCsv(exportCols, all))
       if (truncated) window.alert(t('viewer.exportTruncated', { max: hard.toLocaleString() }))
     } catch (e) {
       if (e?.name === 'AbortError' || ac.signal.aborted) return
@@ -443,7 +498,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
       setExporting(false); setExportProgress(null)
       if (exportAbortRef.current === ac) exportAbortRef.current = null
     }
-  }, [mdt, schema, query, appliedCols, connection, session, pa, version, t])
+  }, [mdt, schema, query, appliedCols, connection, session, readPA, readVersion, isSimple, version, t])
 
   const cancelExport = useCallback(() => exportAbortRef.current?.abort(), [])
 
@@ -617,7 +672,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
     if (!mdt) return
     setFilterTest({ loading: true })
     try {
-      const n = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter, retries: 1, timeout: 60000 })
+      const n = await fetchCount(connection, session, mdt, { planningArea: readPA, versionId: readVersion, extraFilter, retries: 1, timeout: 60000 })
       setFilterTest({ n, total: schema?.total ?? 0 })
     } catch (e) {
       setFilterTest({ error: errText(e) })
@@ -683,12 +738,16 @@ export default function MasterDataViewer({ connection, session, active = true, i
               <label style={LABEL}>{t('viewer.area')}</label>
               <select style={SELECT} value={pa} onChange={e => setPa(e.target.value)} disabled={catalogLoading}>
                 <option value="">{catalogLoading ? '…' : '—'}</option>
-                {pas.map(p => <option key={p.id} value={p.id}>{p.id}{p.desc && p.desc !== p.id ? ` — ${p.desc}` : ''}</option>)}
+                {pas.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.id === SIMPLE_PA ? p.desc : `${p.id}${p.desc && p.desc !== p.id ? ` — ${p.desc}` : ''}`}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
               <label style={LABEL}>{t('viewer.version')}</label>
-              <select style={SELECT} value={version} onChange={e => setVersion(e.target.value)} disabled={!pa}>
+              <select style={SELECT} value={version} onChange={e => setVersion(e.target.value)} disabled={!pa || isSimple}>
                 <option value="">{t('viewer.versionBase')}</option>
                 {versions.map(v => <option key={v.id} value={v.id}>{v.id}{v.name && v.name !== v.id ? ` — ${v.name}` : ''}</option>)}
               </select>
@@ -704,6 +763,11 @@ export default function MasterDataViewer({ connection, session, active = true, i
               />
             </div>
           </div>
+          {isSimple && (
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 10 }}>
+              ⓘ {t('viewer.simpleAreaNote')}
+            </div>
+          )}
         </CollapsibleSection>
 
         {/* Schema-dependent controls */}
@@ -780,7 +844,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
                           onChange={v => setCond(i, { value: v })}
                           placeholder={t('flt.valuesPh')}
                           disabled={!c.field}
-                          loadValues={() => fetchDistinctValues(connection, session, mdt, c.field, { planningArea: pa, versionId: version })}
+                          loadValues={() => fetchDistinctValues(connection, session, mdt, c.field, { planningArea: readPA, versionId: readVersion })}
                         />
                       )}
                       <button title={t('flt.remove')} onClick={() => removeCond(i)} style={{ ...BTN_SEC, padding: '5px 9px', color: 'var(--red)', borderColor: 'var(--border)' }}>×</button>
@@ -845,19 +909,26 @@ export default function MasterDataViewer({ connection, session, active = true, i
             pageSizeOptions={PAGE_SIZES}
             onPageChange={onPageChange}
             onPageSizeChange={onPageSizeChange}
-            editMode={editMode}
-            editableCols={editableCols}
-            edits={edits}
-            editCount={editCount}
-            onToggleEdit={() => setEditMode(v => !v)}
-            onCellEdit={onCellEdit}
-            onSaveEdits={() => { setSaveResult(null); setShowSaveModal(true) }}
-            onDiscardEdits={discardEdits}
-            selectedKeys={selected}
-            selCount={selCount}
-            onToggleRow={onToggleRow}
-            onToggleAllPage={onToggleAllPage}
-            onDeleteSelected={() => { setDeleteResult(null); setShowDeleteModal(true) }}
+            {...(isSimple
+              // Simple (non-version-specific) master data is READ-ONLY in this phase:
+              // omitting the edit/select handlers makes DataGrid hide the edit toggle,
+              // row checkboxes and delete button (it gates them on handler presence).
+              ? {}
+              : {
+                  editMode,
+                  editableCols,
+                  edits,
+                  editCount,
+                  onToggleEdit: () => setEditMode(v => !v),
+                  onCellEdit,
+                  onSaveEdits: () => { setSaveResult(null); setShowSaveModal(true) },
+                  onDiscardEdits: discardEdits,
+                  selectedKeys: selected,
+                  selCount,
+                  onToggleRow,
+                  onToggleAllPage,
+                  onDeleteSelected: () => { setDeleteResult(null); setShowDeleteModal(true) },
+                })}
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
             onExport={exportCsv}

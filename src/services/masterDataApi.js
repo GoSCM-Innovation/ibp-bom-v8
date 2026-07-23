@@ -367,6 +367,42 @@ export function invalidateMasterFieldLabels(connId) {
   try { localStorage.removeItem(MDLABELS_KEY(connId)) } catch { /* ignore */ }
 }
 
+// ─── Simple (non-version-specific) master data catalog ────────────────────────
+// Master data types whose <Key> lacks PlanningAreaID never appear in
+// VersionSpecificMasterDataTypes (fetchVsmt only lists version-specific types), so
+// they can't be discovered from the VSMT catalog and never reach the area/table
+// dropdowns. The proxy parses the $metadata XML server-side (same read as
+// fetchMasterFieldLabels) and returns, for each SIMPLE entity set, its business
+// keys + field names — enough to list, read and paginate them without ever
+// sending a PlanningAreaID/VersionID filter (which those tables reject with 400).
+// Returns { [entitySet]: { keys: string[], fields: string[] } }. Cached 24 h.
+const SIMPLEMDT_KEY = id => `ibp:simplemdt:${id}`
+
+export async function fetchSimpleMdtCatalog(conn, session, { signal } = {}) {
+  const ck = SIMPLEMDT_KEY(conn.id)
+  try {
+    const cached = JSON.parse(localStorage.getItem(ck))
+    if (cached && Date.now() - cached.ts < VSMT_TTL) return cached.catalog || {}
+  } catch { /* ignore cache read errors */ }
+  try {
+    const resp = await proxyCall({ connection: conn, session, com: COM, path: '/$metadata', extractCatalog: true, timeout: 110000, signal })
+    if (!resp.ok) return {}
+    const data    = await resp.json()
+    const catalog = data?.catalog || {}
+    // Only cache a NON-EMPTY result — an empty catalog (transient failure, or a
+    // tenant with no simple MDTs) must not be remembered for 24 h and leave the
+    // simple area permanently hidden with no way to recover before the TTL.
+    if (Object.keys(catalog).length > 0) {
+      try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), catalog })) } catch { /* quota */ }
+    }
+    return catalog
+  } catch { return {} }
+}
+
+export function invalidateSimpleMdtCatalog(connId) {
+  try { localStorage.removeItem(SIMPLEMDT_KEY(connId)) } catch { /* ignore */ }
+}
+
 // Locates an MDT (of the given planning area) exposing `field` and returns its
 // DISTINCT values via fetchDistinctValues. Used by the KF migration to populate
 // attribute-filter dropdowns (BRAND, family…): the planning service refuses

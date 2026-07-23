@@ -834,6 +834,8 @@
   "viewer.area": "Planning area",
   "viewer.version": "Version",
   "viewer.versionBase": "(base / no version)",
+  "viewer.simpleArea": "Simple master data (no version)",
+  "viewer.simpleAreaNote": "Non-version-specific master data tables (the API does not tie them to an area). Read and export only for now.",
   "viewer.tabNew": "New tab",
   "viewer.tabUntitled": "New tab",
   "viewer.tabBase": "base",

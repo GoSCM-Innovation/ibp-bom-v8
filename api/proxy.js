@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   const {
     url, serviceRoot, user, password, method = 'GET', body, timeout = 30000,
-    fetchCsrf, csrfToken: providedToken, cookies: providedCookies, extractLabels,
+    fetchCsrf, csrfToken: providedToken, cookies: providedCookies, extractLabels, extractCatalog,
   } = req.body
 
   if (!user || !password) return res.status(400).json({ error: 'Missing user or password' })
@@ -75,6 +75,65 @@ export default async function handler(req, res) {
         if (name && label && label !== name && labels[name] == null) labels[name] = decode(label)
       }
       return res.json({ labels })
+    }
+
+    // Mode: like extractLabels, but returns a compact catalog of the SIMPLE master
+    // data types — those whose entity-type <Key> does NOT include PlanningAreaID.
+    // These never appear in VersionSpecificMasterDataTypes (which only lists the
+    // version-specific ones), so the viewer needs an alternative source to LIST and
+    // READ them. We parse the same (multi-MB) $metadata server-side and return only
+    // { [entitySet]: { keys, fields } } for the simple sets — keys+fields come from
+    // the metadata itself, so discovery works even when a table is empty.
+    if (extractCatalog) {
+      if (!url) return res.status(400).json({ error: 'Missing url' })
+      try { new URL(url) } catch { return res.status(400).json({ error: 'URL inválida' }) }
+      const r = await fetch(url, {
+        method: 'GET',
+        headers: { ...baseHeaders, 'Accept': 'application/xml, text/xml, */*' },
+        signal: AbortSignal.timeout(timeout),
+      })
+      if (!r.ok) {
+        const text = await r.text().catch(() => '')
+        return res.status(r.status).json({ error: `SAP IBP returned ${r.status}`, detail: text.substring(0, 500) })
+      }
+      const xml = await r.text()
+      // Map addressable entity-set name → its entity-type local name (they usually
+      // match, but read the EntityType attribute to be exact). Only sets are readable.
+      const setToType = {}
+      const setRe = /<EntitySet\b[^>]*>/g
+      let sm
+      while ((sm = setRe.exec(xml)) !== null) {
+        const tag      = sm[0]
+        const setName  = tag.match(/\bName="([^"]*)"/)?.[1]
+        const typeFull = tag.match(/\bEntityType="([^"]*)"/)?.[1]
+        if (setName && typeFull) setToType[setName] = typeFull.split('.').pop()
+      }
+      // Parse each EntityType once: its <Key> field names and its <Property> names.
+      // `<Property\b` excludes <PropertyRef> and <NavigationProperty> (word boundary).
+      const typeInfo = {}
+      const typeRe = /<EntityType\b[^>]*>[\s\S]*?<\/EntityType>/g
+      let tm
+      while ((tm = typeRe.exec(xml)) !== null) {
+        const blk  = tm[0]
+        const name = blk.match(/Name="([^"]*)"/)?.[1]   // first Name= is the type's own
+        if (!name) continue
+        const keyBlock = blk.match(/<Key>[\s\S]*?<\/Key>/)?.[0] || ''
+        const keys   = [...keyBlock.matchAll(/<PropertyRef\b[^>]*?\bName="([^"]*)"/g)].map(x => x[1])
+        const fields = [...blk.matchAll(/<Property\b[^>]*?\bName="([^"]*)"/g)].map(x => x[1])
+        typeInfo[name] = { keys, fields }
+      }
+      // Service-level artifact sets that are not browsable master data tables.
+      const SKIP_SETS = new Set(['ValueResultSet', 'VersionSpecificMasterDataTypes'])
+      const catalog = {}
+      for (const [setName, typeName] of Object.entries(setToType)) {
+        if (SKIP_SETS.has(setName)) continue
+        if (/(?:Trans|Message|_VI)$/.test(setName)) continue     // write / message / value-help sets
+        const info = typeInfo[typeName]
+        if (!info || !info.keys.length) continue
+        if (info.keys.includes('PlanningAreaID')) continue        // version-specific → already via VSMT
+        catalog[setName] = { keys: info.keys, fields: info.fields }
+      }
+      return res.json({ catalog })
     }
 
     if (!url) return res.status(400).json({ error: 'Missing url' })

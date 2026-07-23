@@ -834,6 +834,8 @@
   "viewer.area": "Área de planificación",
   "viewer.version": "Versión",
   "viewer.versionBase": "(base / sin versión)",
+  "viewer.simpleArea": "Dato maestro simple (sin versión)",
+  "viewer.simpleAreaNote": "Tablas de dato maestro no específicas por versión (no aparecen ligadas a un área en la API). Por ahora solo lectura y exportación.",
   "viewer.tabNew": "Nueva pestaña",
   "viewer.tabUntitled": "Nueva pestaña",
   "viewer.tabBase": "base",

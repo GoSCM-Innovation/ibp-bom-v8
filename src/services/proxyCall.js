@@ -1,4 +1,4 @@
-export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout, signal, fetchCsrf, csrf, extractLabels, serviceRoot: serviceRootOverride }) {
+export async function proxyCall({ connection, session, com = '0326', path, method = 'GET', body, injectJobUser, timeout, signal, fetchCsrf, csrf, extractLabels, extractCatalog, serviceRoot: serviceRootOverride }) {
   const comKey = `com${com}`
   const agreement = connection[comKey]
   // serviceRootOverride lets callers reuse a com's credentials but target a
@@ -33,6 +33,9 @@ export async function proxyCall({ connection, session, com = '0326', path, metho
       // XML server-side and return ONLY a compact { field: label } map — the huge
       // body never reaches the browser (Vercel's ~4.5 MB response limit).
       ...(extractLabels ? { extractLabels: true } : {}),
+      // extractCatalog: same $metadata read, but returns a compact catalog of the
+      // SIMPLE (non-version-specific) master data types: { [set]: { keys, fields } }.
+      ...(extractCatalog ? { extractCatalog: true } : {}),
     }),
     // Caller-provided AbortSignal lets a cancelled migration cut requests in flight.
     ...(signal ? { signal } : {}),
