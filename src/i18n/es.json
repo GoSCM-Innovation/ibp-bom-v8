@@ -835,7 +835,7 @@
   "viewer.version": "Versión",
   "viewer.versionBase": "(base / sin versión)",
   "viewer.simpleArea": "Dato maestro simple (sin versión)",
-  "viewer.simpleAreaNote": "Tablas de dato maestro no específicas por versión (no aparecen ligadas a un área en la API). Por ahora solo lectura y exportación.",
+  "viewer.simpleAreaNote": "Tablas de dato maestro no específicas por versión (la API no las liga a un área). Se leen, editan y borran directamente, sin versión.",
   "viewer.tabNew": "Nueva pestaña",
   "viewer.tabUntitled": "Nueva pestaña",
   "viewer.tabBase": "base",

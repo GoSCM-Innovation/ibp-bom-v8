@@ -527,11 +527,14 @@ export default function MasterDataViewer({ connection, session, active = true, i
     try {
       let csrf = null
       try { csrf = await fetchCsrf(connection, session) } catch { /* proxy fetches per POST */ }
-      const txId = await getTransactionId(connection, session, { versionId: version, masterDataTypeId: mdt, planningArea: pa })
-      try { await initiateParallelProcess(connection, session, txId, { planningArea: pa, versionId: version, masterDataTypeId: mdt, transactionName: 'IBP-Viewer-EDIT' }) } catch { /* best effort */ }
+      // For the simple area readPA/readVersion are '' → getTransactionId mints a
+      // base transaction and postTransChunk stages without PlanningAreaID/VersionID;
+      // initiateParallelProcess no-ops when versionId is empty (base has no IPP).
+      const txId = await getTransactionId(connection, session, { versionId: readVersion, masterDataTypeId: mdt, planningArea: readPA })
+      try { await initiateParallelProcess(connection, session, txId, { planningArea: readPA, versionId: readVersion, masterDataTypeId: mdt, transactionName: 'IBP-Viewer-EDIT' }) } catch { /* best effort */ }
       const chunks = chunkByBytes(postRows, MAX_POST_BYTES, 5000)
       for (const chunk of chunks) {
-        await postTransChunk(connection, session, mdt, txId, chunk, { deleteEntries: false, planningArea: pa, versionId: version, csrf })
+        await postTransChunk(connection, session, mdt, txId, chunk, { deleteEntries: false, planningArea: readPA, versionId: readVersion, csrf })
       }
       await commitTransaction(connection, session, txId, { csrf })
       const st   = await waitForProcessed(connection, session, txId, { timeoutMs: 120000 })
@@ -549,7 +552,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
       setSaving(false)
       writeBusy.current = false
     }
-  }, [edits, schema, connection, session, version, mdt, pa, query, runLoad, t])
+  }, [edits, schema, connection, session, readVersion, readPA, mdt, query, runLoad, t])
 
   // ── Row selection (Phase 3 delete) ──
   const selCount = Object.keys(selected).length
@@ -591,14 +594,14 @@ export default function MasterDataViewer({ connection, session, active = true, i
     if (!query || !mdt) return
     let total = query.total
     try {
-      total = await fetchCount(connection, session, mdt, { planningArea: pa, versionId: version, extraFilter: query.filter, retries: 1, timeout: 60000 })
+      total = await fetchCount(connection, session, mdt, { planningArea: readPA, versionId: readVersion, extraFilter: query.filter, retries: 1, timeout: 60000 })
     } catch { /* keep previous total */ }
     setQuery(q => {
       if (!q) return q
       const pages = Math.max(1, Math.ceil(total / q.pageSize))
       return { ...q, total, page: Math.min(q.page, pages) }
     })
-  }, [query, mdt, connection, session, pa, version])
+  }, [query, mdt, connection, session, readPA, readVersion])
 
   // ── Delete: review-confirmed deleteEntries upsert → commit → poll → messages ──
   const doDelete = useCallback(async () => {
@@ -618,11 +621,13 @@ export default function MasterDataViewer({ connection, session, active = true, i
     try {
       let csrf = null
       try { csrf = await fetchCsrf(connection, session) } catch { /* proxy fetches per POST */ }
-      const txId = await getTransactionId(connection, session, { versionId: version, masterDataTypeId: mdt, planningArea: pa })
-      try { await initiateParallelProcess(connection, session, txId, { planningArea: pa, versionId: version, masterDataTypeId: mdt, transactionName: 'IBP-Viewer-DEL' }) } catch { /* best effort */ }
+      // Simple area → readPA/readVersion are '' → base transaction, staging without
+      // PlanningAreaID/VersionID; initiateParallelProcess no-ops on empty versionId.
+      const txId = await getTransactionId(connection, session, { versionId: readVersion, masterDataTypeId: mdt, planningArea: readPA })
+      try { await initiateParallelProcess(connection, session, txId, { planningArea: readPA, versionId: readVersion, masterDataTypeId: mdt, transactionName: 'IBP-Viewer-DEL' }) } catch { /* best effort */ }
       const chunks = chunkByBytes(delRows, MAX_POST_BYTES, 5000)
       for (const chunk of chunks) {
-        await postTransChunk(connection, session, mdt, txId, chunk, { deleteEntries: true, planningArea: pa, versionId: version, csrf })
+        await postTransChunk(connection, session, mdt, txId, chunk, { deleteEntries: true, planningArea: readPA, versionId: readVersion, csrf })
       }
       await commitTransaction(connection, session, txId, { csrf })
       const st   = await waitForProcessed(connection, session, txId, { timeoutMs: 120000 })
@@ -640,7 +645,7 @@ export default function MasterDataViewer({ connection, session, active = true, i
       setDeleting(false)
       writeBusy.current = false
     }
-  }, [selected, schema, connection, session, version, mdt, pa, t, refreshAfterDelete])
+  }, [selected, schema, connection, session, readVersion, readPA, mdt, t, refreshAfterDelete])
 
   const onPageChange     = p  => setQuery(q => q ? { ...q, page: Math.min(Math.max(1, p), pageCount) } : q)
   const onPageSizeChange = sz => { setPageSize(sz); setQuery(q => q ? { ...q, pageSize: sz, page: 1 } : q) }
@@ -909,26 +914,19 @@ export default function MasterDataViewer({ connection, session, active = true, i
             pageSizeOptions={PAGE_SIZES}
             onPageChange={onPageChange}
             onPageSizeChange={onPageSizeChange}
-            {...(isSimple
-              // Simple (non-version-specific) master data is READ-ONLY in this phase:
-              // omitting the edit/select handlers makes DataGrid hide the edit toggle,
-              // row checkboxes and delete button (it gates them on handler presence).
-              ? {}
-              : {
-                  editMode,
-                  editableCols,
-                  edits,
-                  editCount,
-                  onToggleEdit: () => setEditMode(v => !v),
-                  onCellEdit,
-                  onSaveEdits: () => { setSaveResult(null); setShowSaveModal(true) },
-                  onDiscardEdits: discardEdits,
-                  selectedKeys: selected,
-                  selCount,
-                  onToggleRow,
-                  onToggleAllPage,
-                  onDeleteSelected: () => { setDeleteResult(null); setShowDeleteModal(true) },
-                })}
+            editMode={editMode}
+            editableCols={editableCols}
+            edits={edits}
+            editCount={editCount}
+            onToggleEdit={() => setEditMode(v => !v)}
+            onCellEdit={onCellEdit}
+            onSaveEdits={() => { setSaveResult(null); setShowSaveModal(true) }}
+            onDiscardEdits={discardEdits}
+            selectedKeys={selected}
+            selCount={selCount}
+            onToggleRow={onToggleRow}
+            onToggleAllPage={onToggleAllPage}
+            onDeleteSelected={() => { setDeleteResult(null); setShowDeleteModal(true) }}
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
             onExport={exportCsv}
